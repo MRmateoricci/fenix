@@ -2,6 +2,19 @@ import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useCart } from '../context/CartContext'
 
+const T = {
+  paper:          '#F7F4EF',
+  panel:          '#FBF8F3',
+  surface2:       '#E7E0D3',
+  ink:            '#16110B',
+  text3:          '#6B6051',
+  muted2:         '#9A917F',
+  hairline:       '#DED6C7',
+  hairlineStrong: '#C9BFAF',
+  cream:          '#F2EBDC',
+  red:            '#CC0000',
+}
+
 const fmt = (n) =>
   new Intl.NumberFormat('es-AR', {
     style: 'currency',
@@ -12,6 +25,8 @@ const fmt = (n) =>
 export default function ProductCard({ product }) {
   const { addItem } = useCart()
   const [added, setAdded] = useState(false)
+  const [cardHovered, setCardHovered] = useState(false)
+  const [addHover, setAddHover] = useState(false)
 
   function handleAdd(e) {
     e.preventDefault()
@@ -29,87 +44,152 @@ export default function ProductCard({ product }) {
   }
 
   return (
-    <Link to={`/products/${product.id}`} className="group block focus:outline-none">
-      <article
-        className="rounded-lg overflow-hidden transition-colors duration-300 h-full flex flex-col"
-        style={{
-          backgroundColor: 'var(--color-surface)',
-          border: '1px solid var(--color-border)',
-        }}
-        onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'var(--color-text-muted)')}
-        onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
-      >
-        {/* Image container */}
-        <div
-          className="relative overflow-hidden"
-          style={{ aspectRatio: '1 / 1', backgroundColor: 'var(--color-surface-2)' }}
-        >
-          <img
-            src={product.image}
-            alt={product.name}
-            className="w-full h-full object-cover transition-transform duration-500 ease-out group-hover:scale-105"
-            loading="lazy"
-          />
+    <div
+      style={{
+        display: 'flex', flexDirection: 'column',
+        transform: cardHovered ? 'translateY(-5px)' : 'translateY(0)',
+        transition: 'transform .38s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
+      }}
+      onMouseEnter={() => setCardHovered(true)}
+      onMouseLeave={() => setCardHovered(false)}
+    >
+      <Link to={`/products/${product.id}`} style={{ textDecoration: 'none', color: 'inherit' }}>
+        <div style={{
+          position: 'relative',
+          aspectRatio: '1 / 1',
+          background: T.surface2,
+          border: `1px solid ${cardHovered ? T.hairlineStrong : T.hairline}`,
+          borderRadius: 3,
+          overflow: 'hidden',
+          boxShadow: cardHovered
+            ? '0 20px 52px -12px rgba(22,17,11,0.20)'
+            : '0 2px 10px -4px rgba(22,17,11,0.06)',
+          transition: 'box-shadow .38s ease, border-color .25s ease',
+        }}>
+          {product.image
+            ? <img
+                src={product.image}
+                alt={product.name}
+                style={{
+                  width: '100%', height: '100%', objectFit: 'cover', display: 'block',
+                  transform: cardHovered ? 'scale(1.07)' : 'scale(1)',
+                  transition: 'transform .6s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
+                }}
+                loading="lazy"
+              />
+            : <div style={{
+                position: 'absolute', inset: 0,
+                background: 'radial-gradient(64% 54% at 58% 32%, rgba(255,255,255,0.72), transparent 64%)',
+              }} />
+          }
 
-          {/* Category badge */}
-          <span
-            className="absolute top-3 left-3 px-2.5 py-1 text-[11px] uppercase tracking-wider rounded font-medium"
-            style={{ backgroundColor: 'rgba(26,26,20,0.70)', color: '#fff', backdropFilter: 'blur(4px)' }}
-          >
+          {/* Category label */}
+          <span style={{
+            position: 'absolute', top: 12, left: 13, zIndex: 1,
+            fontFamily: "'Spline Sans Mono', monospace",
+            fontSize: 10, letterSpacing: '.06em', textTransform: 'uppercase',
+            color: '#F2EBDC',
+            textShadow: '0 1px 4px rgba(0,0,0,0.5)',
+          }}>
             {product.category}
           </span>
 
           {!product.inStock && (
-            <span
-              className="absolute top-3 right-3 px-2.5 py-1 text-[11px] uppercase tracking-wider rounded"
-              style={{ backgroundColor: 'rgba(20,20,20,0.85)', color: 'var(--color-text-muted)' }}
-            >
+            <span style={{
+              position: 'absolute', top: 12, right: 13, zIndex: 1,
+              fontFamily: "'Spline Sans Mono', monospace",
+              fontSize: 10, letterSpacing: '.06em', textTransform: 'uppercase',
+              color: T.muted2,
+              background: 'rgba(247,244,239,0.92)',
+              padding: '4px 9px', borderRadius: 2,
+            }}>
               Sin stock
             </span>
           )}
-        </div>
 
-        {/* Info */}
-        <div className="p-4 flex flex-col flex-1">
-          <h3
-            className="text-sm font-medium leading-snug mb-1.5 line-clamp-2 flex-1"
-            style={{ color: 'var(--color-text)' }}
-          >
+          {/* Hover overlay */}
+          <div style={{
+            position: 'absolute', inset: 0, zIndex: 2,
+            background: 'rgba(22,17,11,0.36)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            opacity: cardHovered ? 1 : 0,
+            transition: 'opacity .3s ease',
+            pointerEvents: 'none',
+          }}>
+            <span style={{
+              background: T.cream,
+              color: T.ink,
+              fontSize: 12, fontWeight: 500,
+              letterSpacing: '.15em', textTransform: 'uppercase',
+              padding: '12px 24px', borderRadius: 2,
+              fontFamily: "'Hanken Grotesk', system-ui, sans-serif",
+              transform: cardHovered ? 'translateY(0)' : 'translateY(10px)',
+              transition: 'transform .35s ease',
+            }}>
+              Ver producto
+            </span>
+          </div>
+        </div>
+      </Link>
+
+      {/* Info below image */}
+      <div style={{ padding: '15px 2px 0', display: 'flex', flexDirection: 'column', flex: 1 }}>
+        <Link to={`/products/${product.id}`} style={{ textDecoration: 'none', color: 'inherit' }}>
+          <h3 style={{
+            fontFamily: "'Newsreader', serif",
+            fontWeight: 500, fontSize: 18, lineHeight: 1.25,
+            margin: '0 0 12px', color: T.ink,
+          }}>
             {product.name}
           </h3>
-          <p
-            className="text-base font-semibold mb-4"
-            style={{ color: 'var(--color-text)' }}
-          >
+        </Link>
+
+        <div style={{
+          marginTop: 'auto',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+          borderTop: `1px solid ${T.hairline}`, paddingTop: 13,
+        }}>
+          <span style={{
+            fontFamily: "'Spline Sans Mono', monospace",
+            fontSize: 14, fontWeight: 500, color: T.ink,
+          }}>
             {fmt(product.price)}
-          </p>
+          </span>
 
           <button
             onClick={handleAdd}
             disabled={!product.inStock || added}
-            className="w-full py-2.5 text-sm font-medium rounded tracking-wide transition-all duration-200"
-            style={
-              added
-                ? { backgroundColor: '#166534', color: '#fff', cursor: 'default' }
-                : product.inStock
-                  ? { backgroundColor: 'var(--color-primary)', color: '#fff' }
-                  : { backgroundColor: 'var(--color-surface-2)', color: 'var(--color-text-muted)', cursor: 'not-allowed' }
-            }
-            onMouseEnter={(e) => {
-              if (product.inStock && !added) {
-                e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)'
-              }
+            style={{
+              background: 'none', border: 'none',
+              cursor: product.inStock && !added ? 'pointer' : 'default',
+              fontSize: 13, fontWeight: 500,
+              color: added
+                ? '#166534'
+                : addHover && product.inStock ? T.red : T.ink,
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+              padding: '4px 0',
+              borderBottom: `1px solid ${
+                added ? '#166534'
+                  : addHover && product.inStock ? T.red : T.hairlineStrong
+              }`,
+              transition: 'color .15s, border-color .15s',
+              fontFamily: "'Hanken Grotesk', system-ui, sans-serif",
             }}
-            onMouseLeave={(e) => {
-              if (product.inStock && !added) {
-                e.currentTarget.style.backgroundColor = 'var(--color-primary)'
-              }
-            }}
+            onMouseEnter={() => setAddHover(true)}
+            onMouseLeave={() => setAddHover(false)}
           >
-            {added ? '✓ Agregado' : product.inStock ? 'Agregar al carrito' : 'Sin stock'}
+            {added
+              ? '✓ Agregado'
+              : product.inStock ? 'Agregar' : 'Sin stock'
+            }
+            {product.inStock && !added && (
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.9">
+                <path d="M12 5v14M5 12h14" strokeLinecap="round" />
+              </svg>
+            )}
           </button>
         </div>
-      </article>
-    </Link>
+      </div>
+    </div>
   )
 }

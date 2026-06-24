@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Outlet } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Outlet, useLocation } from 'react-router-dom'
 import { CartProvider } from './context/CartContext'
 import Navbar from './components/Navbar'
 import Footer from './components/Footer'
@@ -31,10 +31,11 @@ function PageShell({ name }) {
 }
 
 function Layout() {
+  const { pathname } = useLocation()
   return (
     <>
       <Navbar />
-      <main>
+      <main style={pathname !== '/' ? { paddingTop: 68 } : undefined}>
         <Outlet />
       </main>
       <Footer />

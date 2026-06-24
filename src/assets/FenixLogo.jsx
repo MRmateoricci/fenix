@@ -1,40 +1,42 @@
-export default function FenixLogo({ className = '', onDark = false }) {
+export default function FenixLogo({ onDark = false }) {
+  const textColor = onDark ? '#F2EBDC' : '#CC0000'
+  const subColor  = onDark ? 'rgba(242,235,220,0.6)' : '#444'
+
   return (
-    <div className={`flex items-center gap-2.5 shrink-0 ${className}`}>
-      <svg viewBox="0 0 44 44" width="40" height="40" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <rect width="44" height="44" rx="7" fill="#CC0000" />
-        <path
-          d="M26 6L13 24h9L14 38l18-18h-9l8-14H26z"
-          fill="white"
-          strokeLinejoin="round"
-        />
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+      {/* ── Marca gráfica ── */}
+      <svg viewBox="0 0 54 40" width="54" height="40" aria-hidden="true">
+        {/* Cuerpo central — rectángulo rojo */}
+        <rect x="6" y="10" width="32" height="20" rx="2" fill="#CC0000" />
+        {/* Ala superior — apunta a la derecha */}
+        <polygon points="34,10 50,4 50,20 34,20" fill="#CC0000" />
+        {/* Ala inferior */}
+        <polygon points="34,20 50,20 50,36 34,30" fill="#AA0000" />
+        {/* Rayo / relámpago interno en blanco */}
+        <polygon points="21,14 17,22 20,22 16,28 24,20 20,20" fill="white" />
       </svg>
-      <div>
-        <div
-          style={{
-            fontFamily: 'Inter, system-ui, sans-serif',
-            fontWeight: 800,
-            fontSize: '17px',
-            letterSpacing: '0.12em',
-            color: onDark ? '#F2EDE6' : '#1A1A14',
-            lineHeight: 1.05,
-          }}
-        >
+
+      {/* ── Texto ── */}
+      <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1 }}>
+        <span style={{
+          fontFamily: "'Hanken Grotesk', system-ui, sans-serif",
+          fontWeight: 800, fontSize: 20,
+          letterSpacing: '.18em', paddingLeft: '.18em',
+          color: textColor,
+          transition: 'color .3s',
+        }}>
           FÉNIX
-        </div>
-        <div
-          style={{
-            fontFamily: 'Inter, system-ui, sans-serif',
-            fontWeight: 400,
-            fontSize: '7.5px',
-            letterSpacing: '0.06em',
-            color: onDark ? 'rgba(242,237,230,0.50)' : '#7A7468',
-            lineHeight: 1.3,
-            textTransform: 'uppercase',
-          }}
-        >
+        </span>
+        <span style={{
+          fontFamily: "'Hanken Grotesk', system-ui, sans-serif",
+          fontWeight: 400, fontSize: 9,
+          letterSpacing: '.06em',
+          color: subColor,
+          transition: 'color .3s',
+          marginTop: 2,
+        }}>
           Electricidad e Iluminación
-        </div>
+        </span>
       </div>
     </div>
   )

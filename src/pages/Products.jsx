@@ -1,35 +1,47 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
-import { useSearchParams } from 'react-router-dom'
-import { products, categories } from '../data/products'
+import { useSearchParams, useNavigate } from 'react-router-dom'
+import { products, categories, CATEGORY_NAV_LABEL } from '../data/products'
 import ProductCard from '../components/ProductCard'
+
+const T = {
+  paper:          '#F7F4EF',
+  panel:          '#FBF8F3',
+  surface2:       '#E7E0D3',
+  ink:            '#16110B',
+  ink2:           '#2A2118',
+  text3:          '#6B6051',
+  muted:          '#8A8175',
+  muted2:         '#9A917F',
+  hairline:       '#DED6C7',
+  hairlineStrong: '#C9BFAF',
+  red:            '#CC0000',
+  amber:          '#E0A24A',
+}
 
 const PRICE_MIN = 0
 const PRICE_MAX = 40000
 
 const SORT_OPTIONS = [
-  { value: 'default', label: 'Novedades' },
-  { value: 'price-asc', label: 'Precio: menor a mayor' },
+  { value: 'default',    label: 'Novedades'            },
+  { value: 'price-asc',  label: 'Precio: menor a mayor' },
   { value: 'price-desc', label: 'Precio: mayor a menor' },
-  { value: 'name-az', label: 'Nombre: A–Z' },
+  { value: 'name-az',    label: 'Nombre: A–Z'           },
 ]
 
 const fmt = (n) =>
-  new Intl.NumberFormat('es-AR', {
-    style: 'currency',
-    currency: 'ARS',
-    maximumFractionDigits: 0,
-  }).format(n)
+  new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(n)
 
-// ─── URL helpers ───────────────────────────────────────────────────────────────
+// ─── URL param helpers ─────────────────────────────────────────────────────────
 function useFilterParams() {
   const [searchParams, setSearchParams] = useSearchParams()
 
-  const query = searchParams.get('q') || ''
+  const query              = searchParams.get('q') || ''
   const selectedCategories = searchParams.getAll('category')
-  const onlyInStock = searchParams.get('stock') === '1'
-  const sortBy = searchParams.get('sort') || 'default'
-  const minPrice = Math.max(PRICE_MIN, Number(searchParams.get('min')) || PRICE_MIN)
-  const maxPrice = Math.min(PRICE_MAX, Number(searchParams.get('max')) || PRICE_MAX)
+  const sub                = searchParams.get('sub') || ''
+  const onlyInStock        = searchParams.get('stock') === '1'
+  const sortBy             = searchParams.get('sort') || 'default'
+  const minPrice           = Math.max(PRICE_MIN, Number(searchParams.get('min')) || PRICE_MIN)
+  const maxPrice           = Math.min(PRICE_MAX, Number(searchParams.get('max')) || PRICE_MAX)
 
   function set(key, value) {
     const p = new URLSearchParams(searchParams)
@@ -42,54 +54,103 @@ function useFilterParams() {
     const p = new URLSearchParams(searchParams)
     const current = p.getAll('category')
     p.delete('category')
-    if (current.includes(cat)) {
-      current.filter((c) => c !== cat).forEach((c) => p.append('category', c))
-    } else {
-      [...current, cat].forEach((c) => p.append('category', c))
-    }
+    if (current.includes(cat)) current.filter(c => c !== cat).forEach(c => p.append('category', c))
+    else [...current, cat].forEach(c => p.append('category', c))
     setSearchParams(p, { replace: true })
   }
 
-  function clearAll() {
-    setSearchParams({}, { replace: true })
+  function clearAll() { setSearchParams({}, { replace: true }) }
+
+  function selectCategory(cat) {
+    const p = new URLSearchParams()
+    if (cat) p.set('category', cat)
+    setSearchParams(p, { replace: true })
   }
 
   const hasActiveFilters =
-    query !== '' ||
-    selectedCategories.length > 0 ||
-    onlyInStock ||
-    sortBy !== 'default' ||
-    minPrice > PRICE_MIN ||
-    maxPrice < PRICE_MAX
+    query !== '' || selectedCategories.length > 0 || sub !== '' || onlyInStock ||
+    sortBy !== 'default' || minPrice > PRICE_MIN || maxPrice < PRICE_MAX
 
-  return {
-    query, selectedCategories, onlyInStock, sortBy, minPrice, maxPrice,
-    set, toggleCategory, clearAll, hasActiveFilters,
-  }
+  return { query, selectedCategories, sub, onlyInStock, sortBy, minPrice, maxPrice, set, toggleCategory, clearAll, selectCategory, hasActiveFilters }
+}
+
+// ─── Breadcrumb + title ────────────────────────────────────────────────────────
+function CatalogHeader({ filters }) {
+  const navigate = useNavigate()
+  // Derive labels from active filters
+  const activeCategory = filters.selectedCategories[0] || null
+  const catLabel  = activeCategory ? CATEGORY_NAV_LABEL[activeCategory] : null
+  const subLabel  = filters.sub || null
+  const pageTitle = subLabel || catLabel || 'Catálogo'
+
+  return (
+    <div style={{ padding: '96px 0 32px', borderBottom: `1px solid ${T.hairline}`, marginBottom: 36 }}>
+      {/* Breadcrumb */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 8,
+        fontFamily: "'Spline Sans Mono', monospace",
+        fontSize: 10, letterSpacing: '.14em', textTransform: 'uppercase',
+        color: T.muted2, marginBottom: 18,
+      }}>
+        <a
+          href="/"
+          onClick={(e) => { e.preventDefault(); navigate('/') }}
+          style={{ textDecoration: 'none', color: T.muted2, transition: 'color .15s' }}
+          onMouseEnter={(e) => (e.currentTarget.style.color = T.ink)}
+          onMouseLeave={(e) => (e.currentTarget.style.color = T.muted2)}
+        >
+          Inicio
+        </a>
+        {catLabel && (
+          <>
+            <span style={{ opacity: 0.5 }}>/</span>
+            <a
+              href={`/products?category=${activeCategory}`}
+              onClick={(e) => { e.preventDefault(); navigate(`/products?category=${activeCategory}`) }}
+              style={{ textDecoration: 'none', color: subLabel ? T.muted2 : T.ink, transition: 'color .15s' }}
+              onMouseEnter={(e) => !subLabel && (e.currentTarget.style.color = T.ink)}
+            >
+              {catLabel}
+            </a>
+          </>
+        )}
+        {subLabel && (
+          <>
+            <span style={{ opacity: 0.5 }}>/</span>
+            <span style={{ color: T.ink }}>{subLabel}</span>
+          </>
+        )}
+      </div>
+
+      {/* Page title */}
+      <h1 style={{
+        fontFamily: "'Newsreader', serif",
+        fontWeight: 500, fontSize: 'clamp(38px, 5vw, 64px)',
+        lineHeight: 0.94, letterSpacing: '-.02em',
+        color: T.ink, margin: 0,
+      }}>
+        {pageTitle}
+      </h1>
+    </div>
+  )
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// MAIN PAGE
-// ═══════════════════════════════════════════════════════════════════════════════
 export default function Products() {
   const filters = useFilterParams()
-  const [drawerOpen, setDrawerOpen] = useState(false)
-
   const filtered = useMemo(() => {
     let list = products
-
     if (filters.query) {
       const q = filters.query.toLowerCase()
-      list = list.filter((p) => p.name.toLowerCase().includes(q) || p.description.toLowerCase().includes(q))
+      list = list.filter(p => p.name.toLowerCase().includes(q) || p.description.toLowerCase().includes(q))
     }
-    if (filters.selectedCategories.length > 0) {
-      list = list.filter((p) => filters.selectedCategories.includes(p.category))
-    }
-    if (filters.onlyInStock) {
-      list = list.filter((p) => p.inStock)
-    }
-    list = list.filter((p) => p.price >= filters.minPrice && p.price <= filters.maxPrice)
-
+    if (filters.selectedCategories.length > 0)
+      list = list.filter(p => filters.selectedCategories.includes(p.category))
+    if (filters.sub)
+      list = list.filter(p => p.subcategory === filters.sub)
+    if (filters.onlyInStock)
+      list = list.filter(p => p.inStock)
+    list = list.filter(p => p.price >= filters.minPrice && p.price <= filters.maxPrice)
     switch (filters.sortBy) {
       case 'price-asc':  return [...list].sort((a, b) => a.price - b.price)
       case 'price-desc': return [...list].sort((a, b) => b.price - a.price)
@@ -99,40 +160,41 @@ export default function Products() {
   }, [filters.query, filters.selectedCategories, filters.onlyInStock, filters.sortBy, filters.minPrice, filters.maxPrice])
 
   return (
-    <div style={{ backgroundColor: 'var(--color-bg)', minHeight: '100vh' }}>
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-10 pb-20">
+    <div style={{ background: T.paper, minHeight: '100vh', color: T.ink }}>
+      <div style={{ maxWidth: 1320, margin: '0 auto', padding: '0 40px 80px' }}>
 
-        {/* Page header */}
-        <div className="mb-8">
-          <p className="text-xs uppercase tracking-[0.18em] font-medium mb-2" style={{ color: 'var(--color-primary)' }}>
-            Fénix
-          </p>
-          <h1
-            className="text-3xl sm:text-4xl font-bold"
-            style={{ fontFamily: 'var(--font-serif)', color: 'var(--color-text)' }}
-          >
-            Catálogo
-          </h1>
-        </div>
+        {/* ── Header ─────────────────────────────────────────────────────── */}
+        <CatalogHeader filters={filters} />
 
-        {/* Search + Sort + Mobile filter button row */}
-        <div className="flex flex-col sm:flex-row gap-3 mb-8">
+        {/* ── Category tabs ───────────────────────────────────────────────── */}
+        <CategoryTabs filters={filters} />
+
+        {/* ── Search + sort row ───────────────────────────────────────────── */}
+        <div style={{ display: 'flex', gap: 12, marginBottom: 28, flexWrap: 'wrap', alignItems: 'center' }}>
           {/* Search */}
-          <div className="relative flex-1">
-            <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+          <div style={{ position: 'relative', flex: '1 1 280px' }}>
+            <svg
+              viewBox="0 0 24 24" width="15" height="15" fill="none"
+              stroke={T.muted2} strokeWidth="1.7" strokeLinecap="round"
+              style={{ position: 'absolute', left: 13, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }}
+            >
+              <circle cx="11" cy="11" r="7" /><path d="m20 20-3.4-3.4" />
+            </svg>
             <input
               type="search"
               placeholder="Buscar productos…"
               value={filters.query}
               onChange={(e) => filters.set('q', e.target.value || null)}
-              className="dark-input w-full pl-10 pr-4 py-2.5 rounded-lg text-sm outline-none transition-colors"
               style={{
-                backgroundColor: 'var(--color-surface)',
-                border: '1px solid var(--color-border)',
-                color: 'var(--color-text)',
+                width: '100%', paddingLeft: 38, paddingRight: 14,
+                paddingTop: 11, paddingBottom: 11,
+                background: T.panel, border: `1px solid ${T.hairline}`,
+                borderRadius: 2, outline: 'none',
+                fontFamily: "'Hanken Grotesk', system-ui, sans-serif",
+                fontSize: 13.5, color: T.ink,
               }}
-              onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-              onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+              onFocus={(e) => (e.currentTarget.style.borderColor = T.hairlineStrong)}
+              onBlur={(e)  => (e.currentTarget.style.borderColor = T.hairline)}
             />
           </div>
 
@@ -140,99 +202,116 @@ export default function Products() {
           <select
             value={filters.sortBy}
             onChange={(e) => filters.set('sort', e.target.value)}
-            className="dark-select px-4 py-2.5 rounded-lg text-sm outline-none cursor-pointer"
             style={{
-              backgroundColor: 'var(--color-surface)',
-              border: '1px solid var(--color-border)',
-              color: 'var(--color-text)',
-              minWidth: '200px',
+              padding: '11px 14px',
+              background: T.panel, border: `1px solid ${T.hairline}`,
+              borderRadius: 2, outline: 'none', cursor: 'pointer',
+              fontFamily: "'Hanken Grotesk', system-ui, sans-serif",
+              fontSize: 13.5, color: T.ink,
+              minWidth: 220,
             }}
           >
-            {SORT_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>{o.label}</option>
-            ))}
+            {SORT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
 
-          {/* Mobile filter toggle */}
-          <button
-            onClick={() => setDrawerOpen(true)}
-            className="lg:hidden inline-flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors"
-            style={{
-              backgroundColor: 'var(--color-surface)',
-              border: '1px solid var(--color-border)',
-              color: 'var(--color-text)',
-            }}
-          >
-            <FilterIcon />
-            Filtros
-            {filters.hasActiveFilters && (
-              <span
-                className="w-2 h-2 rounded-full"
-                style={{ backgroundColor: 'var(--color-primary)' }}
-              />
-            )}
-          </button>
         </div>
 
-        {/* Result count */}
-        <p className="text-sm mb-6" style={{ color: 'var(--color-text-muted)' }}>
+        {/* Count */}
+        <div style={{
+          fontFamily: "'Spline Sans Mono', monospace",
+          fontSize: 11, letterSpacing: '.08em', color: T.muted2, marginBottom: 32,
+        }}>
           {filtered.length} {filtered.length === 1 ? 'producto encontrado' : 'productos encontrados'}
-        </p>
-
-        {/* Layout: sidebar + grid */}
-        <div className="flex gap-8 items-start">
-          {/* Desktop sidebar */}
-          <aside
-            className="hidden lg:block w-[240px] shrink-0 sticky top-20"
-            style={{ maxHeight: 'calc(100vh - 100px)', overflowY: 'auto' }}
-          >
-            <FilterPanel filters={filters} />
-          </aside>
-
-          {/* Product grid */}
-          <div className="flex-1 min-w-0">
-            {filtered.length === 0 ? (
-              <EmptyState onClear={filters.clearAll} />
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-5">
-                {filtered.map((product) => (
-                  <ProductCard key={product.id} product={product} />
-                ))}
-              </div>
-            )}
-          </div>
         </div>
-      </div>
 
-      {/* Mobile filter drawer */}
-      <FilterDrawer
-        open={drawerOpen}
-        onClose={() => setDrawerOpen(false)}
-        filters={filters}
-      />
+        {/* ── Product grid ────────────────────────────────────────────────── */}
+        {filtered.length === 0
+          ? <EmptyState onClear={filters.clearAll} />
+          : (
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
+              gap: 28,
+            }}>
+              {filtered.map(p => <ProductCard key={p.id} product={p} />)}
+            </div>
+          )
+        }
+      </div>
     </div>
   )
 }
 
-// ─── Filter Panel (shared by sidebar + drawer) ─────────────────────────────────
+// ─── Category tabs ─────────────────────────────────────────────────────────────
+function CategoryTabs({ filters }) {
+  const activeCategory = filters.sub
+    ? filters.selectedCategories[0] || null
+    : filters.selectedCategories.length === 1 ? filters.selectedCategories[0] : null
+
+  const tabs = [
+    { label: 'Todos',         value: null },
+    { label: 'Interior',      value: 'Iluminación Interior' },
+    { label: 'Exterior',      value: 'Iluminación Exterior' },
+    { label: 'Tiras LED',     value: 'Tiras LED' },
+    { label: 'Electricidad',  value: 'Electricidad' },
+    { label: 'Ventiladores',  value: 'Ventiladores de techo' },
+  ]
+
+  return (
+    <div style={{
+      display: 'flex', gap: 0,
+      borderBottom: `1px solid ${T.hairline}`,
+      marginBottom: 28,
+      overflowX: 'auto',
+    }}>
+      {tabs.map(tab => {
+        const isActive = tab.value === null
+          ? !activeCategory && !filters.sub
+          : activeCategory === tab.value
+
+        return (
+          <button
+            key={tab.label}
+            onClick={() => filters.selectCategory(tab.value)}
+            style={{
+              background: 'none', border: 'none', cursor: 'pointer',
+              padding: '13px 22px',
+              fontFamily: "'Hanken Grotesk', system-ui, sans-serif",
+              fontSize: 13.5, fontWeight: isActive ? 500 : 400,
+              color: isActive ? T.ink : T.muted,
+              borderBottom: `2px solid ${isActive ? T.ink : 'transparent'}`,
+              marginBottom: -1,
+              whiteSpace: 'nowrap',
+              transition: 'color .15s, border-color .15s',
+            }}
+            onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.color = T.ink2 }}
+            onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.color = T.muted }}
+          >
+            {tab.label}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+// ─── Filter Panel ──────────────────────────────────────────────────────────────
 function FilterPanel({ filters }) {
   return (
-    <div className="space-y-7">
-      {/* Clear all */}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
       {filters.hasActiveFilters && (
         <button
           onClick={filters.clearAll}
-          className="w-full py-2 rounded-lg text-xs uppercase tracking-widest font-medium transition-colors"
           style={{
-            border: '1px solid var(--color-primary)',
-            color: 'var(--color-primary)',
+            width: '100%', padding: '9px 0', borderRadius: 2,
+            border: `1px solid ${T.hairlineStrong}`, background: 'transparent',
+            color: T.text3,
+            fontFamily: "'Spline Sans Mono', monospace",
+            fontSize: 10, letterSpacing: '.16em', textTransform: 'uppercase',
+            cursor: 'pointer', transition: 'border-color .15s, color .15s',
           }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.backgroundColor = 'rgba(204,0,0,0.08)'
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.backgroundColor = 'transparent'
-          }}
+          onMouseEnter={(e) => { e.currentTarget.style.borderColor = T.ink; e.currentTarget.style.color = T.ink }}
+          onMouseLeave={(e) => { e.currentTarget.style.borderColor = T.hairlineStrong; e.currentTarget.style.color = T.text3 }}
         >
           Limpiar filtros
         </button>
@@ -240,110 +319,84 @@ function FilterPanel({ filters }) {
 
       {/* Categories */}
       <div>
-        <h3
-          className="text-[11px] uppercase tracking-[0.15em] font-semibold mb-4"
-          style={{ color: 'var(--color-text-muted)' }}
-        >
+        <div style={{ fontFamily: "'Spline Sans Mono', monospace", fontSize: 10, letterSpacing: '.18em', textTransform: 'uppercase', color: T.muted2, marginBottom: 14 }}>
           Categoría
-        </h3>
-        <ul className="space-y-2.5">
-          {categories.map((cat) => {
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {categories.map(cat => {
             const checked = filters.selectedCategories.includes(cat)
             return (
-              <li key={cat}>
-                <label className="flex items-center gap-3 cursor-pointer group">
-                  <div
-                    className="w-4 h-4 rounded flex items-center justify-center shrink-0 transition-colors"
-                    style={{
-                      backgroundColor: checked ? 'var(--color-primary)' : 'transparent',
-                      border: `1.5px solid ${checked ? 'var(--color-primary)' : 'var(--color-border)'}`,
-                    }}
-                    onClick={() => filters.toggleCategory(cat)}
-                  >
-                    {checked && (
-                      <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
-                        <path d="M1 4l3 3 5-6" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                      </svg>
-                    )}
-                  </div>
-                  <input
-                    type="checkbox"
-                    className="sr-only"
-                    checked={checked}
-                    onChange={() => filters.toggleCategory(cat)}
-                    aria-label={cat}
-                  />
-                  <span
-                    className="text-sm transition-colors"
-                    style={{ color: checked ? 'var(--color-text)' : 'var(--color-text-muted)' }}
-                  >
-                    {cat}
-                  </span>
-                  <span
-                    className="ml-auto text-[11px]"
-                    style={{ color: 'var(--color-text-muted)' }}
-                  >
-                    {products.filter((p) => p.category === cat).length}
-                  </span>
-                </label>
-              </li>
+              <label key={cat} style={{ display: 'flex', alignItems: 'center', gap: 11, cursor: 'pointer' }}>
+                <div
+                  onClick={() => filters.toggleCategory(cat)}
+                  style={{
+                    width: 15, height: 15, borderRadius: 2, flexShrink: 0,
+                    border: `1.5px solid ${checked ? T.ink : T.hairlineStrong}`,
+                    background: checked ? T.ink : 'transparent',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    transition: 'background .15s, border-color .15s',
+                  }}
+                >
+                  {checked && (
+                    <svg width="9" height="7" viewBox="0 0 9 7" fill="none">
+                      <path d="M1 3.5l2.5 2.5 4.5-5" stroke="#F7F4EF" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  )}
+                </div>
+                <input type="checkbox" checked={checked} onChange={() => filters.toggleCategory(cat)} style={{ display: 'none' }} />
+                <span style={{ fontFamily: "'Hanken Grotesk', system-ui, sans-serif", fontSize: 13.5, color: checked ? T.ink : T.muted, transition: 'color .15s' }}>
+                  {cat}
+                </span>
+                <span style={{ fontFamily: "'Spline Sans Mono', monospace", fontSize: 11, color: T.muted2, marginLeft: 'auto' }}>
+                  {products.filter(p => p.category === cat).length}
+                </span>
+              </label>
             )
           })}
-        </ul>
+        </div>
       </div>
 
-      {/* Divider */}
-      <div style={{ height: '1px', backgroundColor: 'var(--color-border)' }} />
+      <div style={{ height: 1, background: T.hairline }} />
 
       {/* Availability */}
       <div>
-        <h3
-          className="text-[11px] uppercase tracking-[0.15em] font-semibold mb-4"
-          style={{ color: 'var(--color-text-muted)' }}
-        >
+        <div style={{ fontFamily: "'Spline Sans Mono', monospace", fontSize: 10, letterSpacing: '.18em', textTransform: 'uppercase', color: T.muted2, marginBottom: 14 }}>
           Disponibilidad
-        </h3>
-        <label className="flex items-center justify-between cursor-pointer">
-          <span className="text-sm" style={{ color: 'var(--color-text)' }}>
+        </div>
+        <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }}>
+          <span style={{ fontFamily: "'Hanken Grotesk', system-ui, sans-serif", fontSize: 13.5, color: T.ink }}>
             Solo disponibles
           </span>
-          {/* Toggle switch */}
           <div
             onClick={() => filters.set('stock', filters.onlyInStock ? null : '1')}
-            className="relative w-10 h-6 rounded-full transition-colors duration-200 cursor-pointer"
             style={{
-              backgroundColor: filters.onlyInStock ? 'var(--color-primary)' : 'var(--color-surface-2)',
-              border: '1px solid var(--color-border)',
+              position: 'relative', width: 38, height: 22, borderRadius: 11,
+              background: filters.onlyInStock ? T.ink : T.surface2,
+              border: `1px solid ${T.hairlineStrong}`,
+              cursor: 'pointer', transition: 'background .2s',
             }}
-            role="switch"
-            aria-checked={filters.onlyInStock}
+            role="switch" aria-checked={filters.onlyInStock}
           >
-            <div
-              className="absolute top-0.5 w-5 h-5 rounded-full transition-transform duration-200"
-              style={{
-                backgroundColor: '#fff',
-                transform: filters.onlyInStock ? 'translateX(18px)' : 'translateX(1px)',
-                boxShadow: '0 1px 3px rgba(0,0,0,0.4)',
-              }}
-            />
+            <div style={{
+              position: 'absolute', top: 2,
+              width: 16, height: 16, borderRadius: '50%',
+              background: '#fff', boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
+              transform: filters.onlyInStock ? 'translateX(18px)' : 'translateX(2px)',
+              transition: 'transform .2s',
+            }} />
           </div>
         </label>
       </div>
 
-      {/* Divider */}
-      <div style={{ height: '1px', backgroundColor: 'var(--color-border)' }} />
+      <div style={{ height: 1, background: T.hairline }} />
 
-      {/* Price range */}
+      {/* Price */}
       <div>
-        <h3
-          className="text-[11px] uppercase tracking-[0.15em] font-semibold mb-4"
-          style={{ color: 'var(--color-text-muted)' }}
-        >
+        <div style={{ fontFamily: "'Spline Sans Mono', monospace", fontSize: 10, letterSpacing: '.18em', textTransform: 'uppercase', color: T.muted2, marginBottom: 14 }}>
           Precio
-        </h3>
+        </div>
         <PriceRangeSlider
-          min={PRICE_MIN}
-          max={PRICE_MAX}
+          min={PRICE_MIN} max={PRICE_MAX}
           value={[filters.minPrice, filters.maxPrice]}
           onChange={([lo, hi]) => {
             filters.set('min', lo > PRICE_MIN ? lo : null)
@@ -355,85 +408,39 @@ function FilterPanel({ filters }) {
   )
 }
 
-// ─── Price Range Dual Slider ───────────────────────────────────────────────────
+// ─── Price Slider ──────────────────────────────────────────────────────────────
 function PriceRangeSlider({ min, max, value, onChange }) {
   const [lo, setLo] = useState(value[0])
   const [hi, setHi] = useState(value[1])
-  const trackRef = useRef(null)
 
-  useEffect(() => {
-    setLo(value[0])
-    setHi(value[1])
-  }, [value[0], value[1]])
+  useEffect(() => { setLo(value[0]); setHi(value[1]) }, [value[0], value[1]])
 
-  const loPercent = ((lo - min) / (max - min)) * 100
-  const hiPercent = ((hi - min) / (max - min)) * 100
+  const loP = ((lo - min) / (max - min)) * 100
+  const hiP = ((hi - min) / (max - min)) * 100
 
-  function handleLo(e) {
-    const v = Math.min(Number(e.target.value), hi - 500)
-    setLo(v)
-    onChange([v, hi])
-  }
-
-  function handleHi(e) {
-    const v = Math.max(Number(e.target.value), lo + 500)
-    setHi(v)
-    onChange([lo, v])
-  }
+  function handleLo(e) { const v = Math.min(Number(e.target.value), hi - 500); setLo(v); onChange([v, hi]) }
+  function handleHi(e) { const v = Math.max(Number(e.target.value), lo + 500); setHi(v); onChange([lo, v]) }
 
   return (
     <div>
-      <div className="flex justify-between mb-3">
-        <span className="text-xs font-medium" style={{ color: 'var(--color-text)' }}>
-          {fmt(lo)}
-        </span>
-        <span className="text-xs font-medium" style={{ color: 'var(--color-text)' }}>
-          {fmt(hi)}
-        </span>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
+        <span style={{ fontFamily: "'Spline Sans Mono', monospace", fontSize: 12, color: T.ink }}>{fmt(lo)}</span>
+        <span style={{ fontFamily: "'Spline Sans Mono', monospace", fontSize: 12, color: T.ink }}>{fmt(hi)}</span>
       </div>
-
-      <div
-        ref={trackRef}
-        className="relative h-1.5 rounded-full"
-        style={{ backgroundColor: 'var(--color-border)' }}
-      >
-        {/* Filled track */}
-        <div
-          className="absolute h-full rounded-full pointer-events-none"
-          style={{
-            left: `${loPercent}%`,
-            right: `${100 - hiPercent}%`,
-            backgroundColor: 'var(--color-primary)',
-          }}
-        />
-        {/* Min thumb */}
-        <input
-          type="range"
-          min={min}
-          max={max}
-          step={500}
-          value={lo}
-          onChange={handleLo}
-          className="range-thumb"
-          aria-label="Precio mínimo"
-        />
-        {/* Max thumb */}
-        <input
-          type="range"
-          min={min}
-          max={max}
-          step={500}
-          value={hi}
-          onChange={handleHi}
-          className="range-thumb"
-          aria-label="Precio máximo"
-        />
+      <div style={{ position: 'relative', height: 6, borderRadius: 3, background: T.surface2 }}>
+        <div style={{
+          position: 'absolute', height: '100%', borderRadius: 3,
+          left: `${loP}%`, right: `${100 - hiP}%`,
+          background: T.ink,
+        }} />
+        <input type="range" min={min} max={max} step={500} value={lo} onChange={handleLo} className="range-thumb" aria-label="Precio mínimo" />
+        <input type="range" min={min} max={max} step={500} value={hi} onChange={handleHi} className="range-thumb" aria-label="Precio máximo" />
       </div>
     </div>
   )
 }
 
-// ─── Mobile Filter Drawer ──────────────────────────────────────────────────────
+// ─── Mobile Drawer ─────────────────────────────────────────────────────────────
 function FilterDrawer({ open, onClose, filters }) {
   useEffect(() => {
     document.body.style.overflow = open ? 'hidden' : ''
@@ -448,61 +455,51 @@ function FilterDrawer({ open, onClose, filters }) {
 
   return (
     <>
-      {/* Backdrop */}
       <div
-        className="fixed inset-0 z-40 bg-black/60 lg:hidden transition-opacity duration-300"
-        style={{ opacity: open ? 1 : 0, pointerEvents: open ? 'auto' : 'none' }}
+        style={{
+          position: 'fixed', inset: 0, zIndex: 40, background: 'rgba(22,17,11,0.5)',
+          opacity: open ? 1 : 0, pointerEvents: open ? 'auto' : 'none',
+          transition: 'opacity .3s ease',
+        }}
         onClick={onClose}
         aria-hidden="true"
       />
-
-      {/* Panel */}
       <aside
-        className="fixed left-0 top-0 h-full z-50 lg:hidden flex flex-col transition-transform duration-300 ease-in-out"
         style={{
-          width: '300px',
-          maxWidth: '85vw',
-          backgroundColor: 'var(--color-surface)',
+          position: 'fixed', left: 0, top: 0, height: '100%', zIndex: 50,
+          width: 300, maxWidth: '88vw',
+          background: T.paper,
+          display: 'flex', flexDirection: 'column',
           transform: open ? 'translateX(0)' : 'translateX(-100%)',
+          transition: 'transform .3s ease',
         }}
-        aria-label="Panel de filtros"
-        aria-hidden={!open}
       >
-        {/* Header */}
-        <div
-          className="flex items-center justify-between px-6 py-4 shrink-0"
-          style={{ borderBottom: '1px solid var(--color-border)' }}
-        >
-          <h2 className="font-semibold" style={{ color: 'var(--color-text)' }}>Filtros</h2>
-          <button
-            onClick={onClose}
-            className="p-1.5 transition-colors"
-            style={{ color: 'var(--color-text-muted)' }}
-            aria-label="Cerrar filtros"
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-              <line x1="18" y1="6" x2="6" y2="18" />
-              <line x1="6" y1="6" x2="18" y2="18" />
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '18px 24px', borderBottom: `1px solid ${T.hairline}`,
+        }}>
+          <span style={{ fontFamily: "'Newsreader', serif", fontSize: 20, color: T.ink }}>Filtros</span>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: T.muted, display: 'flex', padding: 4 }} aria-label="Cerrar">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
+              <path d="m6 6 12 12M18 6 6 18" />
             </svg>
           </button>
         </div>
-
-        {/* Scrollable content */}
-        <div className="flex-1 overflow-y-auto px-6 py-6">
+        <div style={{ flex: 1, overflowY: 'auto', padding: '24px 24px' }}>
           <FilterPanel filters={filters} />
         </div>
-
-        {/* Footer */}
-        <div
-          className="shrink-0 px-6 py-4"
-          style={{ borderTop: '1px solid var(--color-border)' }}
-        >
+        <div style={{ padding: '16px 24px', borderTop: `1px solid ${T.hairline}` }}>
           <button
             onClick={onClose}
-            className="w-full py-3 rounded-lg text-sm font-medium transition-colors"
-            style={{ backgroundColor: 'var(--color-primary)', color: '#fff' }}
-            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
-            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
+            style={{
+              width: '100%', padding: '13px 0', borderRadius: 2,
+              background: T.ink, color: T.paper, border: 'none', cursor: 'pointer',
+              fontFamily: "'Hanken Grotesk', system-ui, sans-serif",
+              fontSize: 13.5, fontWeight: 500, letterSpacing: '.04em',
+              transition: 'opacity .15s',
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.opacity = '.82')}
+            onMouseLeave={(e) => (e.currentTarget.style.opacity = '1')}
           >
             Ver resultados
           </button>
@@ -512,73 +509,36 @@ function FilterDrawer({ open, onClose, filters }) {
   )
 }
 
-// ─── Empty State ───────────────────────────────────────────────────────────────
+// ─── Empty state ───────────────────────────────────────────────────────────────
 function EmptyState({ onClear }) {
   return (
-    <div className="flex flex-col items-center justify-center py-24 gap-5 text-center">
-      <svg
-        width="56"
-        height="56"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        style={{ color: 'var(--color-text-muted)' }}
-      >
-        <circle cx="11" cy="11" r="8" />
-        <line x1="21" y1="21" x2="16.65" y2="16.65" />
-        <line x1="8" y1="11" x2="14" y2="11" />
+    <div style={{ textAlign: 'center', padding: '80px 0', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 20 }}>
+      <svg viewBox="0 0 24 24" width="52" height="52" fill="none" stroke={T.hairlineStrong} strokeWidth="1.2" strokeLinecap="round">
+        <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /><line x1="8" y1="11" x2="14" y2="11" />
       </svg>
       <div>
-        <p className="font-medium mb-1" style={{ color: 'var(--color-text)' }}>
-          No encontramos productos con esos filtros
+        <p style={{ fontFamily: "'Newsreader', serif", fontSize: 22, color: T.ink, marginBottom: 8 }}>
+          Sin resultados
         </p>
-        <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
+        <p style={{ fontFamily: "'Hanken Grotesk', system-ui, sans-serif", fontSize: 14, color: T.muted }}>
           Intentá con otros términos o eliminá algunos filtros
         </p>
       </div>
       <button
         onClick={onClear}
-        className="px-6 py-2.5 rounded-lg text-sm font-medium transition-colors"
-        style={{ backgroundColor: 'var(--color-primary)', color: '#fff' }}
-        onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
-        onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
+        style={{
+          padding: '11px 26px', borderRadius: 2,
+          border: `1px solid ${T.hairlineStrong}`, background: 'transparent',
+          color: T.ink, cursor: 'pointer',
+          fontFamily: "'Hanken Grotesk', system-ui, sans-serif",
+          fontSize: 13, fontWeight: 500, letterSpacing: '.06em',
+          transition: 'background .15s',
+        }}
+        onMouseEnter={(e) => (e.currentTarget.style.background = T.surface2)}
+        onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
       >
         Limpiar filtros
       </button>
     </div>
-  )
-}
-
-// ─── Icons ─────────────────────────────────────────────────────────────────────
-function SearchIcon({ className }) {
-  return (
-    <svg
-      className={className}
-      width="16"
-      height="16"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      style={{ color: 'var(--color-text-muted)' }}
-    >
-      <circle cx="11" cy="11" r="8" />
-      <line x1="21" y1="21" x2="16.65" y2="16.65" />
-    </svg>
-  )
-}
-
-function FilterIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      <line x1="4" y1="6" x2="20" y2="6" />
-      <line x1="8" y1="12" x2="16" y2="12" />
-      <line x1="11" y1="18" x2="13" y2="18" />
-    </svg>
   )
 }
