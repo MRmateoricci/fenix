@@ -125,7 +125,7 @@ export default function Navbar() {
   }
 
   const opaque = scrolled || activeMenu !== null
-  const ink    = opaque ? '#16110B' : '#F2EBDC'
+  const ink    = '#16110B'
   const activeItem = NAV_ITEMS.find(i => i.label === activeMenu)
 
   return (
@@ -150,7 +150,7 @@ export default function Navbar() {
           {/* ── Left: Logo + nav links ────────────────────────────────────── */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 44 }}>
             <Link to="/" style={{ textDecoration: 'none', flexShrink: 0 }}>
-              <FenixLogo onDark={!opaque} />
+              <FenixLogo onDark={false} />
             </Link>
 
             <nav className="fnx-desktop-nav" aria-label="Categorías" style={{
@@ -190,14 +190,14 @@ export default function Navbar() {
                 placeholder="Buscar"
                 style={{
                   background: 'transparent', border: 'none', outline: 'none',
-                  borderBottom: `1px solid ${opaque ? 'rgba(22,17,11,0.3)' : 'rgba(242,235,220,0.4)'}`,
+                  borderBottom: `1px solid rgba(22,17,11,0.3)`,
                   width: 140, padding: '4px 26px 4px 0',
                   fontFamily: "'Hanken Grotesk', system-ui, sans-serif",
                   fontSize: 13.5, color: ink,
                   transition: 'border-color .2s, color .3s',
                 }}
                 onFocus={(e) => (e.currentTarget.style.borderBottomColor = ink)}
-                onBlur={(e)  => (e.currentTarget.style.borderBottomColor = opaque ? 'rgba(22,17,11,0.3)' : 'rgba(242,235,220,0.4)')}
+                onBlur={(e)  => (e.currentTarget.style.borderBottomColor = 'rgba(22,17,11,0.3)')}
               />
               <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke={ink} strokeWidth="1.6" strokeLinecap="round"
                 style={{ position: 'absolute', right: 0, opacity: 0.7, pointerEvents: 'none' }}>
@@ -383,9 +383,9 @@ function MobileMenu({ open, onClose, onNavigate }) {
             onClick={(e) => onNavigate(item, e)}
             style={{
               textDecoration: 'none', color: '#F2EBDC',
-              fontFamily: "'Newsreader', serif",
+              fontFamily: "'Playfair Display', serif",
               fontSize: 'clamp(34px, 5.4vw, 62px)',
-              lineHeight: 1.15, letterSpacing: '-.015em',
+              fontWeight: 500, lineHeight: 1.15, letterSpacing: '-.015em',
               transition: 'color .15s',
             }}
             onMouseEnter={(e) => (e.currentTarget.style.color = '#E0A24A')}
@@ -401,7 +401,7 @@ function MobileMenu({ open, onClose, onNavigate }) {
         fontFamily: "'Spline Sans Mono', monospace", fontSize: 12, color: '#8C8270',
         display: 'flex', gap: 26, flexWrap: 'wrap',
       }}>
-        <span>Av. Centenario 1234 · City Bell</span>
+        <span>C. Cantilo 745 · City Bell</span>
         <span>(221) 480-1977</span>
         <span>Lun a Sáb · 8:30–13 / 16–20</span>
       </div>

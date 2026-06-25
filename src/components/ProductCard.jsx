@@ -136,8 +136,8 @@ export default function ProductCard({ product }) {
       <div style={{ padding: '15px 2px 0', display: 'flex', flexDirection: 'column', flex: 1 }}>
         <Link to={`/products/${product.id}`} style={{ textDecoration: 'none', color: 'inherit' }}>
           <h3 style={{
-            fontFamily: "'Newsreader', serif",
-            fontWeight: 500, fontSize: 18, lineHeight: 1.25,
+            fontFamily: "'Playfair Display', serif",
+            fontWeight: 400, fontSize: 18, lineHeight: 1.25,
             margin: '0 0 12px', color: T.ink,
           }}>
             {product.name}

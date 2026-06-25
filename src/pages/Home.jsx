@@ -71,7 +71,7 @@ function HeroSection() {
     }
 
     const overlay = document.createElement('div')
-    overlay.style.cssText = 'position:fixed;inset:0;z-index:200;background:#000;pointer-events:none;transition:opacity 0.7s ease;'
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:200;background:#FAF7F0;pointer-events:none;transition:opacity 0.8s ease;'
     document.body.appendChild(overlay)
     overlay.getBoundingClientRect()
 
@@ -105,22 +105,21 @@ function HeroSection() {
       position: 'relative',
       minHeight: '100vh',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
-      textAlign: 'center', color: T.cream,
-      background: '#0D0905',
-      boxShadow: 'inset 0 0 220px 70px rgba(8,5,3,.62)',
+      textAlign: 'center', color: T.ink,
+      background: '#FAF7F0',
       overflow: 'hidden',
     }}>
-      {/* Gradient background — fades in during animation */}
+      {/* Warm radial glow — fades in as bulb lights up */}
       <div aria-hidden="true" style={{
         position: 'absolute', inset: 0, zIndex: 0,
         background: [
-          'radial-gradient(80% 62% at 50% 24%, rgba(224,162,74,.30), rgba(224,162,74,.06) 44%, transparent 64%)',
-          'linear-gradient(158deg, #271C11 0%, #17110A 54%, #0D0905 100%)',
+          'radial-gradient(62% 56% at 50% 15%, rgba(255,200,75,0.40), rgba(255,175,45,0.14) 48%, transparent 72%)',
+          'linear-gradient(180deg, #FBF4DF 0%, #FAF7F0 52%, #F7F4EF 100%)',
         ].join(','),
         ...fade(reached.bg, '1.4s'),
       }} />
 
-      {/* Pendant lamp */}
+      {/* Edison bulb on cord */}
       <div
         aria-hidden="true"
         className="fnx-lamp"
@@ -134,41 +133,34 @@ function HeroSection() {
           pointerEvents: 'none',
         }}
       >
-        {/* Bracket + cord + shade — appear together as lamp phase */}
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', ...fade(reached.lamp, '0.8s') }}>
-          <div style={{ width: 26, height: 5, borderRadius: '0 0 4px 4px', background: 'linear-gradient(#2a2017, #15100a)' }} />
-          <div style={{ width: 2, height: 128, background: 'linear-gradient(#0d0905, #241a10)' }} />
-          <div style={{
-            position: 'relative', width: 170, height: 92,
-            background: 'linear-gradient(168deg, #4a3720 0%, #2c2012 46%, #170f07 100%)',
-            borderRadius: '84px 84px 12px 12px / 100px 100px 12px 12px',
-            boxShadow: 'inset 14px 10px 26px rgba(255,206,140,0.16), inset -18px -6px 26px rgba(0,0,0,0.5)',
-          }}>
-            <div style={{ position: 'absolute', top: 14, left: 34, width: 46, height: 30, borderRadius: '50%', background: 'radial-gradient(circle, rgba(255,224,170,0.5), transparent 70%)', filter: 'blur(2px)' }} />
-            <div style={{ position: 'absolute', bottom: -3, left: '50%', transform: 'translateX(-50%)', width: 150, height: 18, borderRadius: '50%', background: 'radial-gradient(ellipse at center, rgba(255,206,130,0.95), rgba(255,180,90,0.35) 55%, transparent 72%)', boxShadow: '0 0 26px 6px rgba(255,190,110,0.45)' }} />
+        {/* Ceiling mount + cord + bulb */}
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', ...fade(reached.bulb, '0.9s') }}>
+          {/* Ceiling bracket */}
+          <div style={{ width: 22, height: 5, borderRadius: '0 0 3px 3px', background: 'linear-gradient(#8A8070, #6A6050)' }} />
+          {/* Cord */}
+          <div style={{ width: 2, height: 88, background: 'linear-gradient(#9A9888, #7A7868)' }} />
+
+          {/* Edison bulb with glow filter */}
+          <div
+            className={reached.lamp ? 'fnx-bulb' : ''}
+            style={{
+              filter: reached.lamp
+                ? 'drop-shadow(0 0 18px rgba(255,162,38,0.95)) drop-shadow(0 0 54px rgba(255,140,22,0.62)) drop-shadow(0 0 110px rgba(255,125,10,0.32))'
+                : 'none',
+              transition: 'filter 0.8s ease',
+            }}
+          >
+            <EdisonBulbSVG lit={reached.lamp} />
           </div>
         </div>
 
-        {/* Bulb — appears first, before the shade */}
-        <div
-          className="fnx-bulb"
-          style={{
-            marginTop: 4, width: 26, height: 30,
-            borderRadius: '50% 50% 48% 48%',
-            background: 'radial-gradient(circle at 50% 38%, #FFF6E2 0%, #FFD27E 42%, #E89B36 78%, #9A5e18 100%)',
-            boxShadow: '0 0 30px 12px rgba(255,196,110,0.55), 0 0 90px 36px rgba(255,176,84,0.3)',
-            animation: reached.bulb ? 'fnx-flicker 5s ease-in-out infinite' : 'none',
-            ...fade(reached.bulb, '0.9s'),
-          }}
-        />
-
-        {/* Light cone */}
+        {/* Light cone below bulb */}
         <div style={{
-          position: 'absolute', top: 150, left: '50%', transform: 'translateX(-50%)',
-          width: 340, height: 520,
-          background: 'linear-gradient(180deg, rgba(255,206,140,0.30) 0%, rgba(255,196,120,0.10) 34%, transparent 72%)',
-          clipPath: 'polygon(40% 0, 60% 0, 100% 100%, 0 100%)',
-          filter: 'blur(12px)', mixBlendMode: 'screen',
+          position: 'absolute', top: 228, left: '50%', transform: 'translateX(-50%)',
+          width: 380, height: 560,
+          background: 'linear-gradient(180deg, rgba(255,200,75,0.22) 0%, rgba(255,180,55,0.08) 36%, transparent 72%)',
+          clipPath: 'polygon(38% 0, 62% 0, 100% 100%, 0 100%)',
+          filter: 'blur(20px)',
           ...fade(reached.cone, '1.2s'),
         }} />
       </div>
@@ -178,24 +170,25 @@ function HeroSection() {
         <div style={{
           fontFamily: "'Spline Sans Mono', monospace",
           fontSize: 12.5, letterSpacing: '.26em', textTransform: 'uppercase',
-          color: 'rgba(242,235,220,0.66)', marginBottom: 26,
+          color: 'rgba(22,17,11,0.50)', marginBottom: 26,
           ...rise(reached.eyebrow, '0.7s'),
         }}>
           City Bell · desde 1977
         </div>
         <h1 style={{
-          fontFamily: "'Newsreader', serif",
+          fontFamily: "'Playfair Display', serif",
           fontWeight: 500, margin: 0,
           fontSize: 'clamp(54px, 8vw, 116px)',
           lineHeight: .96, letterSpacing: '-.02em',
-          color: '#F5EFE0',
+          color: T.ink,
           ...rise(reached.h1, '0.8s'),
         }}>
           Tu casa,<br />
-          <em style={{ fontStyle: 'italic' }}>en su mejor luz</em>
+          <em style={{ fontStyle: 'normal' }}>en su mejor luz</em>
         </h1>
         <p style={{
-          maxWidth: 520, margin: '26px auto 0', fontSize: 17.5, lineHeight: 1.6, color: 'rgba(242,235,220,0.8)',
+          maxWidth: 520, margin: '26px auto 0', fontSize: 17.5, lineHeight: 1.6,
+          color: 'rgba(22,17,11,0.62)',
           ...rise(reached.sub, '0.7s'),
         }}>
           Luminarias, materiales eléctricos y el consejo de quien lo hace, con buen gusto, desde hace casi medio siglo.
@@ -210,6 +203,79 @@ function HeroSection() {
   )
 }
 
+function EdisonBulbSVG({ lit }) {
+  const glass      = lit ? 'rgba(255,195,72,0.48)' : 'rgba(235,212,158,0.22)'
+  const glassStroke= lit ? 'rgba(200,148,48,0.52)' : 'rgba(170,145,98,0.32)'
+  const innerGlow  = lit ? 'rgba(255,222,108,0.30)' : 'transparent'
+  const filament   = lit ? '#FF9830' : '#8B6B30'
+  const metal      = '#C4BC9A'
+  const metalStroke= '#9E9676'
+
+  return (
+    <svg width="100" height="190" viewBox="0 0 100 190" fill="none" xmlns="http://www.w3.org/2000/svg">
+      {/* Inner warm glow */}
+      <circle cx="50" cy="52" r="30" fill={innerGlow} />
+
+      {/* Glass globe — A60 bulb profile */}
+      <path
+        d="M 50 10
+           C 24 10 8 26 8 52
+           C 8 70 18 84 34 92
+           L 34 106
+           L 66 106
+           L 66 92
+           C 82 84 92 70 92 52
+           C 92 26 76 10 50 10 Z"
+        fill={glass}
+        stroke={glassStroke}
+        strokeWidth="1.5"
+      />
+
+      {/* Specular highlight */}
+      <path
+        d="M 20 32 Q 26 17 40 12"
+        stroke="rgba(255,255,255,0.55)"
+        strokeWidth="2.5"
+        strokeLinecap="round"
+      />
+
+      {/* Filament support rods */}
+      <line x1="40" y1="104" x2="40" y2="74" stroke="#B09060" strokeWidth="0.9" opacity="0.75" />
+      <line x1="60" y1="104" x2="60" y2="74" stroke="#B09060" strokeWidth="0.9" opacity="0.75" />
+      <line x1="40" y1="80" x2="60" y2="80" stroke="#B09060" strokeWidth="0.8" opacity="0.55" />
+
+      {/* Edison filament — looped arch */}
+      <path
+        d="M 40 74 L 40 58 Q 40 46 50 44 Q 60 46 60 58 L 60 74"
+        stroke={filament} strokeWidth="1.6" strokeLinecap="round"
+      />
+      {/* Inner coil detail */}
+      <path
+        d="M 43 58 C 43 53 50 51 50 55 C 50 59 57 57 57 52 C 57 47 50 45 50 45"
+        stroke={filament} strokeWidth="1.2" strokeLinecap="round"
+      />
+
+      {/* Metal collar */}
+      <rect x="30" y="106" width="40" height="7" rx="2" fill={metal} stroke={metalStroke} strokeWidth="1" />
+
+      {/* Screw base */}
+      <rect x="28" y="113" width="44" height="46" rx="3.5" fill={metal} />
+      {/* Highlight strip */}
+      <rect x="29" y="113" width="8" height="46" rx="2" fill="rgba(255,255,255,0.16)" />
+      {/* Thread lines */}
+      {[119, 125, 131, 137, 143, 149, 155].map(y => (
+        <line key={y} x1="28" y1={y} x2="72" y2={y} stroke={metalStroke} strokeWidth="0.8" opacity="0.65" />
+      ))}
+
+      {/* Insulator disc */}
+      <ellipse cx="50" cy="159" rx="22" ry="3.5" fill="#6E6454" />
+      {/* Contact dome */}
+      <ellipse cx="50" cy="163" rx="14" ry="7" fill="#D4C880" />
+      <ellipse cx="50" cy="167" rx="9" ry="4.5" fill="#C4B868" />
+    </svg>
+  )
+}
+
 function HeroCTA() {
   const [hovered, setHovered] = useState(false)
   const navigate = useNavigate()
@@ -219,9 +285,9 @@ function HeroCTA() {
       onClick={(e) => { e.preventDefault(); navigate('/products') }}
       style={{
         textDecoration: 'none', display: 'inline-block',
-        border: `1px solid ${hovered ? '#F7F4EF' : 'rgba(242,235,220,0.5)'}`,
-        background: hovered ? '#F7F4EF' : 'rgba(20,16,10,0.12)',
-        color: hovered ? '#16110B' : T.cream,
+        border: `1px solid ${hovered ? T.ink : 'rgba(22,17,11,0.42)'}`,
+        background: hovered ? T.ink : 'transparent',
+        color: hovered ? T.paper : T.ink,
         fontSize: 13, fontWeight: 500,
         letterSpacing: '.16em', textTransform: 'uppercase',
         padding: '16px 34px', borderRadius: 2,
@@ -246,7 +312,7 @@ function ScrollIndicator({ visible = true, rm = false }) {
         transform: 'translateX(-50%)', zIndex: 2,
         textDecoration: 'none',
         display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 9,
-        color: hovered ? T.cream : 'rgba(242,235,220,0.6)',
+        color: hovered ? T.ink : 'rgba(22,17,11,0.50)',
         fontFamily: "'Spline Sans Mono', monospace",
         fontSize: 10.5, letterSpacing: '.16em', textTransform: 'uppercase',
         opacity: visible ? 1 : 0,
@@ -274,7 +340,7 @@ function CategoriasSection() {
   return (
     <section id="categorias" style={{ maxWidth: 1320, margin: '0 auto', padding: '96px 40px 30px', scrollMarginTop: 90 }}>
       <h2 style={{
-        fontFamily: "'Newsreader', serif", fontWeight: 500,
+        fontFamily: "'Playfair Display', serif", fontWeight: 500,
         fontSize: 'clamp(32px, 3.8vw, 52px)', lineHeight: 1.0,
         margin: '0 0 48px', color: T.ink, letterSpacing: '-.015em', textAlign: 'center',
       }}>
@@ -323,7 +389,7 @@ function CategoryCard({ cat, onClick }) {
         </span>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginTop: 14 }}>
-        <span style={{ fontFamily: "'Newsreader', serif", fontSize: 20, color: T.ink }}>
+        <span style={{ fontFamily: "'Playfair Display', serif", fontWeight: 400, fontSize: 20, color: T.ink }}>
           {cat.name}
         </span>
         <svg
@@ -352,7 +418,7 @@ function DestacadosSection() {
           Ofertas
         </div>
         <h2 style={{
-          fontFamily: "'Newsreader', serif", fontWeight: 500,
+          fontFamily: "'Playfair Display', serif", fontWeight: 500,
           fontSize: 'clamp(32px, 3.8vw, 52px)', lineHeight: 1.0,
           margin: 0, color: T.ink, letterSpacing: '-.015em',
         }}>
@@ -456,7 +522,7 @@ function FeaturedCard({ product, onAdd }) {
       </Link>
       <div style={{ padding: '16px 2px 0', display: 'flex', flexDirection: 'column', flex: 1 }}>
         <Link to={`/products/${product.id}`} style={{ textDecoration: 'none', color: 'inherit' }}>
-          <h3 style={{ fontFamily: "'Newsreader', serif", fontWeight: 500, fontSize: 19, lineHeight: 1.2, margin: '0 0 12px', color: T.ink }}>
+          <h3 style={{ fontFamily: "'Playfair Display', serif", fontWeight: 400, fontSize: 19, lineHeight: 1.2, margin: '0 0 12px', color: T.ink }}>
             {product.name}
           </h3>
         </Link>
@@ -578,7 +644,7 @@ function HistoriaSection() {
             <span style={{ width: 34, height: 1, background: '#473A28' }} />
           </div>
           <p style={{
-            fontFamily: "'Newsreader', serif",
+            fontFamily: "'Playfair Display', serif",
             fontSize: 'clamp(27px, 3.1vw, 42px)', lineHeight: 1.28,
             fontWeight: 400, margin: 0, color: '#F2EBDC', letterSpacing: '-.01em',
           }}>
@@ -610,7 +676,7 @@ function ContactoSection() {
             <span style={{ width: 34, height: 1, background: T.hairlineStrong }} />
           </div>
           <h2 style={{
-            fontFamily: "'Newsreader', serif", fontWeight: 500,
+            fontFamily: "'Playfair Display', serif", fontWeight: 500,
             fontSize: 'clamp(32px, 3.8vw, 52px)', lineHeight: 1.0,
             margin: '0 0 30px', color: T.ink, letterSpacing: '-.015em',
           }}>
@@ -618,7 +684,7 @@ function ContactoSection() {
           </h2>
           <div style={{ borderTop: `1px solid ${T.hairline}` }}>
             {[
-              { label: 'dirección', value: <span>Av. Centenario 1234, City Bell<br />La Plata, Buenos Aires</span> },
+              { label: 'dirección', value: <span>C. Cantilo 745, City Bell<br />La Plata, Buenos Aires</span> },
               { label: 'horarios',  value: 'Lunes a Sábado · 8:30–13:00 / 16:00–20:00' },
               { label: 'teléfono', value: '(221) 480-1977' },
             ].map(({ label, value }) => (
@@ -636,26 +702,26 @@ function ContactoSection() {
           </div>
         </div>
 
-        {/* Map placeholder */}
+        {/* Map embed */}
         <figure style={{ margin: 0, display: 'flex', flexDirection: 'column' }}>
           <div style={{
             position: 'relative', flex: 1, minHeight: 360,
             borderRadius: 3, overflow: 'hidden',
-            background: T.surface2, border: `1px solid ${T.hairline}`,
+            border: `1px solid ${T.hairline}`,
           }}>
-            <div style={{
-              position: 'absolute', inset: 0,
-              backgroundImage: `linear-gradient(rgba(150,140,122,0.16) 1px, transparent 1px), linear-gradient(90deg, rgba(150,140,122,0.16) 1px, transparent 1px)`,
-              backgroundSize: '48px 48px',
-            }} />
-            <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 11 }}>
-              <span style={{ width: 42, height: 42, borderRadius: '50% 50% 50% 0', background: T.red, transform: 'rotate(-45deg)', boxShadow: '0 12px 26px -10px rgba(204,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <span style={{ width: 13, height: 13, borderRadius: '50%', background: T.paper, transform: 'rotate(45deg)' }} />
-              </span>
-            </div>
+            <iframe
+              title="Ubicación Fénix"
+              src="https://maps.google.com/maps?q=Electricidad+E+Iluminacion+Fenix+City+Bell+La+Plata&output=embed"
+              width="100%"
+              height="100%"
+              style={{ position: 'absolute', inset: 0, border: 0, display: 'block', filter: 'saturate(0.85) contrast(0.95)' }}
+              allowFullScreen=""
+              loading="lazy"
+              referrerPolicy="no-referrer-when-downgrade"
+            />
           </div>
           <figcaption style={{ fontFamily: "'Spline Sans Mono', monospace", fontSize: 10.5, color: T.muted2, marginTop: 11 }}>
-            MAPA · Av. Centenario 1234, City Bell
+            MAPA · C. Cantilo 745, City Bell
           </figcaption>
         </figure>
       </div>
@@ -692,7 +758,7 @@ function ComoLlegarLink() {
   const [hovered, setHovered] = useState(false)
   return (
     <a
-      href="https://maps.google.com/?q=Av.+Centenario+1234+City+Bell+La+Plata"
+      href="https://maps.google.com/?q=Electricidad+E+Iluminacion+Fenix+City+Bell+La+Plata"
       target="_blank" rel="noopener noreferrer"
       style={{
         textDecoration: 'none', color: T.ink,

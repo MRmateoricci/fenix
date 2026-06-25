@@ -124,7 +124,7 @@ function CatalogHeader({ filters }) {
 
       {/* Page title */}
       <h1 style={{
-        fontFamily: "'Newsreader', serif",
+        fontFamily: "'Playfair Display', serif",
         fontWeight: 500, fontSize: 'clamp(38px, 5vw, 64px)',
         lineHeight: 0.94, letterSpacing: '-.02em',
         color: T.ink, margin: 0,
@@ -478,7 +478,7 @@ function FilterDrawer({ open, onClose, filters }) {
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           padding: '18px 24px', borderBottom: `1px solid ${T.hairline}`,
         }}>
-          <span style={{ fontFamily: "'Newsreader', serif", fontSize: 20, color: T.ink }}>Filtros</span>
+          <span style={{ fontFamily: "'Playfair Display', serif", fontWeight: 400, fontSize: 20, color: T.ink }}>Filtros</span>
           <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: T.muted, display: 'flex', padding: 4 }} aria-label="Cerrar">
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
               <path d="m6 6 12 12M18 6 6 18" />
@@ -517,7 +517,7 @@ function EmptyState({ onClear }) {
         <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /><line x1="8" y1="11" x2="14" y2="11" />
       </svg>
       <div>
-        <p style={{ fontFamily: "'Newsreader', serif", fontSize: 22, color: T.ink, marginBottom: 8 }}>
+        <p style={{ fontFamily: "'Playfair Display', serif", fontWeight: 400, fontSize: 22, color: T.ink, marginBottom: 8 }}>
           Sin resultados
         </p>
         <p style={{ fontFamily: "'Hanken Grotesk', system-ui, sans-serif", fontSize: 14, color: T.muted }}>

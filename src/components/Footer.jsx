@@ -29,8 +29,8 @@ export default function Footer() {
               <FenixLogo onDark />
             </div>
             <p style={{
-              fontFamily: "'Newsreader', serif", fontStyle: 'italic',
-              fontSize: 15, lineHeight: 1.55, color: '#8C8270', margin: 0,
+              fontFamily: "'Playfair Display', serif", fontStyle: 'italic',
+              fontWeight: 400, fontSize: 15, lineHeight: 1.55, color: '#8C8270', margin: 0,
             }}>
               Iluminando los hogares de City Bell desde 1977.
             </p>

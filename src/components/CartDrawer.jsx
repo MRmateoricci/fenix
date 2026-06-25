@@ -2,199 +2,126 @@ import { useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useCart } from '../context/CartContext'
 
+const T = {
+  paper:    '#F7F4EF',
+  panel:    '#FBF8F3',
+  hairline: '#DED6C7',
+  ink:      '#16110B',
+  ink2:     '#2A2118',
+  muted:    '#8A8175',
+  muted2:   '#9A917F',
+  red:      '#CC0000',
+}
+
 const fmt = (n) =>
-  new Intl.NumberFormat('es-AR', {
-    style: 'currency',
-    currency: 'ARS',
-    maximumFractionDigits: 0,
-  }).format(n)
+  new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(n)
 
 export default function CartDrawer({ open, onClose }) {
   const { items, removeItem, updateQuantity, totalPrice } = useCart()
   const navigate = useNavigate()
 
   useEffect(() => {
-    function handleKey(e) {
-      if (e.key === 'Escape') onClose()
-    }
+    function handleKey(e) { if (e.key === 'Escape') onClose() }
     if (open) document.addEventListener('keydown', handleKey)
     return () => document.removeEventListener('keydown', handleKey)
   }, [open, onClose])
 
   useEffect(() => {
     document.body.style.overflow = open ? 'hidden' : ''
-    return () => {
-      document.body.style.overflow = ''
-    }
+    return () => { document.body.style.overflow = '' }
   }, [open])
 
-  function goTo(path) {
-    onClose()
-    navigate(path)
-  }
+  function goTo(path) { onClose(); navigate(path) }
 
   return (
     <>
       {/* Backdrop */}
       <div
         onClick={onClose}
-        className="fixed inset-0 z-40 bg-black/60 transition-opacity duration-300"
-        style={{ opacity: open ? 1 : 0, pointerEvents: open ? 'auto' : 'none' }}
         aria-hidden="true"
+        style={{
+          position: 'fixed', inset: 0, zIndex: 40,
+          background: 'rgba(10,8,5,0.52)',
+          opacity: open ? 1 : 0,
+          pointerEvents: open ? 'auto' : 'none',
+          transition: 'opacity 0.3s ease',
+        }}
       />
 
-      {/* Drawer panel */}
+      {/* Drawer */}
       <aside
-        className="fixed right-0 top-0 h-full w-full z-50 flex flex-col transition-transform duration-300 ease-in-out"
-        style={{
-          maxWidth: '400px',
-          backgroundColor: 'var(--color-surface)',
-          transform: open ? 'translateX(0)' : 'translateX(100%)',
-        }}
         aria-label="Carrito de compras"
         aria-hidden={!open}
+        style={{
+          position: 'fixed', right: 0, top: 0,
+          height: '100%', width: '100%', maxWidth: 400,
+          zIndex: 50, display: 'flex', flexDirection: 'column',
+          background: T.panel,
+          transform: open ? 'translateX(0)' : 'translateX(100%)',
+          transition: 'transform 0.32s cubic-bezier(0.32,0,0.15,1)',
+          boxShadow: '-8px 0 48px rgba(10,8,5,0.16)',
+        }}
       >
         {/* Header */}
-        <div
-          className="flex items-center justify-between px-6 py-4 shrink-0"
-          style={{ borderBottom: '1px solid var(--color-border)' }}
-        >
-          <h2
-            className="text-lg font-semibold"
-            style={{ color: 'var(--color-text)' }}
-          >
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '0 28px', height: 64, flexShrink: 0,
+          borderBottom: `1px solid ${T.hairline}`,
+        }}>
+          <h2 style={{
+            fontFamily: "'Playfair Display', serif",
+            fontWeight: 400, fontSize: 22, color: T.ink, margin: 0,
+          }}>
             Tu carrito
           </h2>
           <button
             onClick={onClose}
-            className="p-1.5 rounded transition-colors"
-            style={{ color: 'var(--color-text-muted)' }}
-            onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--color-text)')}
-            onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--color-text-muted)')}
             aria-label="Cerrar carrito"
+            style={{
+              background: 'none', border: 'none', cursor: 'pointer',
+              color: T.muted, padding: 6, display: 'flex',
+              transition: 'color .15s',
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.color = T.ink)}
+            onMouseLeave={(e) => (e.currentTarget.style.color = T.muted)}
           >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
-              <line x1="18" y1="6" x2="6" y2="18" />
-              <line x1="6" y1="6" x2="18" y2="18" />
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
+              <path d="m6 6 12 12M18 6 6 18" />
             </svg>
           </button>
         </div>
 
-        {/* Scrollable items */}
-        <div className="flex-1 overflow-y-auto">
+        {/* Items */}
+        <div style={{ flex: 1, overflowY: 'auto' }}>
           {items.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full gap-5 px-6 text-center">
-              <svg
-                width="56"
-                height="56"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                style={{ color: 'var(--color-text-muted)' }}
-              >
-                <path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z" />
-                <line x1="3" y1="6" x2="21" y2="6" />
-                <path d="M16 10a4 4 0 01-8 0" />
+            <div style={{
+              display: 'flex', flexDirection: 'column',
+              alignItems: 'center', justifyContent: 'center',
+              height: '100%', gap: 20, padding: '0 32px', textAlign: 'center',
+            }}>
+              <svg width="50" height="50" viewBox="0 0 24 24" fill="none"
+                stroke={T.muted2} strokeWidth="1.15" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M6 7h13l-1.2 9.5a2 2 0 0 1-2 1.7H9.2a2 2 0 0 1-2-1.7L6 7Z" />
+                <path d="M9 7a3 3 0 0 1 6 0" />
               </svg>
-              <p style={{ color: 'var(--color-text-muted)' }}>Tu carrito está vacío</p>
-              <button
-                onClick={() => goTo('/products')}
-                className="px-6 py-2.5 text-sm font-medium rounded transition-colors"
-                style={{ backgroundColor: 'var(--color-primary)', color: '#fff' }}
-                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
-                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
-              >
-                Ver productos
-              </button>
+              <p style={{
+                fontFamily: "'Hanken Grotesk', system-ui, sans-serif",
+                fontSize: 15, color: T.muted, margin: 0,
+              }}>
+                Tu carrito está vacío
+              </p>
+              <CtaButton onClick={() => goTo('/products')}>Ver productos</CtaButton>
             </div>
           ) : (
-            <ul>
+            <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
               {items.map((item) => (
-                <li
+                <CartItem
                   key={item.id}
-                  className="flex gap-4 p-4"
-                  style={{ borderBottom: '1px solid var(--color-border)' }}
-                >
-                  {/* Thumbnail */}
-                  <img
-                    src={item.image}
-                    alt={item.name}
-                    className="w-16 h-16 object-cover rounded shrink-0"
-                    style={{ backgroundColor: 'var(--color-surface-2)' }}
-                  />
-
-                  {/* Details */}
-                  <div className="flex-1 min-w-0">
-                    <p
-                      className="text-sm font-medium truncate"
-                      style={{ color: 'var(--color-text)' }}
-                    >
-                      {item.name}
-                    </p>
-                    <p className="text-xs mb-2" style={{ color: 'var(--color-text-muted)' }}>
-                      {item.category}
-                    </p>
-
-                    <div className="flex items-center justify-between">
-                      {/* Qty controls */}
-                      <div
-                        className="flex items-center rounded"
-                        style={{ border: '1px solid var(--color-border)' }}
-                      >
-                        <button
-                          onClick={() => updateQuantity(item.id, item.quantity - 1)}
-                          className="w-7 h-7 flex items-center justify-center text-lg leading-none transition-colors"
-                          style={{ color: 'var(--color-text-muted)' }}
-                          onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--color-text)')}
-                          onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--color-text-muted)')}
-                          aria-label="Disminuir cantidad"
-                        >
-                          −
-                        </button>
-                        <span
-                          className="w-7 text-center text-sm"
-                          style={{ color: 'var(--color-text)' }}
-                        >
-                          {item.quantity}
-                        </span>
-                        <button
-                          onClick={() => updateQuantity(item.id, item.quantity + 1)}
-                          className="w-7 h-7 flex items-center justify-center text-lg leading-none transition-colors"
-                          style={{ color: 'var(--color-text-muted)' }}
-                          onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--color-text)')}
-                          onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--color-text-muted)')}
-                          aria-label="Aumentar cantidad"
-                        >
-                          +
-                        </button>
-                      </div>
-
-                      <span className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>
-                        {fmt(item.price * item.quantity)}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Remove */}
-                  <button
-                    onClick={() => removeItem(item.id)}
-                    className="self-start mt-0.5 p-1 transition-colors shrink-0"
-                    style={{ color: 'var(--color-text-muted)' }}
-                    onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--color-primary)')}
-                    onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--color-text-muted)')}
-                    aria-label={`Eliminar ${item.name}`}
-                  >
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                      <polyline points="3 6 5 6 21 6" />
-                      <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
-                      <path d="M10 11v6M14 11v6" />
-                      <path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2" />
-                    </svg>
-                  </button>
-                </li>
+                  item={item}
+                  onRemove={removeItem}
+                  onUpdate={updateQuantity}
+                />
               ))}
             </ul>
           )}
@@ -202,28 +129,157 @@ export default function CartDrawer({ open, onClose }) {
 
         {/* Footer */}
         {items.length > 0 && (
-          <div
-            className="shrink-0 p-6 space-y-4"
-            style={{ borderTop: '1px solid var(--color-border)' }}
-          >
-            <div className="flex items-center justify-between">
-              <span style={{ color: 'var(--color-text-muted)' }}>Subtotal</span>
-              <span className="text-xl font-semibold" style={{ color: 'var(--color-text)' }}>
+          <div style={{
+            flexShrink: 0, padding: '22px 28px 30px',
+            borderTop: `1px solid ${T.hairline}`,
+          }}>
+            <div style={{
+              display: 'flex', alignItems: 'baseline',
+              justifyContent: 'space-between', marginBottom: 20,
+            }}>
+              <span style={{
+                fontFamily: "'Spline Sans Mono', monospace",
+                fontSize: 11, letterSpacing: '.15em', textTransform: 'uppercase',
+                color: T.muted2,
+              }}>
+                Subtotal
+              </span>
+              <span style={{
+                fontFamily: "'Spline Sans Mono', monospace",
+                fontSize: 19, fontWeight: 500, color: T.ink,
+              }}>
                 {fmt(totalPrice)}
               </span>
             </div>
-            <button
-              onClick={() => goTo('/cart')}
-              className="w-full py-3 font-medium rounded tracking-wide transition-colors"
-              style={{ backgroundColor: 'var(--color-primary)', color: '#fff' }}
-              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
-              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
-            >
-              Ver carrito completo
-            </button>
+            <CtaButton onClick={() => goTo('/cart')} fullWidth>Ver carrito completo</CtaButton>
           </div>
         )}
       </aside>
     </>
+  )
+}
+
+function CartItem({ item, onRemove, onUpdate }) {
+  return (
+    <li style={{
+      display: 'flex', gap: 14, padding: '18px 28px',
+      borderBottom: `1px solid ${T.hairline}`,
+    }}>
+      {/* Thumbnail */}
+      <div style={{
+        width: 62, height: 62, flexShrink: 0,
+        borderRadius: 2, overflow: 'hidden',
+        background: '#E7E0D3', border: `1px solid ${T.hairline}`,
+      }}>
+        {item.image && (
+          <img src={item.image} alt={item.name}
+            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+        )}
+      </div>
+
+      {/* Info */}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <p style={{
+          fontFamily: "'Playfair Display', serif",
+          fontSize: 15, fontWeight: 400, color: T.ink,
+          margin: '0 0 3px',
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        }}>
+          {item.name}
+        </p>
+        <p style={{
+          fontFamily: "'Spline Sans Mono', monospace",
+          fontSize: 9.5, letterSpacing: '.1em', textTransform: 'uppercase',
+          color: T.muted2, margin: '0 0 12px',
+        }}>
+          {item.category}
+        </p>
+
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          {/* Qty */}
+          <div style={{
+            display: 'inline-flex', alignItems: 'center',
+            border: `1px solid ${T.hairline}`, borderRadius: 2,
+          }}>
+            {[
+              { label: '−', delta: -1 },
+              { label: '+', delta: +1 },
+            ].reduce((acc, btn, i) => {
+              const el = (
+                <button
+                  key={btn.label}
+                  onClick={() => onUpdate(item.id, item.quantity + btn.delta)}
+                  aria-label={btn.delta < 0 ? 'Disminuir' : 'Aumentar'}
+                  style={{
+                    width: 28, height: 28, display: 'flex',
+                    alignItems: 'center', justifyContent: 'center',
+                    background: 'none', border: 'none', cursor: 'pointer',
+                    color: T.muted, fontSize: 16, lineHeight: 1,
+                    transition: 'color .12s',
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.color = T.ink)}
+                  onMouseLeave={(e) => (e.currentTarget.style.color = T.muted)}
+                >
+                  {btn.label}
+                </button>
+              )
+              if (i === 0) return [el, <span key="qty" style={{
+                width: 28, textAlign: 'center',
+                fontFamily: "'Spline Sans Mono', monospace",
+                fontSize: 13, color: T.ink,
+              }}>{item.quantity}</span>]
+              return [...acc, el]
+            }, [])}
+          </div>
+
+          <span style={{
+            fontFamily: "'Spline Sans Mono', monospace",
+            fontSize: 14, fontWeight: 500, color: T.ink,
+          }}>
+            {fmt(item.price * item.quantity)}
+          </span>
+        </div>
+      </div>
+
+      {/* Remove */}
+      <button
+        onClick={() => onRemove(item.id)}
+        aria-label={`Eliminar ${item.name}`}
+        style={{
+          alignSelf: 'flex-start', background: 'none', border: 'none',
+          cursor: 'pointer', padding: 3, color: T.muted, flexShrink: 0,
+          transition: 'color .12s',
+        }}
+        onMouseEnter={(e) => (e.currentTarget.style.color = T.red)}
+        onMouseLeave={(e) => (e.currentTarget.style.color = T.muted)}
+      >
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+          <path d="M10 11v6M14 11v6" />
+        </svg>
+      </button>
+    </li>
+  )
+}
+
+function CtaButton({ onClick, children, fullWidth }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        width: fullWidth ? '100%' : 'auto',
+        background: T.ink, color: T.paper, border: 'none', cursor: 'pointer',
+        fontFamily: "'Hanken Grotesk', system-ui, sans-serif",
+        fontSize: 12.5, fontWeight: 500,
+        letterSpacing: '.15em', textTransform: 'uppercase',
+        padding: fullWidth ? '15px 0' : '13px 28px',
+        borderRadius: 2, transition: 'background .2s',
+      }}
+      onMouseEnter={(e) => (e.currentTarget.style.background = T.ink2)}
+      onMouseLeave={(e) => (e.currentTarget.style.background = T.ink)}
+    >
+      {children}
+    </button>
   )
 }
