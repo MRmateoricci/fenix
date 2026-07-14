@@ -1,0 +1,25 @@
+export const SEO = {
+  siteUrl:     'https://fenixiluminacion.com.ar',
+  siteName:    'Fénix Electricidad e Iluminación',
+  description: 'Luminarias, materiales eléctricos y asesoramiento experto en City Bell, La Plata. Atendemos desde 1977 — tres generaciones de familia.',
+  ogImage:     'https://fenixiluminacion.com.ar/og-image.jpg',
+
+  business: {
+    name:        'Fénix Electricidad e Iluminación',
+    address:     'C. Cantilo 745, City Bell, La Plata, Buenos Aires',
+    streetAddress: 'Calle Cantilo 745',
+    locality:    'City Bell',
+    region:      'Buenos Aires',
+    postalCode:  '1897',
+    country:     'AR',
+    phone:       '+542214801977',
+    whatsapp:    '5492214801977',
+    email:       'contacto@fenixiluminacion.com.ar',
+    hours:       'Mo-Sa 08:30-13:00,16:00-20:00',
+    hoursDisplay:'Lunes a Sábado · 8:30–13:00 / 16:00–20:00',
+    instagram:   'https://instagram.com/fenixcitybell',
+    geo: { lat: -34.8917, lng: -58.0556 },
+    mapsUrl:     'https://maps.google.com/?q=Electricidad+E+Iluminacion+Fenix+City+Bell+La+Plata',
+    founded:     '1977',
+  },
+}

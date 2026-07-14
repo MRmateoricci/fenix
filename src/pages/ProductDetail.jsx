@@ -1,17 +1,12 @@
-import { useState } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
-import { getProductById, getProductsByCategory } from '../data/products'
+import { useAdmin } from '../context/AdminContext'
 import { useCart } from '../context/CartContext'
+import { useAuth } from '../context/AuthContext'
+import { useFavorites } from '../context/FavoritesContext'
 import ProductCard from '../components/ProductCard'
-
-// Light-mode tokens — only this page
-const PD = {
-  bg:       '#F5F5F5',
-  surface:  '#EBEBEB',
-  text:     '#111111',
-  muted:    '#555555',
-  border:   '#E0E0E0',
-}
+import PageSEO from '../components/SEO'
+import { SEO as seoCfg } from '../config/seo'
 
 const fmt = (n) =>
   new Intl.NumberFormat('es-AR', {
@@ -20,29 +15,73 @@ const fmt = (n) =>
     maximumFractionDigits: 0,
   }).format(n)
 
+const REVIEWS_API = import.meta.env.VITE_API_URL || ''
+
+function useProductReviews(productId) {
+  const [reviews, setReviews] = useState([])
+  const [average, setAverage] = useState(0)
+  const [count, setCount]     = useState(0)
+  const [loading, setLoading] = useState(true)
+
+  const reload = useCallback(() => {
+    if (productId == null) return
+    setLoading(true)
+    fetch(`${REVIEWS_API}/api/reviews/${productId}`)
+      .then((res) => (res.ok ? res.json() : { reviews: [], average: 0, count: 0 }))
+      .then((data) => {
+        setReviews(data.reviews)
+        setAverage(data.average)
+        setCount(data.count)
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [productId])
+
+  useEffect(() => { reload() }, [reload])
+
+  return { reviews, average, count, loading, reload }
+}
+
 export default function ProductDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
   const { addItem } = useCart()
-  const product = getProductById(id)
+  const { products } = useAdmin()
+  const { isAuthenticated } = useAuth()
+  const { isFavorite, toggleFavorite } = useFavorites()
+  const product = products.find(p => p.id === id)
+  const reviewsData = useProductReviews(product?.id)
 
   const [qty, setQty]     = useState(1)
   const [added, setAdded] = useState(false)
+  const [selectedColor, setSelectedColor] = useState(product?.colors?.[0] ?? null)
+  const [selectedSize, setSelectedSize] = useState(product?.sizes?.[0] ?? null)
 
-  // ── Not found ────────────────────────────────────────────────────────────────
+  useEffect(() => {
+    setSelectedColor(product?.colors?.[0] ?? null)
+    setSelectedSize(product?.sizes?.[0] ?? null)
+  }, [product?.id])
+
+  function handleToggleFavorite() {
+    if (!isAuthenticated) { navigate('/login'); return }
+    toggleFavorite(product.id)
+  }
+
   if (!product) {
     return (
-      <div
-        className="flex flex-col items-center justify-center min-h-[60vh] gap-6"
-        style={{ backgroundColor: 'var(--color-bg)' }}
-      >
+      <div style={{
+        display: 'flex', flexDirection: 'column', alignItems: 'center',
+        justifyContent: 'center', minHeight: '60vh', gap: 24,
+        backgroundColor: 'var(--color-bg)',
+      }}>
         <p style={{ color: 'var(--color-text-muted)' }}>Producto no encontrado.</p>
         <button
           onClick={() => navigate('/products')}
-          className="px-6 py-3 rounded-lg text-sm font-medium transition-colors"
-          style={{ backgroundColor: 'var(--color-primary)', color: '#fff' }}
-          onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
-          onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
+          style={{
+            padding: '12px 28px', borderRadius: 8, fontSize: 14, fontWeight: 500,
+            backgroundColor: 'var(--color-primary)', color: '#fff', border: 'none',
+            cursor: 'pointer',
+          }}
         >
           Ver catálogo
         </button>
@@ -50,7 +89,6 @@ export default function ProductDetail() {
     )
   }
 
-  // ── Add to cart ──────────────────────────────────────────────────────────────
   function handleAdd() {
     if (!product.inStock || added) return
     for (let i = 0; i < qty; i++) {
@@ -58,251 +96,408 @@ export default function ProductDetail() {
         id:       product.id,
         name:     product.name,
         price:    product.price,
-        image:    product.image,
+        image:    selectedColor?.image || product.image,
         category: product.category,
+        color:    selectedColor?.name,
+        size:     selectedSize?.label,
       })
     }
     setAdded(true)
     setTimeout(() => setAdded(false), 1500)
   }
 
-  // ── Related products (same category, exclude self, max 4) ────────────────────
-  const related = getProductsByCategory(product.category)
-    .filter((p) => p.id !== product.id)
+  const related = products
+    .filter(p => p.category === product.category && p.id !== product.id)
     .slice(0, 4)
 
-  // ── High-res image URL ───────────────────────────────────────────────────────
-  const bigImage = product.image.replace('w=400&h=400', 'w=900&h=900')
+  const displayImage = selectedColor?.image || product.image
+  const bigImage = displayImage.replace('w=400&h=400', 'w=900&h=900')
+
+  const productSchema = {
+    '@context': 'https://schema.org',
+    '@type': 'Product',
+    name: product.name,
+    description: product.description,
+    image: bigImage,
+    brand: { '@type': 'Brand', name: seoCfg.business.name },
+    offers: {
+      '@type': 'Offer',
+      url: `${seoCfg.siteUrl}/products/${product.id}`,
+      priceCurrency: 'ARS',
+      price: product.price,
+      availability: product.inStock
+        ? 'https://schema.org/InStock'
+        : 'https://schema.org/OutOfStock',
+      seller: { '@type': 'Organization', name: seoCfg.business.name },
+    },
+  }
 
   return (
     <>
-      {/* ════════════════════════════════════════════════════════════════════════
-          LIGHT SECTION — breadcrumb + main product layout
-      ════════════════════════════════════════════════════════════════════════ */}
-      <div style={{ backgroundColor: PD.bg }}>
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8 sm:py-12">
+      <PageSEO
+        title={product.name}
+        description={`${product.description} — Disponible en Fénix Iluminación, City Bell, La Plata.`}
+        url={`/products/${product.id}`}
+        image={product.image}
+        schema={productSchema}
+      />
+      {/* ── Main section ─────────────────────────────────────────────────────── */}
+      <div style={{ backgroundColor: 'var(--color-bg)', minHeight: '100vh' }}>
+        <div style={{ maxWidth: 1200, margin: '0 auto', padding: '32px 32px 80px' }}>
 
           {/* Breadcrumb */}
-          <nav
-            className="flex items-center flex-wrap gap-1.5 text-sm mb-10"
-            aria-label="Breadcrumb"
-          >
+          <nav style={{
+            display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 6,
+            fontSize: 12, letterSpacing: '.08em', textTransform: 'uppercase',
+            color: 'var(--color-text-muted)', marginBottom: 40,
+            fontFamily: 'var(--font-sans)',
+          }}>
             <Link
               to="/"
-              className="transition-colors hover:underline"
-              style={{ color: PD.muted }}
-              onMouseEnter={(e) => (e.currentTarget.style.color = PD.text)}
-              onMouseLeave={(e) => (e.currentTarget.style.color = PD.muted)}
+              style={{ color: 'var(--color-text-muted)', textDecoration: 'none', transition: 'color .15s' }}
+              onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--color-text)')}
+              onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--color-text-muted)')}
             >
               Inicio
             </Link>
-            <ChevronIcon color={PD.muted} />
+            <span style={{ opacity: 0.5 }}>/</span>
             <Link
               to="/products"
-              className="transition-colors hover:underline"
-              style={{ color: PD.muted }}
-              onMouseEnter={(e) => (e.currentTarget.style.color = PD.text)}
-              onMouseLeave={(e) => (e.currentTarget.style.color = PD.muted)}
+              style={{ color: 'var(--color-text-muted)', textDecoration: 'none', transition: 'color .15s' }}
+              onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--color-text)')}
+              onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--color-text-muted)')}
             >
               Productos
             </Link>
-            <ChevronIcon color={PD.muted} />
+            <span style={{ opacity: 0.5 }}>/</span>
             <Link
               to={`/products?category=${encodeURIComponent(product.category)}`}
-              className="transition-colors hover:underline"
-              style={{ color: PD.muted }}
-              onMouseEnter={(e) => (e.currentTarget.style.color = PD.text)}
-              onMouseLeave={(e) => (e.currentTarget.style.color = PD.muted)}
+              style={{ color: 'var(--color-text-muted)', textDecoration: 'none', transition: 'color .15s' }}
+              onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--color-text)')}
+              onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--color-text-muted)')}
             >
               {product.category}
             </Link>
-            <ChevronIcon color={PD.muted} />
-            <span
-              className="truncate max-w-[200px] sm:max-w-xs"
-              style={{ color: PD.text }}
-              aria-current="page"
-            >
-              {product.name}
-            </span>
+            <span style={{ opacity: 0.5 }}>/</span>
+            <span style={{ color: 'var(--color-text)' }}>{product.name}</span>
           </nav>
 
-          {/* Two-column grid */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-10 lg:gap-16 pb-16 sm:pb-24">
+          {/* Two-column layout */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: '1fr 1fr',
+            gap: 64,
+            alignItems: 'start',
+          }}>
 
-            {/* ── Left: image ───────────────────────────────────────────────── */}
-            <div className="lg:sticky lg:top-24 self-start">
-              <div
-                className="aspect-square rounded-2xl overflow-hidden"
-                style={{ backgroundColor: PD.surface }}
-              >
+            {/* ── Left: image + description ─────────────────────────────────── */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
+              <div style={{
+                borderRadius: 12,
+                overflow: 'hidden',
+                backgroundColor: 'var(--color-surface-2)',
+              }}>
                 <img
                   src={bigImage}
                   alt={product.name}
-                  className="w-full h-full object-cover"
+                  style={{ width: '100%', display: 'block', objectFit: 'cover' }}
                 />
+              </div>
+
+              {/* Description below image */}
+              <div>
+                <p style={{
+                  fontSize: 11, letterSpacing: '.14em', textTransform: 'uppercase',
+                  fontWeight: 600, color: 'var(--color-text-muted)',
+                  fontFamily: 'var(--font-sans)', marginBottom: 12,
+                }}>
+                  Descripción
+                </p>
+                <p style={{
+                  fontSize: 15, lineHeight: 1.75,
+                  color: 'var(--color-text-muted)', margin: 0,
+                }}>
+                  {product.description}
+                </p>
               </div>
             </div>
 
-            {/* ── Right: product info ────────────────────────────────────────── */}
-            <div className="flex flex-col">
+            {/* ── Right: product info ───────────────────────────────────────── */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 20, position: 'sticky', top: 96, alignSelf: 'start' }}>
 
-              {/* Category badge + stock badge */}
-              <div className="flex items-center gap-2 mb-4 flex-wrap">
-                <span
-                  className="inline-block px-3 py-1 rounded text-[11px] uppercase tracking-widest font-semibold"
-                  style={{ backgroundColor: PD.surface, color: PD.muted }}
+              {/* Badges */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <span style={{
+                    padding: '4px 10px', borderRadius: 4,
+                    fontSize: 11, letterSpacing: '.12em', textTransform: 'uppercase',
+                    fontWeight: 600, fontFamily: 'var(--font-sans)',
+                    backgroundColor: 'var(--color-surface-2)',
+                    color: 'var(--color-text-muted)',
+                  }}>
+                    {product.category}
+                  </span>
+                  {product.inStock ? (
+                    <span style={{
+                      padding: '4px 10px', borderRadius: 4,
+                      fontSize: 11, letterSpacing: '.12em', textTransform: 'uppercase',
+                      fontWeight: 600, backgroundColor: '#E4F5E9', color: '#166534',
+                    }}>
+                      En stock
+                    </span>
+                  ) : (
+                    <span style={{
+                      padding: '4px 10px', borderRadius: 4,
+                      fontSize: 11, letterSpacing: '.12em', textTransform: 'uppercase',
+                      fontWeight: 600, backgroundColor: '#FFE4E4', color: '#CC0000',
+                    }}>
+                      Sin stock
+                    </span>
+                  )}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleToggleFavorite}
+                  aria-label={isFavorite(product.id) ? 'Quitar de favoritos' : 'Agregar a favoritos'}
+                  style={{
+                    width: 38, height: 38, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    background: 'var(--color-surface-2)', border: '1px solid var(--color-border)', borderRadius: '50%',
+                    cursor: 'pointer', padding: 0, flexShrink: 0,
+                  }}
                 >
-                  {product.category}
-                </span>
-                {!product.inStock && (
-                  <span
-                    className="inline-block px-3 py-1 rounded text-[11px] uppercase tracking-widest font-semibold"
-                    style={{ backgroundColor: '#FFE4E4', color: '#CC0000' }}
-                  >
-                    Sin stock
-                  </span>
-                )}
-                {product.inStock && (
-                  <span
-                    className="inline-block px-3 py-1 rounded text-[11px] uppercase tracking-widest font-semibold"
-                    style={{ backgroundColor: '#E4F5E9', color: '#166534' }}
-                  >
-                    En stock
-                  </span>
-                )}
+                  <svg viewBox="0 0 24 24" width="17" height="17" fill={isFavorite(product.id) ? 'var(--color-primary)' : 'none'} stroke={isFavorite(product.id) ? 'var(--color-primary)' : 'var(--color-text)'} strokeWidth="1.8">
+                    <path d="M12 20.5s-7.5-4.6-10-9.1C.5 8.1 2.1 4.5 5.6 4c2-.3 3.9.6 5 2.2C11.7 4.6 13.6 3.7 15.6 4c3.5.5 5.1 4.1 3.6 7.4-2.5 4.5-10 9.1-10 9.1Z" strokeLinejoin="round" />
+                  </svg>
+                </button>
               </div>
 
               {/* Product name */}
-              <h1
-                className="text-3xl sm:text-4xl font-bold leading-tight mb-5"
-                style={{ fontFamily: 'var(--font-serif)', color: PD.text }}
-              >
+              <h1 style={{
+                fontFamily: 'var(--font-serif)',
+                fontWeight: 400,
+                fontSize: 'clamp(32px, 3.5vw, 48px)',
+                lineHeight: 1.1,
+                letterSpacing: '-0.01em',
+                color: 'var(--color-text)',
+                margin: 0,
+              }}>
                 {product.name}
               </h1>
 
+              {/* Rating summary */}
+              {reviewsData.count > 0 && (
+                <a
+                  href="#reviews"
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 8,
+                    textDecoration: 'none', width: 'fit-content',
+                  }}
+                >
+                  <StarRating value={Math.round(reviewsData.average)} readOnly size={16} />
+                  <span style={{ fontSize: 13, color: 'var(--color-text-muted)' }}>
+                    {reviewsData.average.toFixed(1)} · {reviewsData.count} {reviewsData.count === 1 ? 'reseña' : 'reseñas'}
+                  </span>
+                </a>
+              )}
+
               {/* Price */}
-              <p
-                className="text-4xl font-bold mb-6"
-                style={{ color: PD.text, fontFamily: 'var(--font-sans)' }}
-              >
+              <p style={{
+                fontSize: 36,
+                fontWeight: 700,
+                color: 'var(--color-text)',
+                fontFamily: 'var(--font-sans)',
+                margin: 0,
+              }}>
                 {fmt(product.price)}
               </p>
 
+              {/* Selector de color */}
+              {product.colors?.length > 0 && (
+                <div>
+                  <span style={{
+                    fontSize: 14, fontWeight: 500,
+                    color: 'var(--color-text)', fontFamily: 'var(--font-sans)',
+                    display: 'block', marginBottom: 10,
+                  }}>
+                    Color{selectedColor ? `: ${selectedColor.name}` : ''}
+                  </span>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+                    {product.colors.map((c) => {
+                      const isSelected = selectedColor?.name === c.name
+                      return (
+                        <button
+                          key={c.name}
+                          type="button"
+                          onClick={() => setSelectedColor(c)}
+                          title={c.name}
+                          aria-label={c.name}
+                          aria-pressed={isSelected}
+                          style={{
+                            width: 34, height: 34, borderRadius: '50%',
+                            backgroundColor: c.hex || '#ccc',
+                            border: isSelected
+                              ? '2px solid var(--color-text)'
+                              : '2px solid var(--color-border)',
+                            outline: isSelected ? '2px solid var(--color-bg)' : 'none',
+                            outlineOffset: isSelected ? '-4px' : '0',
+                            boxShadow: isSelected ? '0 0 0 1.5px var(--color-text)' : 'none',
+                            cursor: 'pointer', padding: 0,
+                            transition: 'box-shadow .15s, border-color .15s',
+                          }}
+                        />
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Selector de medida */}
+              {product.sizes?.length > 0 && (
+                <div>
+                  <span style={{
+                    fontSize: 14, fontWeight: 500,
+                    color: 'var(--color-text)', fontFamily: 'var(--font-sans)',
+                    display: 'block', marginBottom: 10,
+                  }}>
+                    Medida{selectedSize ? `: ${selectedSize.label}` : ''}
+                  </span>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+                    {product.sizes.map((s) => {
+                      const isSelected = selectedSize?.label === s.label
+                      return (
+                        <button
+                          key={s.label}
+                          type="button"
+                          onClick={() => setSelectedSize(s)}
+                          aria-pressed={isSelected}
+                          style={{
+                            padding: '8px 16px', borderRadius: 4,
+                            fontSize: 13, fontFamily: 'var(--font-sans)',
+                            color: isSelected ? '#fff' : 'var(--color-text)',
+                            backgroundColor: isSelected ? 'var(--color-text)' : 'transparent',
+                            border: `1.5px solid ${isSelected ? 'var(--color-text)' : 'var(--color-border)'}`,
+                            cursor: 'pointer',
+                            transition: 'background-color .15s, border-color .15s, color .15s',
+                          }}
+                        >
+                          {s.label}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+
               {/* Divider */}
-              <div
-                className="mb-6"
-                style={{ height: '1px', backgroundColor: PD.border }}
-              />
+              <div style={{ height: 1, backgroundColor: 'var(--color-border)' }} />
 
-              {/* Description */}
-              <p
-                className="text-base leading-relaxed mb-8"
-                style={{ color: PD.muted }}
-              >
-                {product.description}
-              </p>
-
-              {/* Quantity selector — only when in stock */}
+              {/* Quantity selector */}
               {product.inStock && (
-                <div className="flex items-center gap-4 mb-7">
-                  <span className="text-sm font-medium" style={{ color: PD.text }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                  <span style={{
+                    fontSize: 14, fontWeight: 500,
+                    color: 'var(--color-text)', fontFamily: 'var(--font-sans)',
+                  }}>
                     Cantidad
                   </span>
-                  <div
-                    className="inline-flex items-center rounded-lg overflow-hidden"
-                    style={{ border: `1px solid ${PD.border}` }}
-                  >
+                  <div style={{
+                    display: 'inline-flex', alignItems: 'center',
+                    border: '1px solid var(--color-border)', borderRadius: 8, overflow: 'hidden',
+                  }}>
                     <button
                       onClick={() => setQty((q) => Math.max(1, q - 1))}
                       disabled={qty <= 1}
-                      className="w-11 h-11 flex items-center justify-center text-xl font-light transition-colors select-none"
-                      style={{ color: qty <= 1 ? PD.border : PD.muted }}
-                      onMouseEnter={(e) => {
-                        if (qty > 1) e.currentTarget.style.backgroundColor = PD.surface
+                      style={{
+                        width: 44, height: 44, display: 'flex', alignItems: 'center',
+                        justifyContent: 'center', fontSize: 20, fontWeight: 300,
+                        background: 'none', border: 'none', cursor: qty <= 1 ? 'not-allowed' : 'pointer',
+                        color: qty <= 1 ? 'var(--color-border)' : 'var(--color-text-muted)',
+                        transition: 'background .15s',
                       }}
+                      onMouseEnter={(e) => { if (qty > 1) e.currentTarget.style.backgroundColor = 'var(--color-surface-2)' }}
                       onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
                       aria-label="Disminuir cantidad"
                     >
                       −
                     </button>
-                    <span
-                      className="w-12 text-center text-base font-semibold select-none"
-                      style={{
-                        color: PD.text,
-                        borderLeft: `1px solid ${PD.border}`,
-                        borderRight: `1px solid ${PD.border}`,
-                      }}
-                    >
+                    <span style={{
+                      width: 48, textAlign: 'center', fontSize: 15, fontWeight: 600,
+                      color: 'var(--color-text)', userSelect: 'none',
+                      borderLeft: '1px solid var(--color-border)',
+                      borderRight: '1px solid var(--color-border)',
+                    }}>
                       {qty}
                     </span>
                     <button
                       onClick={() => setQty((q) => q + 1)}
-                      className="w-11 h-11 flex items-center justify-center text-xl font-light transition-colors select-none"
-                      style={{ color: PD.muted }}
-                      onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = PD.surface)}
+                      style={{
+                        width: 44, height: 44, display: 'flex', alignItems: 'center',
+                        justifyContent: 'center', fontSize: 20, fontWeight: 300,
+                        background: 'none', border: 'none', cursor: 'pointer',
+                        color: 'var(--color-text-muted)', transition: 'background .15s',
+                      }}
+                      onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-surface-2)')}
                       onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
                       aria-label="Aumentar cantidad"
                     >
                       +
                     </button>
                   </div>
-                  <span className="text-sm" style={{ color: PD.muted }}>
+                  <span style={{ fontSize: 14, color: 'var(--color-text-muted)' }}>
                     Subtotal: {fmt(product.price * qty)}
                   </span>
                 </div>
               )}
 
               {/* CTA buttons */}
-              <div className="flex flex-col sm:flex-row gap-3 mb-8">
-                {/* Add to cart */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 <button
                   onClick={handleAdd}
                   disabled={!product.inStock || added}
-                  className="flex-1 py-4 text-sm font-semibold rounded-xl tracking-wide transition-all duration-200 flex items-center justify-center gap-2"
-                  style={
-                    added
-                      ? { backgroundColor: '#166534', color: '#fff', cursor: 'default' }
+                  style={{
+                    width: '100%', padding: '15px 0',
+                    fontSize: 14, fontWeight: 600, letterSpacing: '.04em',
+                    borderRadius: 10, border: 'none', cursor: product.inStock && !added ? 'pointer' : 'not-allowed',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                    transition: 'background .2s, opacity .2s',
+                    ...(added
+                      ? { backgroundColor: '#166534', color: '#fff' }
                       : product.inStock
                         ? { backgroundColor: 'var(--color-primary)', color: '#fff' }
-                        : { backgroundColor: PD.border, color: PD.muted, cursor: 'not-allowed' }
-                  }
-                  onMouseEnter={(e) => {
-                    if (product.inStock && !added)
-                      e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)'
+                        : { backgroundColor: 'var(--color-border)', color: 'var(--color-text-muted)' }),
                   }}
-                  onMouseLeave={(e) => {
-                    if (product.inStock && !added)
-                      e.currentTarget.style.backgroundColor = 'var(--color-primary)'
-                  }}
+                  onMouseEnter={(e) => { if (product.inStock && !added) e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)' }}
+                  onMouseLeave={(e) => { if (product.inStock && !added) e.currentTarget.style.backgroundColor = 'var(--color-primary)' }}
                 >
                   {added ? (
-                    <>
-                      <CheckIcon />
-                      Agregado al carrito
-                    </>
+                    <><CheckIcon /> Agregado al carrito</>
                   ) : product.inStock ? (
-                    <>
-                      <CartIcon />
-                      Agregar al carrito
-                    </>
+                    <><CartIcon /> Agregar al carrito</>
                   ) : (
                     'Sin stock'
                   )}
                 </button>
 
-                {/* WhatsApp */}
                 <a
-                  href={`https://wa.me/5491122334455?text=Hola!%20Quiero%20consultar%20sobre%20${encodeURIComponent(product.name)}`}
+                  href={`https://wa.me/${seoCfg.business.whatsapp}?text=Hola!%20Quiero%20consultar%20sobre%20${encodeURIComponent(product.name)}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex-1 py-4 text-sm font-semibold rounded-xl tracking-wide transition-all duration-200 flex items-center justify-center gap-2"
-                  style={{ border: `1.5px solid ${PD.border}`, color: PD.text, backgroundColor: 'transparent' }}
+                  style={{
+                    width: '100%', padding: '15px 0',
+                    fontSize: 14, fontWeight: 600, letterSpacing: '.04em',
+                    borderRadius: 10, border: '1.5px solid var(--color-border)',
+                    color: 'var(--color-text)', backgroundColor: 'transparent',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                    textDecoration: 'none', transition: 'border-color .2s, background .2s',
+                    boxSizing: 'border-box',
+                  }}
                   onMouseEnter={(e) => {
-                    e.currentTarget.style.borderColor = PD.text
-                    e.currentTarget.style.backgroundColor = PD.surface
+                    e.currentTarget.style.borderColor = 'var(--color-text)'
+                    e.currentTarget.style.backgroundColor = 'var(--color-surface-2)'
                   }}
                   onMouseLeave={(e) => {
-                    e.currentTarget.style.borderColor = PD.border
+                    e.currentTarget.style.borderColor = 'var(--color-border)'
                     e.currentTarget.style.backgroundColor = 'transparent'
                   }}
                 >
@@ -311,17 +506,19 @@ export default function ProductDetail() {
                 </a>
               </div>
 
+              {!product.inStock && <StockAlertForm product={product} />}
+
               {/* Info chips */}
-              <div className="flex flex-wrap gap-2">
-                {[
-                  'Retiro en local',
-                  'Asesoramiento incluido',
-                  'Garantía de fábrica',
-                ].map((label) => (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {['Retiro en local', 'Asesoramiento incluido', 'Garantía de fábrica'].map((label) => (
                   <span
                     key={label}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs"
-                    style={{ backgroundColor: PD.surface, color: PD.muted }}
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', gap: 6,
+                      padding: '6px 12px', borderRadius: 999, fontSize: 12,
+                      backgroundColor: 'var(--color-surface-2)',
+                      color: 'var(--color-text-muted)',
+                    }}
                   >
                     <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                       <polyline points="20 6 9 17 4 12" />
@@ -330,39 +527,41 @@ export default function ProductDetail() {
                   </span>
                 ))}
               </div>
+
             </div>
           </div>
         </div>
       </div>
 
-      {/* ════════════════════════════════════════════════════════════════════════
-          DARK SECTION — related products
-      ════════════════════════════════════════════════════════════════════════ */}
+      <ReviewsSection product={product} reviewsData={reviewsData} />
+
+      {/* ── Related products ─────────────────────────────────────────────────── */}
       {related.length > 0 && (
-        <section
-          className="py-20 sm:py-24"
-          style={{ backgroundColor: 'var(--color-bg)' }}
-        >
-          <div className="max-w-7xl mx-auto px-4 sm:px-6">
-            <div className="flex items-end justify-between mb-10">
+        <section style={{ backgroundColor: 'var(--color-bg)', paddingTop: 64, paddingBottom: 80 }}>
+          <div style={{ maxWidth: 1200, margin: '0 auto', padding: '0 32px' }}>
+            <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 36 }}>
               <div>
-                <p
-                  className="text-xs uppercase tracking-[0.18em] font-medium mb-2"
-                  style={{ color: 'var(--color-primary)' }}
-                >
+                <p style={{
+                  fontSize: 11, letterSpacing: '.18em', textTransform: 'uppercase',
+                  fontWeight: 500, color: 'var(--color-primary)', marginBottom: 8,
+                }}>
                   {product.category}
                 </p>
-                <h2
-                  className="text-2xl sm:text-3xl font-bold"
-                  style={{ fontFamily: 'var(--font-serif)', color: 'var(--color-text)' }}
-                >
+                <h2 style={{
+                  fontFamily: 'var(--font-serif)', fontWeight: 400,
+                  fontSize: 'clamp(22px, 2.5vw, 30px)',
+                  color: 'var(--color-text)', margin: 0,
+                }}>
                   Productos relacionados
                 </h2>
               </div>
               <Link
                 to={`/products?category=${encodeURIComponent(product.category)}`}
-                className="hidden sm:inline-flex items-center gap-1.5 text-sm transition-colors"
-                style={{ color: 'var(--color-text-muted)' }}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 6,
+                  fontSize: 13, color: 'var(--color-text-muted)',
+                  textDecoration: 'none', transition: 'color .15s',
+                }}
                 onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--color-text)')}
                 onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--color-text-muted)')}
               >
@@ -374,12 +573,11 @@ export default function ProductDetail() {
               </Link>
             </div>
 
-            <div
-              className="grid gap-5"
-              style={{
-                gridTemplateColumns: `repeat(${Math.min(related.length, 4)}, minmax(0, 1fr))`,
-              }}
-            >
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: `repeat(${Math.min(related.length, 4)}, 1fr)`,
+              gap: 20,
+            }}>
               {related.map((p) => (
                 <ProductCard key={p.id} product={p} />
               ))}
@@ -391,7 +589,6 @@ export default function ProductDetail() {
   )
 }
 
-// ─── Inline icons ──────────────────────────────────────────────────────────────
 function ChevronIcon({ color }) {
   return (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -424,5 +621,279 @@ function WhatsAppIcon() {
       <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z" />
       <path d="M11.99 2C6.477 2 2 6.477 2 11.99c0 1.77.463 3.435 1.275 4.884L2 22l5.274-1.256A9.934 9.934 0 0011.99 21.98C17.503 21.98 22 17.503 22 11.99 22 6.477 17.503 2 11.99 2zm0 18.18a8.183 8.183 0 01-4.17-1.142l-.299-.177-3.097.738.768-3.015-.196-.31A8.194 8.194 0 013.79 11.99c0-4.524 3.683-8.207 8.2-8.207 4.524 0 8.207 3.683 8.207 8.207s-3.683 8.19-8.207 8.19z" />
     </svg>
+  )
+}
+
+const STOCK_ALERTS_API = import.meta.env.VITE_API_URL || ''
+
+function StockAlertForm({ product }) {
+  const { user } = useAuth()
+  const [email, setEmail]     = useState(user?.email || '')
+  const [sent, setSent]       = useState(false)
+  const [error, setError]     = useState(null)
+  const [loading, setLoading] = useState(false)
+
+  async function handleSubmit(e) {
+    e.preventDefault()
+    setError(null)
+    setLoading(true)
+    try {
+      const res = await fetch(`${STOCK_ALERTS_API}/api/stock-alerts`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ productId: product.id, email }),
+      })
+      if (!res.ok) throw new Error('No pudimos guardar tu aviso. Probá de nuevo.')
+      setSent(true)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  if (sent) {
+    return (
+      <p style={{
+        fontSize: 13.5, color: '#166534', backgroundColor: '#E4F5E9',
+        padding: '12px 14px', borderRadius: 10,
+      }}>
+        ¡Listo! Te avisaremos por email cuando vuelva a estar disponible.
+      </p>
+    )
+  }
+
+  return (
+    <div>
+      <form onSubmit={handleSubmit} style={{ display: 'flex', gap: 8 }}>
+        <input
+          type="email"
+          required
+          placeholder="Tu email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          style={{
+            flex: 1, padding: '11px 14px', borderRadius: 8,
+            border: '1.5px solid var(--color-border)', outline: 'none',
+            fontSize: 13.5, color: 'var(--color-text)', backgroundColor: 'var(--color-surface-2)',
+          }}
+        />
+        <button
+          type="submit"
+          disabled={loading}
+          style={{
+            padding: '0 18px', borderRadius: 8, border: 'none',
+            fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap',
+            backgroundColor: 'var(--color-text)', color: '#fff',
+            cursor: loading ? 'not-allowed' : 'pointer',
+          }}
+        >
+          {loading ? 'Enviando…' : 'Avisame'}
+        </button>
+      </form>
+      {error && (
+        <p style={{ fontSize: 12, color: 'var(--color-primary)', margin: '6px 0 0' }}>{error}</p>
+      )}
+    </div>
+  )
+}
+
+function StarRating({ value, onChange, size = 18, readOnly = false }) {
+  const [hover, setHover] = useState(0)
+  return (
+    <div style={{ display: 'inline-flex', gap: 2 }}>
+      {[1, 2, 3, 4, 5].map((n) => {
+        const filled = (hover || value) >= n
+        return (
+          <svg
+            key={n}
+            width={size} height={size} viewBox="0 0 24 24"
+            fill={filled ? '#F5A623' : 'none'}
+            stroke={filled ? '#F5A623' : 'var(--color-text-muted)'}
+            strokeWidth="1.5"
+            style={{ cursor: readOnly ? 'default' : 'pointer' }}
+            onMouseEnter={() => !readOnly && setHover(n)}
+            onMouseLeave={() => !readOnly && setHover(0)}
+            onClick={() => !readOnly && onChange?.(n)}
+          >
+            <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+          </svg>
+        )
+      })}
+    </div>
+  )
+}
+
+function ReviewsSection({ product, reviewsData }) {
+  const { user, isAuthenticated } = useAuth()
+  const navigate = useNavigate()
+
+  const { reviews, average, count, loading, reload: load } = reviewsData
+
+  const [rating, setRating]     = useState(0)
+  const [comment, setComment]   = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError]       = useState(null)
+
+  const myReview = reviews.find((r) => r.userId === user?.id)
+
+  useEffect(() => {
+    setRating(myReview?.rating || 0)
+    setComment(myReview?.comment || '')
+  }, [myReview?.id])
+
+  async function handleSubmit(e) {
+    e.preventDefault()
+    if (!rating) { setError('Elegí un puntaje de 1 a 5 estrellas.'); return }
+    setError(null)
+    setSubmitting(true)
+    try {
+      const res = await fetch(`${REVIEWS_API}/api/reviews`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ productId: product.id, rating, comment }),
+      })
+      if (!res.ok) throw new Error('No pudimos guardar tu reseña. Probá de nuevo.')
+      await load()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  async function handleDelete() {
+    setSubmitting(true)
+    try {
+      await fetch(`${REVIEWS_API}/api/reviews/${product.id}`, { method: 'DELETE', credentials: 'include' })
+      await load()
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <section id="reviews" style={{ backgroundColor: 'var(--color-bg)', paddingTop: 64, scrollMarginTop: 96 }}>
+      <div style={{ maxWidth: 1200, margin: '0 auto', padding: '0 32px' }}>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 28, flexWrap: 'wrap' }}>
+          <h2 style={{
+            fontFamily: 'var(--font-serif)', fontWeight: 400,
+            fontSize: 'clamp(22px, 2.5vw, 30px)', color: 'var(--color-text)', margin: 0,
+          }}>
+            Reseñas
+          </h2>
+          {count > 0 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <StarRating value={Math.round(average)} readOnly size={16} />
+              <span style={{ fontSize: 14, color: 'var(--color-text-muted)' }}>
+                {average.toFixed(1)} · {count} {count === 1 ? 'reseña' : 'reseñas'}
+              </span>
+            </div>
+          )}
+        </div>
+
+        {/* Formulario para dejar/editar reseña */}
+        <div style={{
+          padding: 20, borderRadius: 12, backgroundColor: 'var(--color-surface-2)',
+          marginBottom: 32, maxWidth: 560,
+        }}>
+          {!isAuthenticated ? (
+            <p style={{ fontSize: 14, color: 'var(--color-text-muted)', margin: 0 }}>
+              <button
+                onClick={() => navigate('/login')}
+                style={{
+                  background: 'none', border: 'none', padding: 0,
+                  color: 'var(--color-primary)', cursor: 'pointer',
+                  font: 'inherit', textDecoration: 'underline',
+                }}
+              >
+                Iniciá sesión
+              </button>{' '}
+              para dejar tu reseña de este producto.
+            </p>
+          ) : (
+            <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--color-text)' }}>
+                  {myReview ? 'Tu reseña' : 'Tu puntaje'}
+                </span>
+                <StarRating value={rating} onChange={setRating} />
+              </div>
+              <textarea
+                value={comment}
+                onChange={(e) => setComment(e.target.value)}
+                placeholder="Contanos qué te pareció (opcional)"
+                rows={3}
+                style={{
+                  padding: '10px 12px', borderRadius: 8, resize: 'vertical',
+                  border: '1.5px solid var(--color-border)', outline: 'none',
+                  fontSize: 13.5, color: 'var(--color-text)', backgroundColor: 'var(--color-bg)',
+                  fontFamily: 'inherit',
+                }}
+              />
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  style={{
+                    padding: '10px 20px', borderRadius: 8, border: 'none',
+                    fontSize: 13, fontWeight: 600, backgroundColor: 'var(--color-primary)', color: '#fff',
+                    cursor: submitting ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  {submitting ? 'Guardando…' : myReview ? 'Actualizar reseña' : 'Publicar reseña'}
+                </button>
+                {myReview && (
+                  <button
+                    type="button"
+                    onClick={handleDelete}
+                    disabled={submitting}
+                    style={{
+                      padding: '10px 20px', borderRadius: 8, border: '1.5px solid var(--color-border)',
+                      fontSize: 13, fontWeight: 600, backgroundColor: 'transparent', color: 'var(--color-text-muted)',
+                      cursor: submitting ? 'not-allowed' : 'pointer',
+                    }}
+                  >
+                    Eliminar
+                  </button>
+                )}
+              </div>
+              {error && <p style={{ fontSize: 12, color: 'var(--color-primary)', margin: 0 }}>{error}</p>}
+            </form>
+          )}
+        </div>
+
+        {/* Lista de reseñas */}
+        {!loading && (
+          reviews.length === 0 ? (
+            <p style={{ fontSize: 14, color: 'var(--color-text-muted)' }}>
+              Todavía no hay reseñas para este producto. ¡Sé el primero en dejar una!
+            </p>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 20, maxWidth: 720 }}>
+              {reviews.map((r) => (
+                <div key={r.id} style={{ paddingBottom: 20, borderBottom: '1px solid var(--color-border)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6, flexWrap: 'wrap' }}>
+                    <StarRating value={r.rating} readOnly size={14} />
+                    <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--color-text)' }}>{r.author}</span>
+                    <span style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>
+                      {new Date(r.createdAt).toLocaleDateString('es-AR')}
+                    </span>
+                  </div>
+                  {r.comment && (
+                    <p style={{ fontSize: 14, lineHeight: 1.6, color: 'var(--color-text-muted)', margin: 0 }}>
+                      {r.comment}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          )
+        )}
+      </div>
+    </section>
   )
 }

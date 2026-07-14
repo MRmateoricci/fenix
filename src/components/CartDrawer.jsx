@@ -69,7 +69,7 @@ export default function CartDrawer({ open, onClose }) {
           borderBottom: `1px solid ${T.hairline}`,
         }}>
           <h2 style={{
-            fontFamily: "'Playfair Display', serif",
+            fontFamily: "'Cormorant Garamond', serif",
             fontWeight: 400, fontSize: 22, color: T.ink, margin: 0,
           }}>
             Tu carrito
@@ -180,7 +180,7 @@ function CartItem({ item, onRemove, onUpdate }) {
       {/* Info */}
       <div style={{ flex: 1, minWidth: 0 }}>
         <p style={{
-          fontFamily: "'Playfair Display', serif",
+          fontFamily: "'Cormorant Garamond', serif",
           fontSize: 15, fontWeight: 400, color: T.ink,
           margin: '0 0 3px',
           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',

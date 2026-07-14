@@ -1,7 +1,22 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
-import { products, categories, CATEGORY_NAV_LABEL } from '../data/products'
+import { categories, CATEGORY_NAV_LABEL, CATEGORY_SUBCATEGORIES, CABLE_TYPES } from '../data/products'
+import { useAdmin } from '../context/AdminContext'
 import ProductCard from '../components/ProductCard'
+import PageSEO from '../components/SEO'
+import electricidadImg from '../assets/electricidad.jfif'
+import iluminacionImg from '../assets/iluminacion.jfif'
+import herramientasImg from '../assets/herramientas.jpg'
+import automatizacionImg from '../assets/automatizacion.jfif'
+import promocionImg from '../assets/promocion.jfif'
+
+const CATEGORY_IMAGE = {
+  'Electricidad':                electricidadImg,
+  'Herramientas':                herramientasImg,
+  'Iluminación':                 iluminacionImg,
+  'Automatización Industrial':   automatizacionImg,
+  'Promociones':                 promocionImg,
+}
 
 const T = {
   paper:          '#F7F4EF',
@@ -19,7 +34,7 @@ const T = {
 }
 
 const PRICE_MIN = 0
-const PRICE_MAX = 40000
+const PRICE_STEP = 10000
 
 const SORT_OPTIONS = [
   { value: 'default',    label: 'Novedades'            },
@@ -32,16 +47,19 @@ const fmt = (n) =>
   new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(n)
 
 // ─── URL param helpers ─────────────────────────────────────────────────────────
-function useFilterParams() {
+function useFilterParams(priceMax) {
   const [searchParams, setSearchParams] = useSearchParams()
 
   const query              = searchParams.get('q') || ''
   const selectedCategories = searchParams.getAll('category')
   const sub                = searchParams.get('sub') || ''
+  const cableType          = searchParams.get('ctype') || ''
   const onlyInStock        = searchParams.get('stock') === '1'
   const sortBy             = searchParams.get('sort') || 'default'
   const minPrice           = Math.max(PRICE_MIN, Number(searchParams.get('min')) || PRICE_MIN)
-  const maxPrice           = Math.min(PRICE_MAX, Number(searchParams.get('max')) || PRICE_MAX)
+  const maxPrice           = Math.min(priceMax, Number(searchParams.get('max')) || priceMax)
+  const selectedColorTemps = searchParams.getAll('ct').map(Number)
+  const selectedIPs        = searchParams.getAll('ip')
 
   function set(key, value) {
     const p = new URLSearchParams(searchParams)
@@ -59,6 +77,15 @@ function useFilterParams() {
     setSearchParams(p, { replace: true })
   }
 
+  function toggleMulti(key, val) {
+    const p = new URLSearchParams(searchParams)
+    const current = p.getAll(key)
+    p.delete(key)
+    if (current.includes(String(val))) current.filter(v => v !== String(val)).forEach(v => p.append(key, v))
+    else [...current, String(val)].forEach(v => p.append(key, v))
+    setSearchParams(p, { replace: true })
+  }
+
   function clearAll() { setSearchParams({}, { replace: true }) }
 
   function selectCategory(cat) {
@@ -67,11 +94,22 @@ function useFilterParams() {
     setSearchParams(p, { replace: true })
   }
 
-  const hasActiveFilters =
-    query !== '' || selectedCategories.length > 0 || sub !== '' || onlyInStock ||
-    sortBy !== 'default' || minPrice > PRICE_MIN || maxPrice < PRICE_MAX
+  // El tipo de cable es una sub-elección de `sub` (solo aplica dentro de
+  // "Cables Normalizados") — cambiar de subcategoría lo invalida.
+  function setSub(value) {
+    const p = new URLSearchParams(searchParams)
+    if (value == null || value === '') p.delete('sub')
+    else p.set('sub', value)
+    p.delete('ctype')
+    setSearchParams(p, { replace: true })
+  }
 
-  return { query, selectedCategories, sub, onlyInStock, sortBy, minPrice, maxPrice, set, toggleCategory, clearAll, selectCategory, hasActiveFilters }
+  const hasActiveFilters =
+    query !== '' || selectedCategories.length > 0 || sub !== '' || cableType !== '' || onlyInStock ||
+    sortBy !== 'default' || minPrice > PRICE_MIN || maxPrice < priceMax ||
+    selectedColorTemps.length > 0 || selectedIPs.length > 0
+
+  return { query, selectedCategories, sub, cableType, onlyInStock, sortBy, minPrice, maxPrice, priceMax, selectedColorTemps, selectedIPs, set, setSub, toggleCategory, toggleMulti, clearAll, selectCategory, hasActiveFilters }
 }
 
 // ─── Breadcrumb + title ────────────────────────────────────────────────────────
@@ -82,14 +120,31 @@ function CatalogHeader({ filters }) {
   const catLabel  = activeCategory ? CATEGORY_NAV_LABEL[activeCategory] : null
   const subLabel  = filters.sub || null
   const pageTitle = subLabel || catLabel || 'Catálogo'
+  const headerImg = activeCategory ? CATEGORY_IMAGE[activeCategory] : null
 
   return (
-    <div style={{ padding: '96px 0 32px', borderBottom: `1px solid ${T.hairline}`, marginBottom: 36 }}>
+    <div style={{ position: 'relative', padding: '96px 0 32px', borderBottom: `1px solid ${T.hairline}`, marginBottom: 36 }}>
+      {headerImg && (
+        <div
+          aria-hidden="true"
+          style={{
+            position: 'absolute', top: 0, bottom: 0,
+            left: '50%', width: '100vw',
+            marginLeft: '-50vw',
+            backgroundImage: `linear-gradient(90deg, ${T.paper} 0%, ${T.paper}CC 28%, ${T.paper}66 55%, transparent 78%), url(${headerImg})`,
+            backgroundSize: 'cover',
+            backgroundPosition: 'center',
+            opacity: 0.9,
+            zIndex: 0,
+          }}
+        />
+      )}
       {/* Breadcrumb */}
       <div style={{
+        position: 'relative', zIndex: 1,
         display: 'flex', alignItems: 'center', gap: 8,
-        fontFamily: "'Spline Sans Mono', monospace",
-        fontSize: 10, letterSpacing: '.14em', textTransform: 'uppercase',
+        fontFamily: "'Inter', system-ui, sans-serif",
+        fontSize: 11, letterSpacing: '.10em', textTransform: 'uppercase',
         color: T.muted2, marginBottom: 18,
       }}>
         <a
@@ -124,9 +179,10 @@ function CatalogHeader({ filters }) {
 
       {/* Page title */}
       <h1 style={{
-        fontFamily: "'Playfair Display', serif",
-        fontWeight: 500, fontSize: 'clamp(38px, 5vw, 64px)',
-        lineHeight: 0.94, letterSpacing: '-.02em',
+        position: 'relative', zIndex: 1,
+        fontFamily: "'Cormorant Garamond', 'Cormorant Garamond', serif",
+        fontWeight: 400, fontSize: 'clamp(40px, 5vw, 68px)',
+        lineHeight: 0.96, letterSpacing: '-.01em',
         color: T.ink, margin: 0,
       }}>
         {pageTitle}
@@ -137,7 +193,12 @@ function CatalogHeader({ filters }) {
 
 // ═══════════════════════════════════════════════════════════════════════════════
 export default function Products() {
-  const filters = useFilterParams()
+  const { products } = useAdmin()
+  const priceMax = useMemo(
+    () => Math.max(PRICE_STEP, Math.ceil(Math.max(0, ...products.map(p => p.price)) / PRICE_STEP) * PRICE_STEP),
+    [products]
+  )
+  const filters = useFilterParams(priceMax)
   const filtered = useMemo(() => {
     let list = products
     if (filters.query) {
@@ -145,11 +206,19 @@ export default function Products() {
       list = list.filter(p => p.name.toLowerCase().includes(q) || p.description.toLowerCase().includes(q))
     }
     if (filters.selectedCategories.length > 0)
-      list = list.filter(p => filters.selectedCategories.includes(p.category))
+      list = list.filter(p => filters.selectedCategories.some(c =>
+        c === 'Promociones' ? !!p.originalPrice : p.category === c
+      ))
     if (filters.sub)
       list = list.filter(p => p.subcategory === filters.sub)
+    if (filters.cableType)
+      list = list.filter(p => p.cableType === filters.cableType)
     if (filters.onlyInStock)
       list = list.filter(p => p.inStock)
+    if (filters.selectedColorTemps.length > 0)
+      list = list.filter(p => p.colorTemp != null && filters.selectedColorTemps.includes(p.colorTemp))
+    if (filters.selectedIPs.length > 0)
+      list = list.filter(p => p.ipRating != null && filters.selectedIPs.includes(p.ipRating))
     list = list.filter(p => p.price >= filters.minPrice && p.price <= filters.maxPrice)
     switch (filters.sortBy) {
       case 'price-asc':  return [...list].sort((a, b) => a.price - b.price)
@@ -157,10 +226,22 @@ export default function Products() {
       case 'name-az':    return [...list].sort((a, b) => a.name.localeCompare(b.name, 'es'))
       default:           return list
     }
-  }, [filters.query, filters.selectedCategories, filters.onlyInStock, filters.sortBy, filters.minPrice, filters.maxPrice])
+  }, [products, filters.query, filters.selectedCategories, filters.sub, filters.cableType, filters.onlyInStock, filters.sortBy, filters.minPrice, filters.maxPrice, filters.selectedColorTemps, filters.selectedIPs])
+
+  const seoCategory = filters.selectedCategories.length === 1 ? filters.selectedCategories[0] : null
+  const seoTitle = seoCategory
+    ? `${seoCategory} en City Bell, La Plata`
+    : filters.query
+      ? `Buscar: "${filters.query}" — Catálogo`
+      : 'Catálogo de iluminación y electricidad'
+  const seoDesc = seoCategory
+    ? `Comprá ${seoCategory.toLowerCase()} en Fénix Iluminación, City Bell, La Plata. Asesoramiento experto, envíos y retiro en local. Desde 1977.`
+    : 'Catálogo completo de luminarias, materiales eléctricos y tiras LED en Fénix Iluminación, City Bell, La Plata. Desde 1977.'
 
   return (
-    <div style={{ background: T.paper, minHeight: '100vh', color: T.ink }}>
+    <>
+    <PageSEO title={seoTitle} description={seoDesc} url="/products" />
+    <div style={{ background: T.paper, minHeight: '100vh', color: T.ink, overflowX: 'hidden' }}>
       <div style={{ maxWidth: 1320, margin: '0 auto', padding: '0 40px 80px' }}>
 
         {/* ── Header ─────────────────────────────────────────────────────── */}
@@ -168,6 +249,12 @@ export default function Products() {
 
         {/* ── Category tabs ───────────────────────────────────────────────── */}
         <CategoryTabs filters={filters} />
+
+        {/* ── Subcategory filter ──────────────────────────────────────────── */}
+        <SubcategoryTabs filters={filters} />
+
+        {/* ── Cable type filter ───────────────────────────────────────────── */}
+        <CableTypeTabs filters={filters} />
 
         {/* ── Search + sort row ───────────────────────────────────────────── */}
         <div style={{ display: 'flex', gap: 12, marginBottom: 28, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -218,8 +305,8 @@ export default function Products() {
 
         {/* Count */}
         <div style={{
-          fontFamily: "'Spline Sans Mono', monospace",
-          fontSize: 11, letterSpacing: '.08em', color: T.muted2, marginBottom: 32,
+          fontFamily: "'Inter', system-ui, sans-serif",
+          fontSize: 12, color: T.muted2, marginBottom: 32,
         }}>
           {filtered.length} {filtered.length === 1 ? 'producto encontrado' : 'productos encontrados'}
         </div>
@@ -239,6 +326,7 @@ export default function Products() {
         }
       </div>
     </div>
+    </>
   )
 }
 
@@ -249,12 +337,8 @@ function CategoryTabs({ filters }) {
     : filters.selectedCategories.length === 1 ? filters.selectedCategories[0] : null
 
   const tabs = [
-    { label: 'Todos',         value: null },
-    { label: 'Interior',      value: 'Iluminación Interior' },
-    { label: 'Exterior',      value: 'Iluminación Exterior' },
-    { label: 'Tiras LED',     value: 'Tiras LED' },
-    { label: 'Electricidad',  value: 'Electricidad' },
-    { label: 'Ventiladores',  value: 'Ventiladores de techo' },
+    { label: 'Todos', value: null },
+    ...Object.entries(CATEGORY_NAV_LABEL).map(([value, label]) => ({ label, value })),
   ]
 
   return (
@@ -288,6 +372,80 @@ function CategoryTabs({ filters }) {
             onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.color = T.muted }}
           >
             {tab.label}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+// ─── Subcategory tabs ──────────────────────────────────────────────────────────
+function SubcategoryTabs({ filters }) {
+  const activeCategory = filters.selectedCategories.length === 1 ? filters.selectedCategories[0] : null
+  const subs = activeCategory ? CATEGORY_SUBCATEGORIES[activeCategory] : null
+  if (!subs) return null
+
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 28 }}>
+      {subs.map((sub) => {
+        const isActive = filters.sub === sub
+        return (
+          <button
+            key={sub}
+            onClick={() => filters.setSub(isActive ? null : sub)}
+            style={{
+              padding: '8px 16px', borderRadius: 999, cursor: 'pointer',
+              border: `1px solid ${isActive ? T.ink : T.hairline}`,
+              background: isActive ? T.ink : 'transparent',
+              color: isActive ? T.paper : T.muted,
+              fontFamily: "'Hanken Grotesk', system-ui, sans-serif",
+              fontSize: 13, fontWeight: isActive ? 500 : 400,
+              whiteSpace: 'nowrap',
+              transition: 'background .15s, border-color .15s, color .15s',
+            }}
+            onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.borderColor = T.hairlineStrong }}
+            onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.borderColor = T.hairline }}
+          >
+            {sub}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+// ─── Cable type tabs (solo dentro de "Cables Normalizados") ────────────────────
+function CableTypeTabs({ filters }) {
+  if (filters.sub !== 'Cables Normalizados') return null
+
+  return (
+    <div style={{
+      display: 'flex', flexWrap: 'wrap',
+      borderTop: `2px solid ${T.amber}`, borderBottom: `1px solid ${T.hairline}`,
+      background: T.panel,
+      marginBottom: 28,
+    }}>
+      {CABLE_TYPES.map((type) => {
+        const isActive = filters.cableType === type
+        return (
+          <button
+            key={type}
+            onClick={() => filters.set('ctype', isActive ? null : type)}
+            style={{
+              background: 'none', border: 'none', cursor: 'pointer',
+              padding: '14px 22px',
+              fontFamily: "'Hanken Grotesk', system-ui, sans-serif",
+              fontSize: 13.5, fontWeight: isActive ? 600 : 400,
+              color: isActive ? T.ink : T.muted,
+              borderBottom: `2px solid ${isActive ? T.ink : 'transparent'}`,
+              marginBottom: -1,
+              whiteSpace: 'nowrap',
+              transition: 'color .15s, border-color .15s',
+            }}
+            onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.color = T.ink2 }}
+            onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.color = T.muted }}
+          >
+            {type}
           </button>
         )
       })}
@@ -396,13 +554,94 @@ function FilterPanel({ filters }) {
           Precio
         </div>
         <PriceRangeSlider
-          min={PRICE_MIN} max={PRICE_MAX}
+          min={PRICE_MIN} max={filters.priceMax}
           value={[filters.minPrice, filters.maxPrice]}
           onChange={([lo, hi]) => {
             filters.set('min', lo > PRICE_MIN ? lo : null)
-            filters.set('max', hi < PRICE_MAX ? hi : null)
+            filters.set('max', hi < filters.priceMax ? hi : null)
           }}
         />
+      </div>
+
+      <div style={{ height: 1, background: T.hairline }} />
+
+      {/* Temperatura de color */}
+      <div>
+        <div style={{ fontFamily: "'Spline Sans Mono', monospace", fontSize: 10, letterSpacing: '.18em', textTransform: 'uppercase', color: T.muted2, marginBottom: 14 }}>
+          Temperatura de color
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {[
+            { value: 2700, label: 'Cálido 2700 K' },
+            { value: 3000, label: 'Cálido 3000 K' },
+            { value: 4000, label: 'Neutro 4000 K' },
+            { value: 6500, label: 'Frío 6500 K' },
+          ].map(({ value, label }) => {
+            const checked = filters.selectedColorTemps.includes(value)
+            return (
+              <label key={value} style={{ display: 'flex', alignItems: 'center', gap: 11, cursor: 'pointer' }}>
+                <div
+                  onClick={() => filters.toggleMulti('ct', value)}
+                  style={{
+                    width: 15, height: 15, borderRadius: 2, flexShrink: 0,
+                    border: `1.5px solid ${checked ? T.ink : T.hairlineStrong}`,
+                    background: checked ? T.ink : 'transparent',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    transition: 'background .15s, border-color .15s',
+                  }}
+                >
+                  {checked && (
+                    <svg width="9" height="7" viewBox="0 0 9 7" fill="none">
+                      <path d="M1 3.5l2.5 2.5 4.5-5" stroke="#F7F4EF" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  )}
+                </div>
+                <input type="checkbox" checked={checked} onChange={() => filters.toggleMulti('ct', value)} style={{ display: 'none' }} />
+                <span style={{ fontFamily: "'Hanken Grotesk', system-ui, sans-serif", fontSize: 13.5, color: checked ? T.ink : T.muted, transition: 'color .15s' }}>
+                  {label}
+                </span>
+              </label>
+            )
+          })}
+        </div>
+      </div>
+
+      <div style={{ height: 1, background: T.hairline }} />
+
+      {/* Grado IP */}
+      <div>
+        <div style={{ fontFamily: "'Spline Sans Mono', monospace", fontSize: 10, letterSpacing: '.18em', textTransform: 'uppercase', color: T.muted2, marginBottom: 14 }}>
+          Protección (IP)
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {['IP20', 'IP40', 'IP44', 'IP54', 'IP65', 'IP66'].map((ip) => {
+            const checked = filters.selectedIPs.includes(ip)
+            return (
+              <label key={ip} style={{ display: 'flex', alignItems: 'center', gap: 11, cursor: 'pointer' }}>
+                <div
+                  onClick={() => filters.toggleMulti('ip', ip)}
+                  style={{
+                    width: 15, height: 15, borderRadius: 2, flexShrink: 0,
+                    border: `1.5px solid ${checked ? T.ink : T.hairlineStrong}`,
+                    background: checked ? T.ink : 'transparent',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    transition: 'background .15s, border-color .15s',
+                  }}
+                >
+                  {checked && (
+                    <svg width="9" height="7" viewBox="0 0 9 7" fill="none">
+                      <path d="M1 3.5l2.5 2.5 4.5-5" stroke="#F7F4EF" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  )}
+                </div>
+                <input type="checkbox" checked={checked} onChange={() => filters.toggleMulti('ip', ip)} style={{ display: 'none' }} />
+                <span style={{ fontFamily: "'Hanken Grotesk', system-ui, sans-serif", fontSize: 13.5, color: checked ? T.ink : T.muted, transition: 'color .15s' }}>
+                  {ip}
+                </span>
+              </label>
+            )
+          })}
+        </div>
       </div>
     </div>
   )
@@ -478,7 +717,7 @@ function FilterDrawer({ open, onClose, filters }) {
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           padding: '18px 24px', borderBottom: `1px solid ${T.hairline}`,
         }}>
-          <span style={{ fontFamily: "'Playfair Display', serif", fontWeight: 400, fontSize: 20, color: T.ink }}>Filtros</span>
+          <span style={{ fontFamily: "'Cormorant Garamond', serif", fontWeight: 400, fontSize: 20, color: T.ink }}>Filtros</span>
           <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: T.muted, display: 'flex', padding: 4 }} aria-label="Cerrar">
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
               <path d="m6 6 12 12M18 6 6 18" />
@@ -517,7 +756,7 @@ function EmptyState({ onClear }) {
         <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /><line x1="8" y1="11" x2="14" y2="11" />
       </svg>
       <div>
-        <p style={{ fontFamily: "'Playfair Display', serif", fontWeight: 400, fontSize: 22, color: T.ink, marginBottom: 8 }}>
+        <p style={{ fontFamily: "'Cormorant Garamond', serif", fontWeight: 400, fontSize: 22, color: T.ink, marginBottom: 8 }}>
           Sin resultados
         </p>
         <p style={{ fontFamily: "'Hanken Grotesk', system-ui, sans-serif", fontSize: 14, color: T.muted }}>

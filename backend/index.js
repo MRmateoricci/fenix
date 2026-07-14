@@ -1,0 +1,81 @@
+import express from 'express'
+import cors from 'cors'
+import cookieParser from 'cookie-parser'
+import 'dotenv/config'
+import ordersRouter   from './routes/orders.js'
+import webhooksRouter from './routes/webhooks.js'
+import authRouter     from './routes/auth.js'
+import favoritesRouter from './routes/favorites.js'
+import stockAlertsRouter from './routes/stockAlerts.js'
+import reviewsRouter from './routes/reviews.js'
+import productsRouter from './routes/products.js'
+import catalogRouter  from './routes/catalog.js'
+import shippingRouter from './routes/shipping.js'
+import { uploadsDir } from './config/uploads.js'
+import { startExpireReservationsJob } from './jobs/expireReservations.js'
+
+const app  = express()
+const PORT = process.env.PORT || 3001
+
+// Detrás del proxy de Railway/Render, sin esto `req.protocol` siempre da
+// 'http' — rompe las URLs absolutas que arma POST /api/products/:id/image.
+app.set('trust proxy', 1)
+
+// ── CORS ──────────────────────────────────────────────────────────────────────
+const allowedOrigins = [
+  'http://localhost:5173',
+  'http://localhost:4173',
+  process.env.FRONTEND_BASE_URL,
+].filter(Boolean)
+
+const allowedOriginPatterns = [/\.ngrok-free\.dev$/, /\.ngrok-free\.app$/, /\.ngrok\.io$/]
+
+app.use(cors({
+  origin: (origin, cb) => {
+    if (!origin || allowedOrigins.includes(origin)) return cb(null, true)
+    if (allowedOriginPatterns.some((re) => re.test(new URL(origin).hostname))) return cb(null, true)
+    cb(new Error(`CORS: origen no permitido → ${origin}`))
+  },
+  credentials: true,
+}))
+
+// ── Webhooks: necesitan el body raw para verificar la firma ───────────────────
+app.use('/api/webhooks', express.raw({ type: 'application/json' }), (req, _res, next) => {
+  if (Buffer.isBuffer(req.body)) {
+    try { req.body = JSON.parse(req.body.toString()) } catch { req.body = {} }
+  }
+  next()
+})
+
+// ── Body parser JSON + cookies para el resto de rutas ─────────────────────────
+app.use(express.json())
+app.use(cookieParser())
+
+// ── Fotos de producto subidas por el admin (ver routes/products.js POST /:id/image) ─
+app.use('/uploads', express.static(uploadsDir))
+
+// ── Rutas ─────────────────────────────────────────────────────────────────────
+app.get('/api/health', (_req, res) => res.json({ ok: true, env: process.env.NODE_ENV || 'development' }))
+app.use('/api/orders',   ordersRouter)
+app.use('/api/webhooks', webhooksRouter)
+app.use('/api/auth',     authRouter)
+app.use('/api/favorites', favoritesRouter)
+app.use('/api/stock-alerts', stockAlertsRouter)
+app.use('/api/reviews', reviewsRouter)
+app.use('/api/products', productsRouter)
+app.use('/api/catalog',  catalogRouter)
+app.use('/api/shipping', shippingRouter)
+
+// ── 404 ───────────────────────────────────────────────────────────────────────
+app.use((_req, res) => res.status(404).json({ error: 'Ruta no encontrada' }))
+
+// ── Error global ──────────────────────────────────────────────────────────────
+app.use((err, _req, res, _next) => {
+  console.error('[Express error]', err)
+  res.status(500).json({ error: err.message || 'Error interno del servidor' })
+})
+
+app.listen(PORT, () => {
+  console.log(`🔥 Fénix backend corriendo en http://localhost:${PORT}`)
+  startExpireReservationsJob()
+})

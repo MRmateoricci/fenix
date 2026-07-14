@@ -26,10 +26,10 @@ export default function Footer() {
           {/* Brand */}
           <div style={{ maxWidth: 310 }}>
             <div style={{ marginBottom: 16 }}>
-              <FenixLogo onDark />
+              <FenixLogo />
             </div>
             <p style={{
-              fontFamily: "'Playfair Display', serif", fontStyle: 'italic',
+              fontFamily: "'Cormorant Garamond', serif", fontStyle: 'italic',
               fontWeight: 400, fontSize: 15, lineHeight: 1.55, color: '#8C8270', margin: 0,
             }}>
               Iluminando los hogares de City Bell desde 1977.
@@ -56,11 +56,26 @@ export default function Footer() {
               >
                 Destacados
               </a>
-              <Link to="/products?category=Tiras LED" style={LINK} onMouseEnter={enter} onMouseLeave={leave}>Iluminación LED</Link>
+              <Link to="/products?category=Iluminación" style={LINK} onMouseEnter={enter} onMouseLeave={leave}>Iluminación</Link>
               <Link to="/products?category=Electricidad" style={LINK} onMouseEnter={enter} onMouseLeave={leave}>Materiales eléctricos</Link>
+              <Link to="/products?category=Herramientas" style={LINK} onMouseEnter={enter} onMouseLeave={leave}>Herramientas</Link>
             </div>
 
-            {/* Contacto */}
+            {/* Información */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
+              <span style={{
+                fontFamily: "'Spline Sans Mono', monospace",
+                fontSize: 10.5, color: '#6B6151', marginBottom: 3,
+              }}>
+                información
+              </span>
+              <Link to="/nosotros" style={LINK} onMouseEnter={enter} onMouseLeave={leave}>Nuestra historia</Link>
+              <Link to="/guias" style={LINK} onMouseEnter={enter} onMouseLeave={leave}>Guías de iluminación</Link>
+              <Link to="/faq" style={LINK} onMouseEnter={enter} onMouseLeave={leave}>Preguntas frecuentes</Link>
+              <Link to="/profesionales" style={LINK} onMouseEnter={enter} onMouseLeave={leave}>Profesionales B2B</Link>
+            </div>
+
+          {/* Contacto */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
               <span style={{
                 fontFamily: "'Spline Sans Mono', monospace",

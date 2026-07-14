@@ -1,0 +1,25 @@
+{
+  "name": "fenix-backend",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "dev": "node --watch index.js",
+    "start": "node index.js",
+    "db:migrate": "node -e \"import('./db/pool.js').then(m => m.runSchema())\""
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "jsonwebtoken": "^9.0.3",
+    "mercadopago": "^2.0.15",
+    "multer": "^2.2.0",
+    "nodemailer": "^9.0.3",
+    "pdf-parse": "^1.1.1",
+    "pg": "^8.12.0",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
+  }
+}

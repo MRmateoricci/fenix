@@ -4,13 +4,21 @@ const CartContext = createContext(null)
 
 const STORAGE_KEY = 'fenix_cart'
 
+// Dos líneas de carrito son "la misma" si comparten producto, color y medida
+// elegidos. Productos sin color/medida (undefined/null) siguen matcheando
+// como antes.
+const sameLine = (a, b) =>
+  a.id === b.id &&
+  (a.color ?? null) === (b.color ?? null) &&
+  (a.size ?? null) === (b.size ?? null)
+
 function cartReducer(state, action) {
   switch (action.type) {
     case 'ADD_ITEM': {
-      const existing = state.find(item => item.id === action.product.id)
+      const existing = state.find(item => sameLine(item, action.product))
       if (existing) {
         return state.map(item =>
-          item.id === action.product.id
+          sameLine(item, action.product)
             ? { ...item, quantity: item.quantity + 1 }
             : item
         )
@@ -18,13 +26,13 @@ function cartReducer(state, action) {
       return [...state, { ...action.product, quantity: 1 }]
     }
     case 'REMOVE_ITEM':
-      return state.filter(item => item.id !== action.id)
+      return state.filter(item => !sameLine(item, action))
     case 'UPDATE_QUANTITY':
       if (action.quantity <= 0) {
-        return state.filter(item => item.id !== action.id)
+        return state.filter(item => !sameLine(item, action))
       }
       return state.map(item =>
-        item.id === action.id ? { ...item, quantity: action.quantity } : item
+        sameLine(item, action) ? { ...item, quantity: action.quantity } : item
       )
     case 'CLEAR_CART':
       return []
@@ -57,12 +65,12 @@ export function CartProvider({ children }) {
     dispatch({ type: 'ADD_ITEM', product })
   }
 
-  function removeItem(id) {
-    dispatch({ type: 'REMOVE_ITEM', id })
+  function removeItem(id, color = null, size = null) {
+    dispatch({ type: 'REMOVE_ITEM', id, color, size })
   }
 
-  function updateQuantity(id, quantity) {
-    dispatch({ type: 'UPDATE_QUANTITY', id, quantity })
+  function updateQuantity(id, color, size, quantity) {
+    dispatch({ type: 'UPDATE_QUANTITY', id, color, size, quantity })
   }
 
   function clearCart() {

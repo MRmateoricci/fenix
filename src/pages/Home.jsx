@@ -1,7 +1,15 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { products } from '../data/products'
+import { useAdmin } from '../context/AdminContext'
 import { useCart } from '../context/CartContext'
+import localImg from '../assets/Fenix local.jpg'
+import heroImg from '../assets/fondo fenix.jpg'
+import interiorImg from '../assets/IF01__fondo_bco_sin_logo-removebg-preview.png'
+import electricidadImg from '../assets/D_Q_NP_2X_721001-MLA99449833512_112025-T-removebg-preview.png'
+import herramientasImg from '../assets/pinza-universal-removebg-preview.png'
+import automatizacionImg from '../assets/302489-800-800-removebg-preview.png'
+import PageSEO from '../components/SEO'
+import { SEO as seoCfg } from '../config/seo'
 
 const T = {
   paper:          '#F7F4EF',
@@ -24,17 +32,124 @@ const T = {
 const fmt = (n) =>
   new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(n)
 
+// Reveals children with a fade + rise-up cinematic entrance the first time they scroll into view.
+function useInView(threshold = 0.2) {
+  const ref = useRef(null)
+  const [inView, setInView] = useState(false)
+
+  useEffect(() => {
+    const node = ref.current
+    if (!node) return
+    if (typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      setInView(true)
+      return
+    }
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setInView(true)
+          observer.disconnect()
+        }
+      },
+      { threshold, rootMargin: '0px 0px -8% 0px' }
+    )
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [threshold])
+
+  return [ref, inView]
+}
+
+function Reveal({ children, delay = 0, y = 26, threshold = 0.2, style }) {
+  const [ref, inView] = useInView(threshold)
+  return (
+    <div
+      ref={ref}
+      style={{
+        opacity: inView ? 1 : 0,
+        transform: inView ? 'translateY(0)' : `translateY(${y}px)`,
+        transition: `opacity .8s cubic-bezier(0.16,1,0.3,1) ${delay}ms, transform .8s cubic-bezier(0.16,1,0.3,1) ${delay}ms`,
+        willChange: 'opacity, transform',
+        ...style,
+      }}
+    >
+      {children}
+    </div>
+  )
+}
+
 const CATEGORIES = [
-  { code: 'IL',  name: 'Iluminación',          to: '/products?category=Iluminación Interior' },
-  { code: 'LED', name: 'Lámparas LED',         to: '/products?category=Tiras LED'            },
-  { code: 'VT',  name: 'Ventiladores',         to: '/products?category=Ventiladores de techo'},
-  { code: 'EM',  name: 'Materiales eléctricos',to: '/products?category=Electricidad'         },
-  { code: 'EX',  name: 'Exterior',             to: '/products?category=Iluminación Exterior' },
+  { code: 'EL', name: 'Electricidad',              to: '/products?category=Electricidad',              image: electricidadImg, icon: 'plug', productShot: true },
+  { code: 'IL', name: 'Iluminación',                to: '/products?category=Iluminación',               image: interiorImg,     icon: 'bulb', productShot: true },
+  { code: 'HE', name: 'Herramientas',               to: '/products?category=Herramientas',              image: herramientasImg,   icon: 'tool', productShot: true },
+  { code: 'AI', name: 'Automatización',             to: '/products?category=Automatización Industrial', image: automatizacionImg, icon: 'gear', productShot: true },
 ]
 
+const LOCAL_BUSINESS_SCHEMA = {
+  '@context': 'https://schema.org',
+  '@graph': [
+    {
+      '@type': 'LocalBusiness',
+      '@id': `${seoCfg.siteUrl}/#business`,
+      name: seoCfg.business.name,
+      url: seoCfg.siteUrl,
+      telephone: seoCfg.business.phone,
+      email: seoCfg.business.email,
+      address: {
+        '@type': 'PostalAddress',
+        streetAddress: seoCfg.business.streetAddress,
+        addressLocality: seoCfg.business.locality,
+        addressRegion: seoCfg.business.region,
+        postalCode: seoCfg.business.postalCode,
+        addressCountry: seoCfg.business.country,
+      },
+      geo: {
+        '@type': 'GeoCoordinates',
+        latitude: seoCfg.business.geo.lat,
+        longitude: seoCfg.business.geo.lng,
+      },
+      openingHours: seoCfg.business.hours,
+      image: seoCfg.ogImage,
+      priceRange: '$$',
+      sameAs: [seoCfg.business.instagram],
+      foundingDate: seoCfg.business.founded,
+      description: seoCfg.description,
+    },
+    {
+      '@type': 'Organization',
+      '@id': `${seoCfg.siteUrl}/#organization`,
+      name: seoCfg.business.name,
+      url: seoCfg.siteUrl,
+      logo: `${seoCfg.siteUrl}/favicon.svg`,
+      sameAs: [seoCfg.business.instagram],
+    },
+  ],
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
+// The area below the hero starts covered by a dark veil (same tone as the header,
+// with a soft gradient trailing edge) instead of the bare paper color, so there's
+// no seam mid-intro. Once the hero's cinematic sequence finishes, the veil recedes
+// upward — its own gradient edge sweeping bottom-to-top — never a flat color swap.
 export default function Home() {
+  const rm = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  const [pageReady, setPageReady] = useState(rm)
+
+  useEffect(() => {
+    if (rm) return
+    const onIntroDone = () => setPageReady(true)
+    document.addEventListener('fnx-intro-done', onIntroDone)
+    return () => document.removeEventListener('fnx-intro-done', onIntroDone)
+  }, [rm])
+
   return (
+    <>
+    <PageSEO
+      title="Iluminación en City Bell y La Plata — Desde 1977"
+      description="Luminarias, materiales eléctricos y asesoramiento experto en City Bell, La Plata. Tres generaciones de familia desde 1977. Envíos y retiro en local."
+      url="/"
+      schema={LOCAL_BUSINESS_SCHEMA}
+    />
     <div style={{ background: T.paper, color: T.ink, overflowX: 'hidden', position: 'relative' }}>
       {/* Paper grain */}
       <div
@@ -46,18 +161,33 @@ export default function Home() {
         }}
       />
       <HeroSection />
-      <CategoriasSection />
-      <DestacadosSection />
-      <CatalogoBand />
-      <HistoriaSection />
-      <ContactoSection />
+      <div style={{ position: 'relative' }}>
+        <div
+          aria-hidden="true"
+          style={{
+            position: 'absolute', top: 0, left: 0, right: 0, zIndex: 50, pointerEvents: 'none',
+            height: 'clamp(500px, 100vh, 1000px)',
+            background: `linear-gradient(180deg, ${T.dark} 0%, ${T.dark} 68%, rgba(20,16,10,0) 100%)`,
+            transform: pageReady ? 'scaleY(0)' : 'scaleY(1)',
+            transformOrigin: 'top',
+            transition: rm ? 'none' : 'transform 1.1s cubic-bezier(0.16,1,0.3,1)',
+          }}
+        />
+        <CategoriasSection />
+        <DestacadosSection />
+        <CatalogoBand />
+        <HistoriaSection />
+        <ResenasSection />
+        <ContactoSection />
+      </div>
     </div>
+    </>
   )
 }
 
 // ─── 1. Hero ───────────────────────────────────────────────────────────────────
-const ALL_REACHED  = { bulb:true,  lamp:true,  bg:true,  cone:true,  eyebrow:true,  h1:true,  sub:true,  cta:true  }
-const NONE_REACHED = { bulb:false, lamp:false, bg:false, cone:false, eyebrow:false, h1:false, sub:false, cta:false }
+const ALL_REACHED  = { bg:true,  eyebrow:true,  h1:true,  sub:true,  cta:true  }
+const NONE_REACHED = { bg:false, eyebrow:false, h1:false, sub:false, cta:false }
 
 function HeroSection() {
   const rm = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -71,23 +201,20 @@ function HeroSection() {
     }
 
     const overlay = document.createElement('div')
-    overlay.style.cssText = 'position:fixed;inset:0;z-index:200;background:#FAF7F0;pointer-events:none;transition:opacity 0.8s ease;'
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:200;background:#14100A;pointer-events:none;transition:opacity 0.8s ease;'
     document.body.appendChild(overlay)
     overlay.getBoundingClientRect()
 
     const set = (key) => setReached(prev => ({ ...prev, [key]: true }))
     const ts = [
-      setTimeout(() => { overlay.style.opacity = '0' },   100),
-      setTimeout(() => set('bulb'),                        420),
-      setTimeout(() => set('lamp'),                        720),
-      setTimeout(() => set('bg'),                          920),
-      setTimeout(() => set('cone'),                       1220),
-      setTimeout(() => set('eyebrow'),                    1620),
-      setTimeout(() => set('h1'),                         2020),
-      setTimeout(() => set('sub'),                        2420),
-      setTimeout(() => set('cta'),                        2820),
-      setTimeout(() => document.dispatchEvent(new CustomEvent('fnx-intro-done')), 3220),
-      setTimeout(() => overlay.remove(),                  4100),
+      setTimeout(() => { overlay.style.opacity = '0' },   80),
+      setTimeout(() => set('bg'),                        200),
+      setTimeout(() => set('eyebrow'),                   520),
+      setTimeout(() => set('h1'),                        720),
+      setTimeout(() => set('sub'),                       920),
+      setTimeout(() => set('cta'),                      1120),
+      setTimeout(() => document.dispatchEvent(new CustomEvent('fnx-intro-done')), 1320),
+      setTimeout(() => overlay.remove(),                1760),
     ]
     return () => { ts.forEach(clearTimeout); overlay.remove() }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
@@ -103,254 +230,107 @@ function HeroSection() {
   return (
     <header style={{
       position: 'relative',
-      minHeight: '100vh',
+      minHeight: 'clamp(620px, 72vh, 840px)',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
-      textAlign: 'center', color: T.ink,
-      background: '#FAF7F0',
+      textAlign: 'center', color: '#F2EBDC',
+      background: '#14100A',
       overflow: 'hidden',
     }}>
-      {/* Warm radial glow — fades in as bulb lights up */}
+      {/* Photo background — pendant globe lights */}
       <div aria-hidden="true" style={{
         position: 'absolute', inset: 0, zIndex: 0,
-        background: [
-          'radial-gradient(62% 56% at 50% 15%, rgba(255,200,75,0.40), rgba(255,175,45,0.14) 48%, transparent 72%)',
-          'linear-gradient(180deg, #FBF4DF 0%, #FAF7F0 52%, #F7F4EF 100%)',
-        ].join(','),
+        backgroundImage: `url(${heroImg})`,
+        backgroundSize: 'cover',
+        backgroundPosition: 'center 66%',
         ...fade(reached.bg, '1.4s'),
       }} />
 
-      {/* Edison bulb on cord */}
-      <div
-        aria-hidden="true"
-        className="fnx-lamp"
-        style={{
-          position: 'absolute', top: 0, left: '50%',
-          transform: 'translateX(-50%)',
-          transformOrigin: 'top center',
-          zIndex: 1,
-          display: 'flex', flexDirection: 'column', alignItems: 'center',
-          animation: reached.lamp ? 'fnx-sway 7s ease-in-out infinite' : 'none',
-          pointerEvents: 'none',
-        }}
-      >
-        {/* Ceiling mount + cord + bulb */}
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', ...fade(reached.bulb, '0.9s') }}>
-          {/* Ceiling bracket */}
-          <div style={{ width: 22, height: 5, borderRadius: '0 0 3px 3px', background: 'linear-gradient(#8A8070, #6A6050)' }} />
-          {/* Cord */}
-          <div style={{ width: 2, height: 88, background: 'linear-gradient(#9A9888, #7A7868)' }} />
+      {/* Darkening overlay for text legibility */}
+      <div aria-hidden="true" style={{
+        position: 'absolute', inset: 0, zIndex: 1,
+        background: [
+          'linear-gradient(180deg, rgba(10,8,4,0.55) 0%, rgba(10,8,4,0.35) 40%, rgba(10,8,4,0.72) 100%)',
+          'radial-gradient(60% 55% at 50% 42%, rgba(10,8,4,0.15), rgba(10,8,4,0.55) 78%)',
+        ].join(','),
+      }} />
 
-          {/* Edison bulb with glow filter */}
-          <div
-            className={reached.lamp ? 'fnx-bulb' : ''}
-            style={{
-              filter: reached.lamp
-                ? 'drop-shadow(0 0 18px rgba(255,162,38,0.95)) drop-shadow(0 0 54px rgba(255,140,22,0.62)) drop-shadow(0 0 110px rgba(255,125,10,0.32))'
-                : 'none',
-              transition: 'filter 0.8s ease',
-            }}
-          >
-            <EdisonBulbSVG lit={reached.lamp} />
-          </div>
-        </div>
-
-        {/* Light cone below bulb */}
-        <div style={{
-          position: 'absolute', top: 228, left: '50%', transform: 'translateX(-50%)',
-          width: 380, height: 560,
-          background: 'linear-gradient(180deg, rgba(255,200,75,0.22) 0%, rgba(255,180,55,0.08) 36%, transparent 72%)',
-          clipPath: 'polygon(38% 0, 62% 0, 100% 100%, 0 100%)',
-          filter: 'blur(20px)',
-          ...fade(reached.cone, '1.2s'),
-        }} />
-      </div>
+      {/* Fade into the page background so the categories blend in, no hard cut.
+          Scales up from the bottom edge so the transition sweeps in cinematically. */}
+      <div aria-hidden="true" style={{
+        position: 'absolute', left: 0, right: 0, bottom: 0, zIndex: 1,
+        height: 'clamp(90px, 14vw, 160px)',
+        background: `linear-gradient(180deg, rgba(20,16,10,0) 0%, ${T.paper} 100%)`,
+        pointerEvents: 'none',
+        transform: reached.bg ? 'scaleY(1)' : 'scaleY(0)',
+        transformOrigin: 'bottom',
+        transition: rm ? 'none' : 'transform 1.3s cubic-bezier(0.16,1,0.3,1) .2s',
+      }} />
 
       {/* Content */}
-      <div style={{ position: 'relative', zIndex: 2, padding: '120px 30px 90px', maxWidth: 900 }}>
+      <div style={{ position: 'relative', zIndex: 2, padding: '90px 30px 44px', maxWidth: 900 }}>
         <div style={{
           fontFamily: "'Spline Sans Mono', monospace",
           fontSize: 12.5, letterSpacing: '.26em', textTransform: 'uppercase',
-          color: 'rgba(22,17,11,0.50)', marginBottom: 26,
+          color: 'rgba(242,235,220,0.72)', marginBottom: 20,
           ...rise(reached.eyebrow, '0.7s'),
         }}>
           City Bell · desde 1977
         </div>
         <h1 style={{
-          fontFamily: "'Playfair Display', serif",
+          fontFamily: "'Cormorant Garamond', serif",
           fontWeight: 500, margin: 0,
-          fontSize: 'clamp(54px, 8vw, 116px)',
+          fontSize: 'clamp(48px, 7vw, 100px)',
           lineHeight: .96, letterSpacing: '-.02em',
-          color: T.ink,
+          color: '#F7F4EF',
+          textShadow: '0 4px 32px rgba(0,0,0,0.35)',
           ...rise(reached.h1, '0.8s'),
         }}>
           Tu casa,<br />
           <em style={{ fontStyle: 'normal' }}>en su mejor luz</em>
         </h1>
-        <p style={{
-          maxWidth: 520, margin: '26px auto 0', fontSize: 17.5, lineHeight: 1.6,
-          color: 'rgba(22,17,11,0.62)',
-          ...rise(reached.sub, '0.7s'),
-        }}>
-          Luminarias, materiales eléctricos y el consejo de quien lo hace, con buen gusto, desde hace casi medio siglo.
-        </p>
-        <div style={{ marginTop: 40, ...rise(reached.cta, '0.6s') }}>
-          <HeroCTA />
-        </div>
       </div>
-
-      <ScrollIndicator visible={reached.cta} rm={rm} />
     </header>
   )
 }
 
-function EdisonBulbSVG({ lit }) {
-  const glass      = lit ? 'rgba(255,195,72,0.48)' : 'rgba(235,212,158,0.22)'
-  const glassStroke= lit ? 'rgba(200,148,48,0.52)' : 'rgba(170,145,98,0.32)'
-  const innerGlow  = lit ? 'rgba(255,222,108,0.30)' : 'transparent'
-  const filament   = lit ? '#FF9830' : '#8B6B30'
-  const metal      = '#C4BC9A'
-  const metalStroke= '#9E9676'
-
-  return (
-    <svg width="100" height="190" viewBox="0 0 100 190" fill="none" xmlns="http://www.w3.org/2000/svg">
-      {/* Inner warm glow */}
-      <circle cx="50" cy="52" r="30" fill={innerGlow} />
-
-      {/* Glass globe — A60 bulb profile */}
-      <path
-        d="M 50 10
-           C 24 10 8 26 8 52
-           C 8 70 18 84 34 92
-           L 34 106
-           L 66 106
-           L 66 92
-           C 82 84 92 70 92 52
-           C 92 26 76 10 50 10 Z"
-        fill={glass}
-        stroke={glassStroke}
-        strokeWidth="1.5"
-      />
-
-      {/* Specular highlight */}
-      <path
-        d="M 20 32 Q 26 17 40 12"
-        stroke="rgba(255,255,255,0.55)"
-        strokeWidth="2.5"
-        strokeLinecap="round"
-      />
-
-      {/* Filament support rods */}
-      <line x1="40" y1="104" x2="40" y2="74" stroke="#B09060" strokeWidth="0.9" opacity="0.75" />
-      <line x1="60" y1="104" x2="60" y2="74" stroke="#B09060" strokeWidth="0.9" opacity="0.75" />
-      <line x1="40" y1="80" x2="60" y2="80" stroke="#B09060" strokeWidth="0.8" opacity="0.55" />
-
-      {/* Edison filament — looped arch */}
-      <path
-        d="M 40 74 L 40 58 Q 40 46 50 44 Q 60 46 60 58 L 60 74"
-        stroke={filament} strokeWidth="1.6" strokeLinecap="round"
-      />
-      {/* Inner coil detail */}
-      <path
-        d="M 43 58 C 43 53 50 51 50 55 C 50 59 57 57 57 52 C 57 47 50 45 50 45"
-        stroke={filament} strokeWidth="1.2" strokeLinecap="round"
-      />
-
-      {/* Metal collar */}
-      <rect x="30" y="106" width="40" height="7" rx="2" fill={metal} stroke={metalStroke} strokeWidth="1" />
-
-      {/* Screw base */}
-      <rect x="28" y="113" width="44" height="46" rx="3.5" fill={metal} />
-      {/* Highlight strip */}
-      <rect x="29" y="113" width="8" height="46" rx="2" fill="rgba(255,255,255,0.16)" />
-      {/* Thread lines */}
-      {[119, 125, 131, 137, 143, 149, 155].map(y => (
-        <line key={y} x1="28" y1={y} x2="72" y2={y} stroke={metalStroke} strokeWidth="0.8" opacity="0.65" />
-      ))}
-
-      {/* Insulator disc */}
-      <ellipse cx="50" cy="159" rx="22" ry="3.5" fill="#6E6454" />
-      {/* Contact dome */}
-      <ellipse cx="50" cy="163" rx="14" ry="7" fill="#D4C880" />
-      <ellipse cx="50" cy="167" rx="9" ry="4.5" fill="#C4B868" />
-    </svg>
-  )
-}
-
-function HeroCTA() {
-  const [hovered, setHovered] = useState(false)
-  const navigate = useNavigate()
-  return (
-    <a
-      href="/products"
-      onClick={(e) => { e.preventDefault(); navigate('/products') }}
-      style={{
-        textDecoration: 'none', display: 'inline-block',
-        border: `1px solid ${hovered ? T.ink : 'rgba(22,17,11,0.42)'}`,
-        background: hovered ? T.ink : 'transparent',
-        color: hovered ? T.paper : T.ink,
-        fontSize: 13, fontWeight: 500,
-        letterSpacing: '.16em', textTransform: 'uppercase',
-        padding: '16px 34px', borderRadius: 2,
-        transition: 'background .25s ease, color .25s ease, border-color .25s ease',
-      }}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-    >
-      Ver el catálogo
-    </a>
-  )
-}
-
-function ScrollIndicator({ visible = true, rm = false }) {
-  const [hovered, setHovered] = useState(false)
-  return (
-    <a
-      href="#categorias"
-      onClick={(e) => { e.preventDefault(); document.getElementById('categorias')?.scrollIntoView({ behavior: 'smooth' }) }}
-      style={{
-        position: 'absolute', left: '50%', bottom: 30,
-        transform: 'translateX(-50%)', zIndex: 2,
-        textDecoration: 'none',
-        display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 9,
-        color: hovered ? T.ink : 'rgba(22,17,11,0.50)',
-        fontFamily: "'Spline Sans Mono', monospace",
-        fontSize: 10.5, letterSpacing: '.16em', textTransform: 'uppercase',
-        opacity: visible ? 1 : 0,
-        transition: rm ? 'color .15s' : 'color .15s, opacity 0.6s ease',
-      }}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-    >
-      Comprá por categoría
-      <svg
-        viewBox="0 0 24 24" width="18" height="18"
-        fill="none" stroke="currentColor" strokeWidth="1.4"
-        className="fnx-bob-el"
-        style={{ animation: 'fnx-bob 2.4s ease-in-out infinite' }}
-      >
-        <path d="M12 5v14M6 13l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-    </a>
-  )
-}
-
-// ─── 2. Comprá por categoría ───────────────────────────────────────────────────
+// ─── 2. Comprá por categoría (flotante sobre el hero) ──────────────────────────
+// Stays hidden until the hero's cinematic intro finishes dispatching 'fnx-intro-done',
+// so the photo + headline always land before the category cards appear.
 function CategoriasSection() {
   const navigate = useNavigate()
+  const rm = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  const [ready, setReady] = useState(rm)
+
+  useEffect(() => {
+    if (rm) return
+    const onIntroDone = () => setReady(true)
+    document.addEventListener('fnx-intro-done', onIntroDone)
+    return () => document.removeEventListener('fnx-intro-done', onIntroDone)
+  }, [rm])
+
   return (
-    <section id="categorias" style={{ maxWidth: 1320, margin: '0 auto', padding: '96px 40px 30px', scrollMarginTop: 90 }}>
-      <h2 style={{
-        fontFamily: "'Playfair Display', serif", fontWeight: 500,
-        fontSize: 'clamp(32px, 3.8vw, 52px)', lineHeight: 1.0,
-        margin: '0 0 48px', color: T.ink, letterSpacing: '-.015em', textAlign: 'center',
-      }}>
-        Comprá por categoría
-      </h2>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 18 }}>
+    <section
+      id="categorias"
+      style={{
+        maxWidth: 1440, margin: '0 auto', padding: '0 40px 120px', position: 'relative', zIndex: 3, scrollMarginTop: 90,
+        opacity: ready ? 1 : 0,
+        transform: ready ? 'translateY(0)' : 'translateY(24px)',
+        transition: rm ? 'none' : 'opacity .8s cubic-bezier(0.16,1,0.3,1), transform .8s cubic-bezier(0.16,1,0.3,1)',
+      }}
+    >
+      <div
+        className="fnx-cat-grid"
+        style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 'clamp(32px, 5vw, 56px)' }}
+      >
         {CATEGORIES.map((cat) => (
           <CategoryCard key={cat.code} cat={cat} onClick={() => navigate(cat.to)} />
         ))}
       </div>
+      <style>{`
+        .fnx-cat-grid { margin-top: -72px; }
+        @media (min-width: 640px)  { .fnx-cat-grid { margin-top: -104px; } }
+        @media (min-width: 1024px) { .fnx-cat-grid { margin-top: -136px; } }
+      `}</style>
     </section>
   )
 }
@@ -367,69 +347,177 @@ function CategoryCard({ cat, onClick }) {
     >
       <div
         style={{
-          position: 'relative', aspectRatio: '4/5',
-          background: T.surface2,
-          border: `1px solid ${hovered ? T.hairlineStrong : T.hairline}`,
+          display: 'flex', flexDirection: 'column',
+          background: cat.productShot ? 'transparent' : cat.image ? T.surface2 : 'linear-gradient(160deg, #2A2118 0%, #3A2E1E 55%, #4A3B24 100%)',
+          border: cat.productShot ? 'none' : `1px solid ${hovered ? T.hairlineStrong : T.hairline}`,
           borderRadius: 3, overflow: 'hidden',
-          boxShadow: hovered ? '0 12px 36px -10px rgba(22,17,11,0.16)' : '0 2px 8px -4px rgba(22,17,11,0.04)',
+          boxShadow: cat.productShot ? 'none' : hovered ? '0 12px 36px -10px rgba(22,17,11,0.16)' : '0 2px 8px -4px rgba(22,17,11,0.04)',
           transition: 'box-shadow .35s ease, border-color .25s ease',
         }}
       >
-        <div style={{
-          position: 'absolute', inset: 0,
-          background: 'radial-gradient(72% 60% at 64% 30%, rgba(255,255,255,0.66), transparent 64%)',
-          transform: hovered ? 'scale(1.06)' : 'scale(1)',
-          transition: 'transform .6s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
-        }} />
-        <span style={{ position: 'absolute', top: 13, left: 14, fontFamily: "'Spline Sans Mono', monospace", fontSize: 11, letterSpacing: '.08em', color: T.ink, zIndex: 1 }}>
-          {cat.code}
-        </span>
-        <span style={{ position: 'absolute', bottom: 12, right: 14, fontFamily: "'Spline Sans Mono', monospace", fontSize: 9.5, color: T.muted2, zIndex: 1 }}>
-          FOTO
-        </span>
-      </div>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginTop: 14 }}>
-        <span style={{ fontFamily: "'Playfair Display', serif", fontWeight: 400, fontSize: 20, color: T.ink }}>
-          {cat.name}
-        </span>
-        <svg
-          viewBox="0 0 24 24" width="15" height="15" fill="none" stroke={T.muted2} strokeWidth="1.6"
-          style={{
-            transform: hovered ? 'translateX(5px)' : 'translateX(0)',
-            transition: 'transform .25s ease',
-          }}
-        >
-          <path d="M5 12h14M13 6l6 6-6 6" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
+        <div style={{ position: 'relative', aspectRatio: '4/4.3' }}>
+          {cat.image
+            ? <img
+                src={cat.image} alt={cat.name}
+                style={{
+                  width: '100%', height: '100%', display: 'block',
+                  objectFit: cat.productShot ? 'contain' : 'cover',
+                  objectPosition: 'center',
+                  padding: cat.productShot ? '9%' : 0,
+                  boxSizing: 'border-box',
+                  transform: hovered ? 'scale(1.06)' : 'scale(1)',
+                  transition: 'transform .6s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
+                }}
+                loading="lazy"
+              />
+            : (
+              <>
+                <div aria-hidden="true" style={{
+                  position: 'absolute', inset: 0,
+                  background: 'radial-gradient(64% 54% at 68% 28%, rgba(224,162,74,0.28), transparent 68%)',
+                  transform: hovered ? 'scale(1.06)' : 'scale(1)',
+                  transition: 'transform .6s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
+                }} />
+                <div style={{
+                  position: 'absolute', inset: 0, zIndex: 1,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  opacity: hovered ? 0.9 : 0.72,
+                  transform: hovered ? 'scale(1.08)' : 'scale(1)',
+                  transition: 'transform .5s cubic-bezier(0.25, 0.46, 0.45, 0.94), opacity .3s ease',
+                }}>
+                  <CategoryIcon type={cat.icon} />
+                </div>
+              </>
+            )
+          }
+        </div>
+        <div style={{ padding: '14px 4px 4px', textAlign: 'center' }}>
+          <span style={{ fontFamily: "'Hanken Grotesk', system-ui, sans-serif", fontWeight: 700, fontSize: 18, color: T.ink }}>
+            {cat.name}
+          </span>
+        </div>
       </div>
     </a>
   )
 }
 
+function CategoryIcon({ type }) {
+  const stroke = '#E0A24A'
+  const common = { width: 56, height: 56, viewBox: '0 0 24 24', fill: 'none', stroke, strokeWidth: 1.3, strokeLinecap: 'round', strokeLinejoin: 'round' }
+  switch (type) {
+    case 'led':
+      return (
+        <svg {...common}>
+          <rect x="3" y="9" width="18" height="6" rx="1.5" />
+          <path d="M6 9v6M9.5 9v6M13 9v6M16.5 9v6" opacity="0.6" />
+        </svg>
+      )
+    case 'plug':
+      return (
+        <svg {...common}>
+          <path d="M9 3v5M15 3v5" />
+          <path d="M6 8h12v4a6 6 0 0 1-12 0V8Z" />
+          <path d="M12 18v3" />
+        </svg>
+      )
+    case 'sun':
+      return (
+        <svg {...common}>
+          <circle cx="12" cy="12" r="4.2" />
+          <path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1" />
+        </svg>
+      )
+    case 'tool':
+      return (
+        <svg {...common}>
+          <path d="M14.7 6.3a4 4 0 0 1-5.4 5.4L4 17l3 3 5.3-5.3a4 4 0 0 1 5.4-5.4L20 7.3l-3-3-2.3 2z" />
+        </svg>
+      )
+    case 'gear':
+      return (
+        <svg {...common}>
+          <circle cx="12" cy="12" r="3" />
+          <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.6-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9a1.7 1.7 0 0 0 1-1.6V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9a1.7 1.7 0 0 0 1.6 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.6 1z" />
+        </svg>
+      )
+    case 'tag':
+      return (
+        <svg {...common}>
+          <path d="M12.6 2H4a2 2 0 0 0-2 2v8.6a2 2 0 0 0 .6 1.4l9 9a2 2 0 0 0 2.8 0l7.6-7.6a2 2 0 0 0 0-2.8l-9-9a2 2 0 0 0-1.4-.6Z" />
+          <circle cx="7.5" cy="7.5" r="1.4" />
+        </svg>
+      )
+    case 'bulb':
+    default:
+      return (
+        <svg {...common}>
+          <path d="M9 18h6" />
+          <path d="M10 21h4" />
+          <path d="M12 3a6 6 0 0 0-3.6 10.8c.6.46 1.1 1.3 1.1 2.2h5c0-.9.5-1.74 1.1-2.2A6 6 0 0 0 12 3Z" />
+        </svg>
+      )
+  }
+}
+
 // ─── 3. Destacados ─────────────────────────────────────────────────────────────
+// Same product set as the "Promociones" category page (/products?category=Promociones):
+// anything currently marked down (has an originalPrice), kept in sync via that one condition.
+const PROMO_CARD_W = 258
+const PROMO_GAP = 26
+const PROMO_SPEED = 42 // px/s
+
 function DestacadosSection() {
   const { addItem } = useCart()
-  const featured = products.slice(0, 4)
+  const { products } = useAdmin()
+  const featured = products.filter(p => p.originalPrice)
+
+  if (featured.length === 0) return null
+
+  // Enough copies so the strip never runs out of content mid-loop, however wide
+  // the screen is — otherwise the reset shows a visible jump instead of an
+  // uninterrupted scroll. Kept even so translateX(-50%) lands on a whole
+  // multiple of one set's width.
+  const canLoop = featured.length > 1
+  const repeatRaw = canLoop ? Math.min(8, Math.max(2, Math.ceil(16 / featured.length))) : 1
+  const repeat = canLoop ? (repeatRaw % 2 === 0 ? repeatRaw : repeatRaw + 1) : 1
+  const track = canLoop ? Array.from({ length: repeat }, () => featured).flat() : featured
+  const setWidth = featured.length * PROMO_CARD_W + (featured.length - 1) * PROMO_GAP
+  const duration = canLoop ? (repeat / 2) * setWidth / PROMO_SPEED : 0
 
   return (
-    <section id="destacados" style={{ maxWidth: 1320, margin: '0 auto', padding: '74px 40px 26px', scrollMarginTop: 90 }}>
-      <div style={{ marginBottom: 42, textAlign: 'center' }}>
-        <div style={{ fontFamily: "'Spline Sans Mono', monospace", fontSize: 12, color: T.amber, marginBottom: 14, letterSpacing: '.12em' }}>
-          Ofertas
+    <section id="destacados" style={{ padding: '74px 0 26px', scrollMarginTop: 90 }}>
+      <Reveal>
+        <div style={{ maxWidth: 1320, margin: '0 auto 42px', padding: '0 40px', textAlign: 'center' }}>
+          <div style={{ fontFamily: "'Spline Sans Mono', monospace", fontSize: 12, color: T.amber, marginBottom: 14, letterSpacing: '.12em' }}>
+            Ofertas
+          </div>
+          <Link to="/products?category=Promociones" style={{ textDecoration: 'none' }}>
+            <h2 style={{
+              fontFamily: "'Cormorant Garamond', serif", fontWeight: 400,
+              fontSize: 'clamp(32px, 3.8vw, 52px)', lineHeight: 1.0,
+              margin: 0, color: T.ink, letterSpacing: '-.015em',
+            }}>
+              Promociones
+            </h2>
+          </Link>
         </div>
-        <h2 style={{
-          fontFamily: "'Playfair Display', serif", fontWeight: 500,
-          fontSize: 'clamp(32px, 3.8vw, 52px)', lineHeight: 1.0,
-          margin: 0, color: T.ink, letterSpacing: '-.015em',
-        }}>
-          Precios especiales de esta semana
-        </h2>
+      </Reveal>
+      <div style={{ overflow: 'hidden', width: '100%' }}>
+        <div
+          className="fnx-marquee-track fnx-promo-track"
+          style={{
+            display: 'flex', gap: PROMO_GAP, width: 'max-content', padding: '4px 40px',
+            animation: canLoop ? `fnx-marquee ${duration}s linear infinite` : 'none',
+          }}
+        >
+          {track.map((p, i) => (
+            <div key={`${p.id}-${i}`} style={{ width: PROMO_CARD_W, flexShrink: 0 }}>
+              <FeaturedCard product={p} onAdd={addItem} />
+            </div>
+          ))}
+        </div>
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(258px, 1fr))', gap: 26 }}>
-        {featured.map((p) => (
-          <FeaturedCard key={p.id} product={p} onAdd={addItem} />
-        ))}
-      </div>
+      <style>{`.fnx-promo-track:hover { animation-play-state: paused; }`}</style>
     </section>
   )
 }
@@ -482,15 +570,15 @@ function FeaturedCard({ product, onAdd }) {
                 transition: 'transform .6s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
               }} />
           }
-          <span style={{ position: 'absolute', top: 12, left: 13, fontFamily: "'Spline Sans Mono', monospace", fontSize: 10, letterSpacing: '.06em', color: T.text3, zIndex: 1 }}>
+          <span style={{ position: 'absolute', top: 12, left: 13, fontFamily: "'Inter', system-ui, sans-serif", fontSize: 10, letterSpacing: '.08em', color: T.text3, zIndex: 1 }}>
             {product.category}
           </span>
           {product.originalPrice && (
             <span style={{
               position: 'absolute', top: 12, right: 13, zIndex: 1,
               background: T.amber, color: '#fff',
-              fontFamily: "'Spline Sans Mono', monospace",
-              fontSize: 11, fontWeight: 500, letterSpacing: '.04em',
+              fontFamily: "'Inter', system-ui, sans-serif",
+              fontSize: 11, fontWeight: 600, letterSpacing: '.03em',
               padding: '3px 8px', borderRadius: 2,
             }}>
               -{Math.round((1 - product.price / product.originalPrice) * 100)}%
@@ -522,7 +610,7 @@ function FeaturedCard({ product, onAdd }) {
       </Link>
       <div style={{ padding: '16px 2px 0', display: 'flex', flexDirection: 'column', flex: 1 }}>
         <Link to={`/products/${product.id}`} style={{ textDecoration: 'none', color: 'inherit' }}>
-          <h3 style={{ fontFamily: "'Playfair Display', serif", fontWeight: 400, fontSize: 19, lineHeight: 1.2, margin: '0 0 12px', color: T.ink }}>
+          <h3 style={{ fontFamily: "'Inter', system-ui, sans-serif", fontWeight: 400, fontSize: 14, lineHeight: 1.4, margin: '0 0 12px', color: T.ink }}>
             {product.name}
           </h3>
         </Link>
@@ -532,11 +620,11 @@ function FeaturedCard({ product, onAdd }) {
           borderTop: `1px solid ${T.hairline}`, paddingTop: 13,
         }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-            <span style={{ fontFamily: "'Spline Sans Mono', monospace", fontSize: 15, fontWeight: 500, color: T.ink }}>
+            <span style={{ fontFamily: "'Inter', system-ui, sans-serif", fontSize: 14, fontWeight: 500, color: T.ink }}>
               {fmt(product.price)}
             </span>
             {product.originalPrice && (
-              <span style={{ fontFamily: "'Spline Sans Mono', monospace", fontSize: 12, color: T.muted2, textDecoration: 'line-through' }}>
+              <span style={{ fontFamily: "'Inter', system-ui, sans-serif", fontSize: 12, color: T.muted2, textDecoration: 'line-through' }}>
                 {fmt(product.originalPrice)}
               </span>
             )}
@@ -553,7 +641,7 @@ function FeaturedCard({ product, onAdd }) {
               padding: '4px 0',
               borderBottom: `1px solid ${addHover && product.inStock ? T.red : T.hairlineStrong}`,
               transition: 'color .15s, border-color .15s',
-              fontFamily: "'Hanken Grotesk', system-ui, sans-serif",
+              fontFamily: "'Inter', system-ui, sans-serif",
             }}
             onMouseEnter={() => setAddHover(true)}
             onMouseLeave={() => setAddHover(false)}
@@ -573,7 +661,7 @@ function FeaturedCard({ product, onAdd }) {
 
 // ─── 3b. Separador catálogo ────────────────────────────────────────────────────
 const BAND_ITEMS = [
-  'Iluminación', 'Lámparas LED', 'Ventiladores', 'Exterior', 'Materiales eléctricos',
+  'Iluminación', 'Lámparas LED', 'Exterior', 'Materiales eléctricos',
   'Apliques', 'Tiras LED', 'Plafones', 'City Bell',
 ]
 
@@ -629,35 +717,39 @@ function HistoriaSection() {
         className="fnx-historia-grid"
         style={{ maxWidth: 1320, margin: '0 auto', padding: '90px 40px', display: 'grid', gridTemplateColumns: '0.86fr 1.14fr', gap: 60, alignItems: 'center', position: 'relative' }}
       >
-        <figure style={{ margin: 0 }}>
-          <div style={{ aspectRatio: '4/5', borderRadius: 3, overflow: 'hidden', background: '#241B12', border: '1px solid #2E2417', position: 'relative' }}>
-            <div style={{ position: 'absolute', inset: 0, background: 'radial-gradient(80% 55% at 50% 18%, rgba(224,162,74,0.16), transparent 60%)' }} />
-          </div>
-          <figcaption style={{ fontFamily: "'Spline Sans Mono', monospace", fontSize: 10.5, color: '#7C7160', marginTop: 11 }}>
-            FOTO · el local sobre Av. Centenario, 1980
-          </figcaption>
-        </figure>
+        <Reveal y={40}>
+          <figure style={{ margin: 0 }}>
+            <div style={{ aspectRatio: '3/4', borderRadius: 3, overflow: 'hidden', background: '#241B12', border: '1px solid #2E2417', position: 'relative' }}>
+              <img
+                src={localImg}
+                alt="El local Fénix"
+                style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block', opacity: 0.88 }}
+              />
+            </div>
+          </figure>
+        </Reveal>
 
+        <Reveal delay={150} y={40}>
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 24 }}>
-            <span style={{ fontFamily: "'Spline Sans Mono', monospace", fontSize: 12, color: '#9A8B6E' }}>La casa</span>
+            <span style={{ fontFamily: "'Spline Sans Mono', monospace", fontSize: 12, color: '#9A8B6E' }}>Quiénes somos</span>
             <span style={{ width: 34, height: 1, background: '#473A28' }} />
           </div>
           <p style={{
-            fontFamily: "'Playfair Display', serif",
-            fontSize: 'clamp(27px, 3.1vw, 42px)', lineHeight: 1.28,
-            fontWeight: 400, margin: 0, color: '#F2EBDC', letterSpacing: '-.01em',
+            fontFamily: "'Playfair Display', Georgia, serif",
+            fontSize: 'clamp(26px, 2.9vw, 40px)', lineHeight: 1.32,
+            fontWeight: 400, margin: 0, color: '#F2EBDC', letterSpacing: '-.005em',
           }}>
-            Abrimos en 1977 con una idea simple, y todavía la sostenemos:{' '}
-            <em style={{ fontStyle: 'italic', color: T.amber }}>asesorar de verdad</em>, no solo vender una lámpara.
+            Abrimos en <span style={{ fontVariantNumeric: 'lining-nums', fontFeatureSettings: '"lnum" 1' }}>1977</span> con una idea simple, y todavía la sostenemos: asesorar de verdad, no solo vender una lámpara.
           </p>
-          <p style={{ fontSize: 15.5, lineHeight: 1.7, color: '#A99E8B', margin: '28px 0 0', maxWidth: 520 }}>
+          <p style={{ fontFamily: 'Georgia, serif', fontSize: 15.5, lineHeight: 1.75, color: '#A99E8B', margin: '28px 0 0', maxWidth: 520 }}>
             Tres generaciones de la misma familia atendieron este mostrador. Conocemos cada proyecto por su nombre y elegimos los productos que pondríamos en nuestra propia casa.
           </p>
           <div style={{ fontFamily: "'Spline Sans Mono', monospace", fontSize: 12, color: '#8C8270', marginTop: 38, borderTop: '1px solid #2E2417', paddingTop: 18 }}>
             Familia Fénix — tres generaciones en City Bell
           </div>
         </div>
+        </Reveal>
       </div>
       <style>{`.fnx-historia-grid { grid-template-columns: 1fr !important; } @media (min-width: 860px) { .fnx-historia-grid { grid-template-columns: 0.86fr 1.14fr !important; } }`}</style>
     </section>
@@ -676,7 +768,7 @@ function ContactoSection() {
             <span style={{ width: 34, height: 1, background: T.hairlineStrong }} />
           </div>
           <h2 style={{
-            fontFamily: "'Playfair Display', serif", fontWeight: 500,
+            fontFamily: "'Cormorant Garamond', serif", fontWeight: 400,
             fontSize: 'clamp(32px, 3.8vw, 52px)', lineHeight: 1.0,
             margin: '0 0 30px', color: T.ink, letterSpacing: '-.015em',
           }}>
@@ -780,5 +872,134 @@ function WaIcon() {
     <svg viewBox="0 0 24 24" width="17" height="17" fill="currentColor">
       <path d="M12 2a10 10 0 0 0-8.6 15l-1.3 4.7 4.8-1.3A10 10 0 1 0 12 2Zm5.3 14.1c-.2.6-1.3 1.2-1.8 1.2-.5.1-1 .2-3.3-.7s-3.7-3.2-3.8-3.4c-.1-.2-.9-1.2-.9-2.3s.6-1.6.8-1.9c.2-.2.4-.3.6-.3h.4c.2 0 .4 0 .6.5l.8 1.9c.1.2.1.4 0 .5l-.4.5c-.2.2-.3.3-.1.6s.7 1.1 1.4 1.7c.9.8 1.6 1 1.9 1.2.2.1.4.1.5-.1l.6-.7c.2-.2.3-.2.6-.1l1.8.9c.3.1.4.2.5.3.1.2.1.6-.1 1.2Z" />
     </svg>
+  )
+}
+
+// ─── Reseñas Section ───────────────────────────────────────────────────────────
+const RESENAS = [
+  {
+    nombre: 'Martina G.',
+    inicial: 'M',
+    fecha: 'hace 2 semanas',
+    texto: 'Excelente atención. Fui buscando una lámpara para el comedor y me asesoraron muy bien, terminé eligiendo algo mucho mejor de lo que tenía en mente. El producto llegó perfecto.',
+  },
+  {
+    nombre: 'Pablo R.',
+    inicial: 'P',
+    fecha: 'hace 1 mes',
+    texto: 'Compré tiras LED para toda la cocina. Me explicaron todo sobre temperatura de color y potencia antes de llevar. Instalé todo sin problemas y quedó impecable.',
+  },
+  {
+    nombre: 'Laura S.',
+    inicial: 'L',
+    fecha: 'hace 3 semanas',
+    texto: 'Local de barrio con atención de primera. Llevan años en City Bell y se nota — conocen los productos de verdad. Los precios son más que razonables para la calidad que ofrecen.',
+  },
+]
+
+function StarIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="#F59E0B" stroke="none">
+      <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+    </svg>
+  )
+}
+
+const RESENA_CARD_W = 340
+const RESENA_GAP = 20
+const RESENA_SPEED = 46 // px/s
+
+function ResenasSection() {
+  // Enough copies so the strip never runs out of content mid-loop, however wide
+  // the screen is — otherwise the reset shows a visible jump instead of an
+  // uninterrupted scroll. Kept even so translateX(-50%) lands on a whole
+  // multiple of one set's width.
+  const repeatRaw = Math.min(8, Math.max(2, Math.ceil(16 / RESENAS.length)))
+  const repeat = repeatRaw % 2 === 0 ? repeatRaw : repeatRaw + 1
+  const track = Array.from({ length: repeat }, () => RESENAS).flat()
+  const setWidth = RESENAS.length * RESENA_CARD_W + (RESENAS.length - 1) * RESENA_GAP
+  const duration = (repeat / 2) * setWidth / RESENA_SPEED
+
+  return (
+    <section style={{ background: T.paper, padding: '72px 0' }}>
+      <div style={{ maxWidth: 1320, margin: '0 auto', padding: '0 40px' }}>
+        <Reveal>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 20, marginBottom: 40, flexWrap: 'wrap' }}>
+          <div>
+            <span style={{ fontFamily: "'Spline Sans Mono', monospace", fontSize: 11, letterSpacing: '.14em', textTransform: 'uppercase', color: T.muted2, display: 'block', marginBottom: 10 }}>
+              Opiniones
+            </span>
+            <h2 style={{
+              fontFamily: "'Cormorant Garamond', serif", fontWeight: 400,
+              fontSize: 'clamp(26px, 3vw, 40px)', color: T.ink, margin: 0, lineHeight: 1.1,
+            }}>
+              Lo que dicen nuestros clientes
+            </h2>
+          </div>
+          <div style={{
+            display: 'inline-flex', alignItems: 'center', gap: 8,
+            padding: '8px 16px', borderRadius: 999,
+            background: '#FBF8F3', border: '1px solid #DED6C7',
+            fontFamily: "'Spline Sans Mono', monospace", fontSize: 11, color: T.muted,
+          }}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="#4285F4" stroke="none">
+              <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+              <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+              <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z" fill="#FBBC05"/>
+              <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+            </svg>
+            Google Reviews
+          </div>
+        </div>
+        </Reveal>
+      </div>
+
+      <div style={{ overflow: 'hidden', width: '100%' }}>
+        <div
+          className="fnx-marquee-track fnx-resenas-track"
+          style={{
+            display: 'flex', gap: RESENA_GAP, width: 'max-content', padding: '4px 40px',
+            animation: `fnx-marquee ${duration}s linear infinite`,
+          }}
+        >
+          {track.map((r, i) => (
+            <div
+              key={`${r.nombre}-${i}`}
+              style={{
+                width: RESENA_CARD_W, flexShrink: 0,
+                background: T.panel, border: '1px solid #DED6C7',
+                borderRadius: 3, padding: '24px',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
+                <div style={{
+                  width: 38, height: 38, borderRadius: '50%',
+                  background: T.surface2, color: T.ink,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontFamily: "'Inter', system-ui, sans-serif",
+                  fontSize: 15, fontWeight: 600, flexShrink: 0,
+                }}>
+                  {r.inicial}
+                </div>
+                <div>
+                  <p style={{ fontFamily: "'Inter', system-ui, sans-serif", fontSize: 13.5, fontWeight: 500, color: T.ink, margin: 0 }}>{r.nombre}</p>
+                  <p style={{ fontFamily: "'Inter', system-ui, sans-serif", fontSize: 11.5, color: T.muted2, margin: 0 }}>{r.fecha}</p>
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 2, marginBottom: 12 }}>
+                {[...Array(5)].map((_, i) => <StarIcon key={i} />)}
+              </div>
+              <p style={{
+                fontFamily: "'Inter', system-ui, sans-serif",
+                fontSize: 13.5, lineHeight: 1.65, color: '#5A5248', margin: 0,
+              }}>
+                {r.texto}
+              </p>
+            </div>
+          ))}
+        </div>
+      </div>
+      <style>{`.fnx-resenas-track:hover { animation-play-state: paused; }`}</style>
+    </section>
   )
 }
