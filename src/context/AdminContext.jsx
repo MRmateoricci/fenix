@@ -26,6 +26,7 @@ function toBackendPayload(p) {
   if ('ipRating' in p)      out.ip_rating          = p.ipRating
   if ('watts' in p)         out.watts              = p.watts
   if ('material' in p)      out.material           = p.material
+  if ('productType' in p)   out.product_type       = p.productType || null
   if ('cableType' in p)     out.cable_type         = p.cableType
   if ('published' in p)     out.published          = p.published
   // El backend solo tiene `stock` (entero) — inStock es stock > 0 derivado al
@@ -253,16 +254,24 @@ export function AdminProvider({ children }) {
     return data
   }, [])
 
-  // ── adjustInventoryStock — ajuste manual +/- (nunca clampea a 0) ─────────
-  const adjustInventoryStock = useCallback(async (id, delta) => {
-    const res = await fetch(`${API_BASE}/api/products/${id}/adjust-stock`, {
+  // Guarda varios ajustes juntos y sincroniza las dos vistas locales del mismo
+  // producto sin volver a descargar toda la tabla.
+  const adjustInventoryStocks = useCallback(async (changes) => {
+    const res = await fetch(`${API_BASE}/api/products/stock/batch`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-admin-token': ADMIN_PASSWORD },
-      body: JSON.stringify({ delta }),
+      body: JSON.stringify({ changes }),
     })
     const data = await res.json()
-    if (!res.ok) throw new Error(data.error || 'No se pudo ajustar el stock')
-    return data
+    if (!res.ok) throw new Error(data.error || 'No se pudieron guardar los cambios de stock')
+
+    const updated = new Map((data.products || []).map(product => [product.id, product]))
+    setInventory(current => current.map(product => updated.get(product.id) || product))
+    setProducts(current => current.map(product => {
+      const saved = updated.get(product.id)
+      return saved ? { ...product, stock: saved.stock, inStock: saved.stock > 0 } : product
+    }))
+    return data.products || []
   }, [])
 
   // ── uploadInventoryFile — sube uno de los 4 excel de inventario ──────────
@@ -348,7 +357,7 @@ export function AdminProvider({ children }) {
       inventory, inventoryTotal, inventoryLoading, inventoryError,
       importResult, importLoading, importError,
       fetchInventory, createInventoryItem, updateInventoryItem, deleteInventoryItem,
-      adjustInventoryStock, uploadInventoryFile, uploadProductImage,
+      adjustInventoryStocks, uploadInventoryFile, uploadProductImage,
       searchProducts, parseInvoicePdf, applyInvoiceLines,
     }}>
       {children}

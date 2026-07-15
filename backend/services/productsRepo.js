@@ -56,12 +56,13 @@ export async function upsertPriceRows(client, rows) {
     for (const r of batch) params.push(r.codigo, r.descripcion, r.precio_costo, r.precio_venta, r.precio_iva)
 
     const { rows: result } = await client.query(
-      `INSERT INTO products (codigo, descripcion, precio_costo, precio_venta, precio_iva, source, price_updated_at)
-       VALUES ${valuesClause(batch.length, 5, ["'price_list'", 'NOW()'])}
+      `INSERT INTO products (codigo, descripcion, precio_costo, precio_venta, precio_iva, source, supplier, price_updated_at)
+       VALUES ${valuesClause(batch.length, 5, ["'price_list'", "'ALCIDES'", 'NOW()'])}
        ON CONFLICT (codigo) DO UPDATE SET
          precio_costo     = EXCLUDED.precio_costo,
          precio_venta     = EXCLUDED.precio_venta,
          precio_iva       = EXCLUDED.precio_iva,
+         supplier         = 'ALCIDES',
          price_updated_at = NOW(),
          updated_at       = NOW()
        RETURNING (xmax = 0) AS inserted`,
@@ -132,11 +133,12 @@ export async function applyPurchaseIncrement(client, lines) {
     for (const l of batch) params.push(l.codigo, l.descripcion, l.watts, l.totalUnidades, l.precioFinalUsd)
 
     const { rows: result } = await client.query(
-      `INSERT INTO products (codigo, descripcion, watts, stock, precio_costo_usd, source, stock_updated_at)
-       VALUES ${valuesClause(batch.length, 5, ["'purchase'", 'NOW()'])}
+      `INSERT INTO products (codigo, descripcion, watts, stock, precio_costo_usd, source, supplier, stock_updated_at)
+       VALUES ${valuesClause(batch.length, 5, ["'purchase'", "'KIAN'", 'NOW()'])}
        ON CONFLICT (codigo) DO UPDATE SET
          stock             = products.stock + EXCLUDED.stock,
          precio_costo_usd  = EXCLUDED.precio_costo_usd,
+         supplier          = 'KIAN',
          stock_updated_at  = NOW(),
          updated_at        = NOW()
        RETURNING (xmax = 0) AS inserted`,

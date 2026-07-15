@@ -1,11 +1,7 @@
 // Full catalog taxonomy for the header "Categoría" mega-menu.
-// Only the top-level `label` values map to real product categories/filters
-// (see CATEGORY_NAV_LABEL / CATEGORY_SUBCATEGORIES in ./products.js) — the
-// nested levels below are for browsing/navigation across the whole catalog.
-// Nodes only declare `to` where the catalog can actually filter that deep
-// (category, category + subcategory, or the cable-type filter); every other
-// node inherits its closest ancestor's `to` below, so every label in the
-// menu ends up selectable even past the point the catalog can filter.
+// This is the single source of truth for both the header mega-menu and the
+// filters shown on /products. Top-level nodes are product categories, their
+// children are subcategories and the next level is the product type.
 
 function leaf(label) {
   return { label }
@@ -200,16 +196,49 @@ const RAW_CATEGORY_TREE = [
   },
 ]
 
-// Backfills `to` on every node that doesn't declare its own, using the
-// closest ancestor's `to` — makes every subgrupo/leaf in the mega-menu
-// clickable, landing on the deepest filter the catalog actually supports.
-function inheritTo(nodes, inheritedTo) {
+function addParam(to, key, value) {
+  const [pathname, query = ''] = to.split('?')
+  const params = new URLSearchParams(query)
+  params.set(key, value)
+  return `${pathname}?${params.toString()}`
+}
+
+// Nodes on level 3 receive their own generic `type` filter. Cables keep their
+// existing `ctype` URLs for backwards compatibility. Deeper nodes inherit the
+// level-3 URL because the storefront product model intentionally stops there.
+function addFilterLinks(nodes, inheritedTo) {
   return nodes.map((node) => {
-    const to = node.to || inheritedTo
+    let to = node.to || inheritedTo
+
+    if (!node.to && inheritedTo) {
+      const query = inheritedTo.split('?')[1] || ''
+      const params = new URLSearchParams(query)
+      const isSubcategory = params.has('category') && params.has('sub')
+      const alreadyHasType = params.has('type') || params.has('ctype')
+      if (isSubcategory && !alreadyHasType) to = addParam(inheritedTo, 'type', node.label)
+    }
+
     return node.children
-      ? { ...node, to, children: inheritTo(node.children, to) }
+      ? { ...node, to, children: addFilterLinks(node.children, to) }
       : { ...node, to }
   })
 }
 
-export const CATEGORY_TREE = inheritTo(RAW_CATEGORY_TREE)
+export const CATEGORY_TREE = addFilterLinks(RAW_CATEGORY_TREE)
+
+function categoryValue(node) {
+  const query = node?.to?.split('?')[1] || ''
+  return new URLSearchParams(query).get('category')
+}
+
+export function getCategoryNode(category) {
+  return CATEGORY_TREE.find((node) => categoryValue(node) === category) || null
+}
+
+export function getSubcategoryOptions(category) {
+  return getCategoryNode(category)?.children || []
+}
+
+export function getProductTypeOptions(category, subcategory) {
+  return getSubcategoryOptions(category).find((node) => node.label === subcategory)?.children || []
+}

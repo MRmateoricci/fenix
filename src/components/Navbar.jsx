@@ -39,6 +39,7 @@ export default function Navbar() {
   const accountRef = useRef(null)
   const categoryRef = useRef(null)
   const categoryPanelRef = useRef(null)
+  const categoryCloseTimer = useRef(null)
   const { pathname } = useLocation()
   const navigate = useNavigate()
   const isHome = pathname === '/'
@@ -68,9 +69,23 @@ export default function Navbar() {
     }
   }, [categoryOpen])
 
+  useEffect(() => () => clearTimeout(categoryCloseTimer.current), [])
+
   function goToCategory(to) {
+    clearTimeout(categoryCloseTimer.current)
     setCategoryOpen(false)
     navigate(to)
+  }
+
+  function openCategoryMenu(label) {
+    clearTimeout(categoryCloseTimer.current)
+    if (label) setActiveCategoryLabel(label)
+    setCategoryOpen(true)
+  }
+
+  function scheduleCategoryClose() {
+    clearTimeout(categoryCloseTimer.current)
+    categoryCloseTimer.current = setTimeout(() => setCategoryOpen(false), 180)
   }
 
   function goToAccountLink(to) {
@@ -147,6 +162,8 @@ export default function Navbar() {
 
   function handleLink(item, e) {
     e.preventDefault()
+    clearTimeout(categoryCloseTimer.current)
+    setCategoryOpen(false)
     setMobileOpen(false)
     if (item.to) navigate(item.to)
     else if (isHome) setTimeout(() => scrollTo(item.hash), 60)
@@ -185,10 +202,11 @@ export default function Navbar() {
 
             <nav className="fnx-desktop-nav" aria-label="Categorías" style={{
               display: 'flex', alignItems: 'center', gap: 28,
-            }} ref={categoryRef}>
+            }} ref={categoryRef} onMouseLeave={scheduleCategoryClose}>
               <button
                 type="button"
                 onClick={() => setCategoryOpen((o) => !o)}
+                onMouseEnter={() => openCategoryMenu(activeCategoryLabel)}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 6,
                   background: 'none', border: 'none', cursor: 'pointer', padding: 0,
@@ -210,25 +228,32 @@ export default function Navbar() {
                 </svg>
               </button>
 
-              {NAV_ITEMS.map((item) => (
-                <a
-                  key={item.label}
-                  href={item.to || `#${item.hash}`}
-                  onClick={(e) => handleLink(item, e)}
-                  style={{
-                    textDecoration: 'none',
-                    fontFamily: "'Hanken Grotesk', system-ui, sans-serif",
-                    fontSize: 13.5, fontWeight: 400,
-                    color: ink,
-                    opacity: 0.82,
-                    transition: 'opacity .18s ease, color .3s ease',
-                    whiteSpace: 'nowrap',
-                    paddingBottom: 3,
-                  }}
-                >
-                  {item.label}
-                </a>
-              ))}
+              {NAV_ITEMS.map((item) => {
+                const category = item.to ? CATEGORY_TREE.find((cat) => cat.to === item.to) : null
+                const isActiveCategory = category && categoryOpen && activeCategoryLabel === category.label
+
+                return (
+                  <a
+                    key={item.label}
+                    href={item.to || `#${item.hash}`}
+                    onClick={(e) => handleLink(item, e)}
+                    onMouseEnter={() => category ? openCategoryMenu(category.label) : scheduleCategoryClose()}
+                    style={{
+                      textDecoration: 'none',
+                      fontFamily: "'Hanken Grotesk', system-ui, sans-serif",
+                      fontSize: 13.5, fontWeight: isActiveCategory ? 500 : 400,
+                      color: ink,
+                      opacity: isActiveCategory ? 1 : 0.82,
+                      transition: 'opacity .18s ease, color .3s ease',
+                      whiteSpace: 'nowrap',
+                      paddingBottom: 3,
+                      borderBottom: `1px solid ${isActiveCategory ? ink : 'transparent'}`,
+                    }}
+                  >
+                    {item.label}
+                  </a>
+                )
+              })}
             </nav>
           </div>
 
@@ -403,6 +428,8 @@ export default function Navbar() {
         <div
           ref={categoryPanelRef}
           role="menu"
+          onMouseEnter={() => clearTimeout(categoryCloseTimer.current)}
+          onMouseLeave={scheduleCategoryClose}
           style={{
             position: 'fixed', top: 64, left: 0, right: 0, zIndex: 49,
             background: 'rgba(247,244,239,0.98)',

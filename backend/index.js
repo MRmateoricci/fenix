@@ -1,6 +1,8 @@
 import express from 'express'
 import cors from 'cors'
 import cookieParser from 'cookie-parser'
+import path from 'path'
+import { fileURLToPath } from 'url'
 import 'dotenv/config'
 import ordersRouter   from './routes/orders.js'
 import webhooksRouter from './routes/webhooks.js'
@@ -16,6 +18,8 @@ import { startExpireReservationsJob } from './jobs/expireReservations.js'
 
 const app  = express()
 const PORT = process.env.PORT || 3001
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const frontendDist = path.resolve(__dirname, '..', 'dist')
 
 // Detrás del proxy de Railway/Render, sin esto `req.protocol` siempre da
 // 'http' — rompe las URLs absolutas que arma POST /api/products/:id/image.
@@ -25,6 +29,7 @@ app.set('trust proxy', 1)
 const allowedOrigins = [
   'http://localhost:5173',
   'http://localhost:4173',
+  process.env.APP_BASE_URL,
   process.env.FRONTEND_BASE_URL,
 ].filter(Boolean)
 
@@ -67,7 +72,21 @@ app.use('/api/catalog',  catalogRouter)
 app.use('/api/shipping', shippingRouter)
 
 // ── 404 ───────────────────────────────────────────────────────────────────────
-app.use((_req, res) => res.status(404).json({ error: 'Ruta no encontrada' }))
+// Las rutas API inexistentes siempre responden JSON, incluso en producciÃ³n.
+app.use('/api', (_req, res) => res.status(404).json({ error: 'Ruta no encontrada' }))
+
+// En producciÃ³n Express sirve tambiÃ©n el build de React. El fallback a
+// index.html permite refrescar rutas de React Router como /products/:id o
+// /admin sin recibir un 404 del servidor.
+if (process.env.NODE_ENV === 'production') {
+  app.use(express.static(frontendDist))
+  app.get('*', (_req, res) => {
+    res.sendFile(path.join(frontendDist, 'index.html'))
+  })
+} else {
+  // En desarrollo el frontend lo sirve Vite en :5173.
+  app.use((_req, res) => res.status(404).json({ error: 'Ruta no encontrada' }))
+}
 
 // ── Error global ──────────────────────────────────────────────────────────────
 app.use((err, _req, res, _next) => {

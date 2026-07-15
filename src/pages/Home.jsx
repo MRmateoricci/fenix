@@ -29,6 +29,13 @@ const T = {
   wa:             '#1f7a3d',
 }
 
+const API_BASE = import.meta.env.VITE_API_URL || ''
+
+const HERO_PAPER_FADE_HEIGHT = 'clamp(140px, 20vw, 240px)'
+const INTRO_CURTAIN_DURATION_MS = 800
+const INTRO_HERO_FADE_DELAY_MS = 180
+const INTRO_DONE_DELAY_MS = 950
+
 const fmt = (n) =>
   new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(n)
 
@@ -128,9 +135,9 @@ const LOCAL_BUSINESS_SCHEMA = {
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // The area below the hero starts covered by a dark veil (same tone as the header,
-// with a soft gradient trailing edge) instead of the bare paper color, so there's
-// no seam mid-intro. Once the hero's cinematic sequence finishes, the veil recedes
-// upward — its own gradient edge sweeping bottom-to-top — never a flat color swap.
+// with a soft gradient trailing edge) instead of the bare paper color. The veil moves
+// upward inside a clipped track so its gradient keeps its softness without entering
+// the hero. Once it clears, the hero's paper fade continues the reveal upward.
 export default function Home() {
   const rm = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
   const [pageReady, setPageReady] = useState(rm)
@@ -160,21 +167,26 @@ export default function Home() {
           backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")`,
         }}
       />
-      <HeroSection />
+      <HeroSection pageReady={pageReady} />
       <div style={{ position: 'relative' }}>
         <div
           aria-hidden="true"
           style={{
             position: 'absolute', top: 0, left: 0, right: 0, zIndex: 50, pointerEvents: 'none',
-            height: 'clamp(500px, 100vh, 1000px)',
-            background: `linear-gradient(180deg, ${T.dark} 0%, ${T.dark} 68%, rgba(20,16,10,0) 100%)`,
-            transform: pageReady ? 'scaleY(0)' : 'scaleY(1)',
-            transformOrigin: 'top',
-            transition: rm ? 'none' : 'transform 1.1s cubic-bezier(0.16,1,0.3,1)',
+            height: 'clamp(500px, 100vh, 1000px)', overflow: 'hidden',
           }}
-        />
+        >
+          <div style={{
+            position: 'absolute', inset: 0,
+            background: `linear-gradient(180deg, ${T.dark} 0%, ${T.dark} 52%, rgba(20,16,10,.92) 61%, rgba(20,16,10,.70) 72%, rgba(20,16,10,.42) 83%, rgba(20,16,10,.16) 93%, rgba(20,16,10,0) 100%)`,
+            transform: pageReady ? 'translateY(-100%)' : 'translateY(0)',
+            transition: rm ? 'none' : `transform ${INTRO_CURTAIN_DURATION_MS}ms cubic-bezier(0.16,1,0.3,1)`,
+            willChange: 'transform',
+          }} />
+        </div>
         <CategoriasSection />
         <DestacadosSection />
+        <MostSearchedSection />
         <CatalogoBand />
         <HistoriaSection />
         <ResenasSection />
@@ -189,7 +201,7 @@ export default function Home() {
 const ALL_REACHED  = { bg:true,  eyebrow:true,  h1:true,  sub:true,  cta:true  }
 const NONE_REACHED = { bg:false, eyebrow:false, h1:false, sub:false, cta:false }
 
-function HeroSection() {
+function HeroSection({ pageReady }) {
   const rm = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
 
   const [reached, setReached] = useState(rm ? ALL_REACHED : NONE_REACHED)
@@ -213,7 +225,7 @@ function HeroSection() {
       setTimeout(() => set('h1'),                        720),
       setTimeout(() => set('sub'),                       920),
       setTimeout(() => set('cta'),                      1120),
-      setTimeout(() => document.dispatchEvent(new CustomEvent('fnx-intro-done')), 1320),
+      setTimeout(() => document.dispatchEvent(new CustomEvent('fnx-intro-done')), INTRO_DONE_DELAY_MS),
       setTimeout(() => overlay.remove(),                1760),
     ]
     return () => { ts.forEach(clearTimeout); overlay.remove() }
@@ -258,12 +270,12 @@ function HeroSection() {
           Scales up from the bottom edge so the transition sweeps in cinematically. */}
       <div aria-hidden="true" style={{
         position: 'absolute', left: 0, right: 0, bottom: 0, zIndex: 1,
-        height: 'clamp(90px, 14vw, 160px)',
-        background: `linear-gradient(180deg, rgba(20,16,10,0) 0%, ${T.paper} 100%)`,
+        height: HERO_PAPER_FADE_HEIGHT,
+        background: `linear-gradient(180deg, rgba(247,244,239,0) 0%, rgba(247,244,239,.05) 18%, rgba(247,244,239,.18) 38%, rgba(247,244,239,.42) 60%, rgba(247,244,239,.72) 80%, rgba(247,244,239,.92) 94%, ${T.paper} 100%)`,
         pointerEvents: 'none',
-        transform: reached.bg ? 'scaleY(1)' : 'scaleY(0)',
+        transform: pageReady ? 'scaleY(1)' : 'scaleY(0)',
         transformOrigin: 'bottom',
-        transition: rm ? 'none' : 'transform 1.3s cubic-bezier(0.16,1,0.3,1) .2s',
+        transition: rm ? 'none' : `transform .75s cubic-bezier(0.16,1,0.3,1) ${INTRO_HERO_FADE_DELAY_MS}ms`,
       }} />
 
       {/* Content */}
@@ -462,10 +474,6 @@ function CategoryIcon({ type }) {
 // ─── 3. Destacados ─────────────────────────────────────────────────────────────
 // Same product set as the "Promociones" category page (/products?category=Promociones):
 // anything currently marked down (has an originalPrice), kept in sync via that one condition.
-const PROMO_CARD_W = 258
-const PROMO_GAP = 26
-const PROMO_SPEED = 42 // px/s
-
 function DestacadosSection() {
   const { addItem } = useCart()
   const { products } = useAdmin()
@@ -473,24 +481,10 @@ function DestacadosSection() {
 
   if (featured.length === 0) return null
 
-  // Enough copies so the strip never runs out of content mid-loop, however wide
-  // the screen is — otherwise the reset shows a visible jump instead of an
-  // uninterrupted scroll. Kept even so translateX(-50%) lands on a whole
-  // multiple of one set's width.
-  const canLoop = featured.length > 1
-  const repeatRaw = canLoop ? Math.min(8, Math.max(2, Math.ceil(16 / featured.length))) : 1
-  const repeat = canLoop ? (repeatRaw % 2 === 0 ? repeatRaw : repeatRaw + 1) : 1
-  const track = canLoop ? Array.from({ length: repeat }, () => featured).flat() : featured
-  const setWidth = featured.length * PROMO_CARD_W + (featured.length - 1) * PROMO_GAP
-  const duration = canLoop ? (repeat / 2) * setWidth / PROMO_SPEED : 0
-
   return (
     <section id="destacados" style={{ padding: '74px 0 26px', scrollMarginTop: 90 }}>
       <Reveal>
         <div style={{ maxWidth: 1320, margin: '0 auto 42px', padding: '0 40px', textAlign: 'center' }}>
-          <div style={{ fontFamily: "'Spline Sans Mono', monospace", fontSize: 12, color: T.amber, marginBottom: 14, letterSpacing: '.12em' }}>
-            Ofertas
-          </div>
           <Link to="/products?category=Promociones" style={{ textDecoration: 'none' }}>
             <h2 style={{
               fontFamily: "'Cormorant Garamond', serif", fontWeight: 400,
@@ -502,23 +496,156 @@ function DestacadosSection() {
           </Link>
         </div>
       </Reveal>
-      <div style={{ overflow: 'hidden', width: '100%' }}>
-        <div
-          className="fnx-marquee-track fnx-promo-track"
-          style={{
-            display: 'flex', gap: PROMO_GAP, width: 'max-content', padding: '4px 40px',
-            animation: canLoop ? `fnx-marquee ${duration}s linear infinite` : 'none',
-          }}
-        >
-          {track.map((p, i) => (
-            <div key={`${p.id}-${i}`} style={{ width: PROMO_CARD_W, flexShrink: 0 }}>
-              <FeaturedCard product={p} onAdd={addItem} />
-            </div>
-          ))}
-        </div>
-      </div>
-      <style>{`.fnx-promo-track:hover { animation-play-state: paused; }`}</style>
+      <InfiniteProductCarousel products={featured} onAdd={addItem} label="Promociones" />
     </section>
+  )
+}
+
+function MostSearchedSection() {
+  const { addItem } = useCart()
+  const { products } = useAdmin()
+  const [bestSellerIds, setBestSellerIds] = useState([])
+
+  useEffect(() => {
+    const controller = new AbortController()
+
+    fetch(`${API_BASE}/api/catalog/best-sellers?days=30&limit=15`, { signal: controller.signal })
+      .then((res) => res.ok ? res.json() : Promise.reject(new Error('No se pudo cargar el ranking')))
+      .then((data) => setBestSellerIds((data.products || []).map((item) => item.productId)))
+      .catch((err) => {
+        if (err.name !== 'AbortError') setBestSellerIds([])
+      })
+
+    return () => controller.abort()
+  }, [])
+
+  const productById = new Map(products.map((product) => [String(product.id), product]))
+  const rankedProducts = bestSellerIds.map((id) => productById.get(String(id))).filter(Boolean)
+  const rankedIds = new Set(rankedProducts.map((product) => String(product.id)))
+  const mostSearched = [
+    ...rankedProducts,
+    ...products.filter((product) => !rankedIds.has(String(product.id))),
+  ].slice(0, 15)
+
+  if (mostSearched.length === 0) return null
+
+  return (
+    <section id="mas-buscados" style={{ padding: '66px 0 26px', scrollMarginTop: 90 }}>
+      <Reveal>
+        <div style={{ maxWidth: 1320, margin: '0 auto 38px', padding: '0 40px', textAlign: 'center' }}>
+          <h2 style={{
+            fontFamily: "'Cormorant Garamond', serif", fontWeight: 400,
+            fontSize: 'clamp(32px, 3.8vw, 52px)', lineHeight: 1,
+            margin: 0, color: T.ink, letterSpacing: '-.015em',
+          }}>
+            Los más buscados
+          </h2>
+        </div>
+      </Reveal>
+      <InfiniteProductCarousel products={mostSearched} onAdd={addItem} label="Los más buscados" />
+    </section>
+  )
+}
+
+function InfiniteProductCarousel({ products, onAdd, label }) {
+  const carouselRef = useRef(null)
+  const normalizeTimer = useRef(null)
+  const [canScroll, setCanScroll] = useState(false)
+  const shouldLoop = products.length > 5
+  const carouselProducts = shouldLoop
+    ? Array.from({ length: 3 }, () => products).flat()
+    : products
+
+  useEffect(() => {
+    const carousel = carouselRef.current
+    if (!carousel || products.length === 0) return undefined
+    let frameId
+
+    function jumpTo(left) {
+      carousel.style.scrollBehavior = 'auto'
+      carousel.scrollLeft = left
+      frameId = requestAnimationFrame(() => { carousel.style.scrollBehavior = '' })
+    }
+
+    function getMetrics() {
+      if (!shouldLoop) return null
+      const middleStart = carousel.children[products.length]?.offsetLeft
+      const nextStart = carousel.children[products.length * 2]?.offsetLeft
+      if (middleStart == null || nextStart == null) return null
+      return { middleStart, nextStart, setWidth: nextStart - middleStart }
+    }
+
+    function positionCarousel() {
+      const first = carousel.children[0]
+      const last = carousel.children[products.length - 1]
+      const contentWidth = first && last ? last.offsetLeft + last.offsetWidth - first.offsetLeft : 0
+      setCanScroll(contentWidth > carousel.clientWidth + 2)
+
+      const metrics = getMetrics()
+      if (metrics) jumpTo(metrics.middleStart)
+    }
+
+    function normalizePosition() {
+      if (!shouldLoop) return
+      clearTimeout(normalizeTimer.current)
+      normalizeTimer.current = setTimeout(() => {
+        const metrics = getMetrics()
+        if (!metrics) return
+
+        if (carousel.scrollLeft < metrics.middleStart - 2) {
+          jumpTo(carousel.scrollLeft + metrics.setWidth)
+        } else if (carousel.scrollLeft >= metrics.nextStart - 2) {
+          jumpTo(carousel.scrollLeft - metrics.setWidth)
+        }
+      }, 140)
+    }
+
+    frameId = requestAnimationFrame(positionCarousel)
+    carousel.addEventListener('scroll', normalizePosition, { passive: true })
+    window.addEventListener('resize', positionCarousel)
+
+    return () => {
+      cancelAnimationFrame(frameId)
+      clearTimeout(normalizeTimer.current)
+      carousel.removeEventListener('scroll', normalizePosition)
+      window.removeEventListener('resize', positionCarousel)
+    }
+  }, [products.length, shouldLoop])
+
+  function move(direction) {
+    const carousel = carouselRef.current
+    if (!carousel) return
+    carousel.scrollBy({ left: direction * carousel.clientWidth, behavior: 'smooth' })
+  }
+
+  return (
+    <div className="fnx-promo-carousel-shell">
+      <button
+        type="button"
+        className="fnx-promo-arrow fnx-promo-arrow--previous"
+        onClick={() => move(-1)}
+        disabled={!canScroll}
+        aria-label={`Ver productos anteriores de ${label}`}
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14.5 5-7 7 7 7" /></svg>
+      </button>
+      <div ref={carouselRef} className="fnx-promo-carousel" aria-label={label}>
+        {carouselProducts.map((product, index) => (
+          <div key={`${product.id}-${index}`} className="fnx-promo-slide">
+            <FeaturedCard product={product} onAdd={onAdd} />
+          </div>
+        ))}
+      </div>
+      <button
+        type="button"
+        className="fnx-promo-arrow fnx-promo-arrow--next"
+        onClick={() => move(1)}
+        disabled={!canScroll}
+        aria-label={`Ver más productos de ${label}`}
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9.5 5 7 7-7 7" /></svg>
+      </button>
+    </div>
   )
 }
 
@@ -536,6 +663,7 @@ function FeaturedCard({ product, onAdd }) {
     <div
       style={{
         display: 'flex', flexDirection: 'column',
+        height: '100%',
         transform: cardHovered ? 'translateY(-5px)' : 'translateY(0)',
         transition: 'transform .38s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
       }}

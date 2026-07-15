@@ -1,30 +1,33 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAdmin } from '../../context/AdminContext'
-import { CATEGORY_NAV_LABEL, CATEGORY_SUBCATEGORIES, CABLE_TYPES } from '../../data/products'
+import { CATEGORY_NAV_LABEL } from '../../data/products'
+import { getSubcategoryOptions, getProductTypeOptions } from '../../data/categoryTree'
 import FenixLogo from '../../assets/FenixLogo'
+import OverviewDashboard from './OverviewDashboard'
 
 // ── Paleta ────────────────────────────────────────────────────────────────────
 const C = {
-  dark:        '#1E1E1E',
-  darkHover:   '#282828',
-  paper:       '#F7F4EF',
+  dark:        '#111827',
+  darkHover:   '#1F2937',
+  paper:       '#FFFFFF',
   white:       '#FFFFFF',
-  ink:         '#16110B',
-  text2:       '#3A2E23',
-  text3:       '#6B6051',
-  muted:       '#9A917F',
-  border:      '#E3DDD4',
-  hairline:    '#EDE8E1',
+  ink:         '#111827',
+  text2:       '#374151',
+  text3:       '#4B5563',
+  muted:       '#6B7280',
+  border:      '#DDE3EA',
+  hairline:    '#ECEFF3',
   amber:       '#E0A24A',
-  amberLight:  '#FEF6E4',
+  amberLight:  '#FFF7E6',
   amberDark:   '#B8821A',
   red:         '#CC0000',
-  redLight:    '#FFF2F2',
+  redLight:    '#FDECEC',
   green:       '#1a7a3d',
-  greenLight:  '#EBF7F0',
-  sidebar:     240,
+  greenLight:  '#EAF7EF',
+  sidebar:     218,
 }
+const ADMIN_FONT = "Arial, Helvetica, sans-serif"
 
 const CATS = Object.keys(CATEGORY_NAV_LABEL)
 
@@ -87,7 +90,7 @@ function Toggle({ value, onChange, size = 'md' }) {
       title={value ? 'En stock' : 'Sin stock'}
       style={{
         width: w, height: h, borderRadius: h / 2,
-        background: value ? C.green : '#C9BFAF',
+        background: value ? C.green : '#CBD5E1',
         border: 'none', cursor: 'pointer',
         position: 'relative', transition: 'background 0.2s', flexShrink: 0,
       }}
@@ -202,13 +205,11 @@ function InventoryLookup({ onSelect }) {
   )
 }
 
-// ── ImageFileField — pegá un link (ej. foto de catálogo del proveedor) o
-// subí un archivo, que se guarda en el servidor y devuelve una URL real.
-// La subida de archivo necesita que el producto ya exista (tenga `id`): para
-// uno nuevo todavía sin guardar, solo se puede pegar un link por ahora.
+// ── ImageFileField — sube un archivo y conserva internamente la URL devuelta
+// por el servidor. El producto debe existir para asociar el archivo a su ID.
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024
 
-function ImageFileField({ label, value, onChange, productId }) {
+function ImageFileField({ label, value, onChange, productId, compact = false }) {
   const inputRef = useRef(null)
   const { uploadProductImage } = useAdmin()
   const [error, setError] = useState('')
@@ -231,14 +232,7 @@ function ImageFileField({ label, value, onChange, productId }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-      <label style={lbl}>{label}</label>
-      <input
-        type="text"
-        value={value}
-        onChange={e => onChange(e.target.value)}
-        placeholder="Pegá el link de la foto (ej. catálogo del proveedor)"
-        style={inp}
-      />
+      {label && <label style={lbl}>{label}</label>}
       <input
         ref={inputRef}
         type="file"
@@ -250,22 +244,22 @@ function ImageFileField({ label, value, onChange, productId }) {
           e.target.value = ''
         }}
       />
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: compact ? 6 : 10, flexWrap: 'wrap' }}>
         {value && (
           <img
             src={value} alt=""
-            style={{ width: 44, height: 44, objectFit: 'cover', borderRadius: 6, border: `1px solid ${C.border}`, flexShrink: 0 }}
+            style={{ width: compact ? 34 : 44, height: compact ? 34 : 44, objectFit: 'cover', borderRadius: 6, border: `1px solid ${C.border}`, flexShrink: 0 }}
           />
         )}
         {productId ? (
-          <button type="button" disabled={uploading} onClick={() => inputRef.current?.click()} style={{ ...outlineBtn, fontSize: 11.5, padding: '7px 12px', opacity: uploading ? 0.6 : 1 }}>
-            {uploading ? 'Subiendo...' : 'o subir un archivo'}
+          <button type="button" disabled={uploading} onClick={() => inputRef.current?.click()} style={{ ...outlineBtn, fontSize: compact ? 10.5 : 11.5, padding: compact ? '5px 8px' : '7px 12px', opacity: uploading ? 0.6 : 1 }}>
+            {uploading ? 'Subiendo...' : 'Subir archivo'}
           </button>
         ) : (
-          <span style={{ fontSize: 11, color: C.muted }}>Guardá el producto para poder subir un archivo</span>
+          <span style={{ fontSize: compact ? 10 : 11, color: C.muted }}>Guardá primero el producto para subir la imagen</span>
         )}
         {value && (
-          <button type="button" onClick={() => onChange('')} style={{ ...outlineBtn, fontSize: 11.5, padding: '7px 12px', color: C.red }}>
+          <button type="button" onClick={() => onChange('')} style={{ ...outlineBtn, fontSize: compact ? 10.5 : 11.5, padding: compact ? '5px 8px' : '7px 12px', color: C.red }}>
             Quitar
           </button>
         )}
@@ -288,19 +282,28 @@ function guessCategory(grupo, subgrupo) {
 }
 
 const EMPTY = {
-  name: '', category: CATS[0], subcategory: '',
+  codigo: '', supplier: 'OTRO', inventoryDescription: '', grupo: '', subgrupoInterno: '', medida: '',
+  priceCost: '', priceWithTax: '',
+  name: '', category: CATS[0], subcategory: '', productType: '',
   price: '', originalPrice: '',
   description: '', image: '', hoverImage: '',
   inStock: true, stock: '', colors: [], sizes: [],
   published: true,
 }
 
-// Arma un borrador de producto de tienda a partir de una fila de Inventario
-// (usado por "Publicar en tienda" en la pestaña Inventario).
+// Normaliza una fila de la API para editar todos sus datos en un único modal.
 function draftFromInventoryRow(inv) {
   return {
     ...EMPTY,
     id:          inv.id,
+    codigo:      inv.codigo || '',
+    supplier:    inv.supplier || 'OTRO',
+    inventoryDescription: inv.descripcion || '',
+    grupo:       inv.grupo || '',
+    subgrupoInterno: inv.subgrupo || '',
+    medida:      inv.medida || '',
+    priceCost:   inv.precio_costo ?? '',
+    priceWithTax: inv.precio_iva ?? '',
     name:        inv.name || inv.descripcion || '',
     description: inv.description_larga || inv.descripcion || '',
     category:    inv.category || guessCategory(inv.grupo, inv.subgrupo),
@@ -315,14 +318,40 @@ function draftFromInventoryRow(inv) {
     ipRating:    inv.ip_rating,
     watts:       inv.watts,
     material:    inv.material,
-    cableType:   inv.cable_type,
+    productType: inv.product_type || inv.cable_type || '',
     colors:      inv.color_options || [],
     sizes:       inv.size_options || [],
-    // El botón que abre este borrador se llama "Publicar en tienda" — arranca
-    // en ON aunque la fila todavía no esté publicada, para que sea un solo
-    // click. El admin lo puede apagar a mano si en realidad quiere guardar
-    // como borrador sin publicar todavía.
-    published:   true,
+    published:   Boolean(inv.published),
+  }
+}
+
+function toUnifiedProductPayload(data) {
+  return {
+    codigo: data.codigo,
+    supplier: data.supplier || 'OTRO',
+    descripcion: data.inventoryDescription || null,
+    grupo: data.grupo || null,
+    subgrupo: data.subgrupoInterno || null,
+    medida: data.medida || null,
+    precio_costo: data.priceCost,
+    precio_venta: data.price,
+    precio_iva: data.priceWithTax,
+    stock: data.stock === '' ? 0 : Number(data.stock),
+    name: data.name?.trim() || null,
+    category: data.category || null,
+    subcategory: data.subcategory || null,
+    product_type: data.productType || null,
+    description_larga: data.description?.trim() || null,
+    original_price: data.originalPrice ?? null,
+    image_url: data.image || null,
+    hover_image_url: data.hoverImage || null,
+    color_options: data.colors || [],
+    size_options: data.sizes || [],
+    color_temp: data.colorTemp || null,
+    ip_rating: data.ipRating || null,
+    watts: data.watts || null,
+    material: data.material || null,
+    published: Boolean(data.published),
   }
 }
 
@@ -332,15 +361,17 @@ function ProductModal({ product, onSave, onClose }) {
     ...product,
     price:         String(product.price ?? ''),
     originalPrice: String(product.originalPrice ?? ''),
+    priceCost:     String(product.priceCost ?? ''),
+    priceWithTax:  String(product.priceWithTax ?? ''),
     stock:         String(product.stock ?? ''),
     colors:        product.colors || [],
     sizes:         product.sizes || [],
   })
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
-  const valid = form.name.trim() && form.price && Number(form.price) > 0
-  const subOptions = CATEGORY_SUBCATEGORIES[form.category]
-    || [...new Set(Object.values(CATEGORY_SUBCATEGORIES).flat())]
+  const valid = form.codigo.trim() && (!form.published || (form.name.trim() && form.price && Number(form.price) > 0))
+  const subOptions = getSubcategoryOptions(form.category).map(node => node.label)
+  const typeOptions = getProductTypeOptions(form.category, form.subcategory).map(node => node.label)
 
   const setColor = (idx, key, value) => setForm(f => ({
     ...f,
@@ -356,21 +387,19 @@ function ProductModal({ product, onSave, onClose }) {
   const addSize = () => setForm(f => ({ ...f, sizes: [...f.sizes, { label: '' }] }))
   const removeSize = (idx) => setForm(f => ({ ...f, sizes: f.sizes.filter((_, i) => i !== idx) }))
 
-  const applyInventoryMatch = (inv) => setForm(f => ({
-    ...f,
-    name:        f.name.trim() ? f.name : (inv.descripcion || f.name),
-    description: f.description.trim() ? f.description : (inv.descripcion || f.description),
-    category:    (f.category && f.category !== CATS[0]) ? f.category : guessCategory(inv.grupo, inv.subgrupo),
-    price:       inv.precio_venta != null ? String(inv.precio_venta) : (inv.precio_costo != null ? String(inv.precio_costo) : f.price),
-    stock:       inv.stock != null ? String(inv.stock) : f.stock,
-    inStock:     inv.stock != null ? inv.stock > 0 : f.inStock,
-  }))
-
   const [saving, setSaving] = useState(false)
 
   const handleSave = async () => {
     if (!valid || saving) return
-    const out = { ...form, price: Number(form.price) }
+    const out = { ...form, price: form.price === '' ? null : Number(form.price) }
+    out.codigo = form.codigo.trim()
+    out.supplier = form.supplier.trim().toUpperCase() || 'OTRO'
+    out.inventoryDescription = form.inventoryDescription.trim()
+    out.grupo = form.grupo.trim()
+    out.subgrupoInterno = form.subgrupoInterno.trim()
+    out.medida = form.medida.trim()
+    out.priceCost = form.priceCost === '' ? null : Number(form.priceCost)
+    out.priceWithTax = form.priceWithTax === '' ? null : Number(form.priceWithTax)
     if (form.originalPrice) out.originalPrice = Number(form.originalPrice)
     else delete out.originalPrice
     if (form.stock !== '') {
@@ -391,35 +420,59 @@ function ProductModal({ product, onSave, onClose }) {
   }
 
   return (
-    <div style={{
-      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      zIndex: 1000, padding: 16,
-    }}>
+    <div
+      onMouseDown={event => { if (event.target === event.currentTarget) onClose() }}
+      style={{
+        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        zIndex: 1000, padding: 16,
+      }}
+    >
       <div style={{
         background: C.paper, borderRadius: 12,
-        width: '100%', maxWidth: 640,
+        width: '100%', maxWidth: 780,
         maxHeight: '92vh', overflowY: 'auto',
         padding: 32, boxShadow: '0 24px 80px rgba(0,0,0,0.3)',
       }}>
         {/* Header */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-          <h2 style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 22, color: C.ink, margin: 0, fontWeight: 400 }}>
+          <h2 style={{ fontFamily: ADMIN_FONT, fontSize: 22, color: C.ink, margin: 0, fontWeight: 500 }}>
             {isNew ? 'Nuevo producto' : 'Editar producto'}
           </h2>
           <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.text3, fontSize: 18, lineHeight: 1 }}>✕</button>
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-          <InventoryLookup onSelect={applyInventoryMatch} />
-          <FormField label="Nombre del producto *" value={form.name} onChange={v => set('name', v)} span={2} />
+          <h3 style={{ ...sectionTitle, gridColumn: 'span 2', margin: '0 0 2px' }}>Datos internos</h3>
+          <FormField label="Código *" value={form.codigo} onChange={v => set('codigo', v)} placeholder="ej: ALC-PO043" />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+            <label style={lbl}>Proveedor</label>
+            <input list="supplier-options" value={form.supplier} onChange={e => set('supplier', e.target.value)} placeholder="ej: ALCIDES" style={inp} />
+            <datalist id="supplier-options">{SUPPLIER_FILTERS.filter(s => s !== 'Todos').map(s => <option key={s} value={s} />)}</datalist>
+          </div>
+          <FormField label="Descripción interna" value={form.inventoryDescription} onChange={v => set('inventoryDescription', v)} span={2} />
+          <FormField label="Marca / grupo" value={form.grupo} onChange={v => set('grupo', v)} />
+          <FormField label="Subgrupo interno" value={form.subgrupoInterno} onChange={v => set('subgrupoInterno', v)} />
+          <FormField label="Medida" value={form.medida} onChange={v => set('medida', v)} />
+          <FormField label="Stock" value={form.stock} onChange={v => set('stock', v)} type="number" />
+          <FormField label="Precio costo" value={form.priceCost} onChange={v => set('priceCost', v)} type="number" />
+          <FormField label="Precio de venta" value={form.price} onChange={v => set('price', v)} type="number" />
+          <FormField label="Precio con IVA" value={form.priceWithTax} onChange={v => set('priceWithTax', v)} type="number" />
+
+          <div style={{
+            gridColumn: 'span 2', marginTop: 10, padding: 16,
+            background: '#F9FAFB', border: `1px solid ${C.border}`, borderRadius: 8,
+          }}>
+            <h3 style={{ ...sectionTitle, margin: '0 0 14px' }}>Información para la tienda online</h3>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+              <FormField label="Nombre del producto *" value={form.name} onChange={v => set('name', v)} span={2} />
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
             <label style={lbl}>Categoría *</label>
             <input
               list="category-options"
               value={form.category}
-              onChange={e => set('category', e.target.value)}
+              onChange={e => setForm(f => ({ ...f, category: e.target.value, subcategory: '', productType: '' }))}
               placeholder="ej: Electricidad"
               style={inp}
             />
@@ -430,7 +483,7 @@ function ProductModal({ product, onSave, onClose }) {
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
             <label style={lbl}>Subcategoría</label>
-            <select value={form.subcategory} onChange={e => set('subcategory', e.target.value)} style={inp}>
+            <select value={form.subcategory} onChange={e => setForm(f => ({ ...f, subcategory: e.target.value, productType: '' }))} style={inp}>
               <option value="">Sin subcategoría</option>
               {subOptions.map(s => <option key={s} value={s}>{s}</option>)}
               {form.subcategory && !subOptions.includes(form.subcategory) && (
@@ -438,16 +491,18 @@ function ProductModal({ product, onSave, onClose }) {
               )}
             </select>
           </div>
-          {form.subcategory === 'Cables Normalizados' && (
+          {typeOptions.length > 0 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-              <label style={lbl}>Tipo de cable</label>
-              <select value={form.cableType || ''} onChange={e => set('cableType', e.target.value)} style={inp}>
+              <label style={lbl}>{form.subcategory === 'Cables Normalizados' ? 'Tipo de cable' : 'Tipo / clasificación'}</label>
+              <select value={form.productType || ''} onChange={e => set('productType', e.target.value)} style={inp}>
                 <option value="">Sin especificar</option>
-                {CABLE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                {typeOptions.map(t => <option key={t} value={t}>{t}</option>)}
+                {form.productType && !typeOptions.includes(form.productType) && (
+                  <option value={form.productType}>{form.productType} (actual)</option>
+                )}
               </select>
             </div>
           )}
-          <FormField label="Precio (ARS) *" value={form.price} onChange={v => set('price', v)} type="number" placeholder="28900" />
           <FormField label="Precio original (para mostrar oferta)" value={form.originalPrice} onChange={v => set('originalPrice', v)} type="number" placeholder="36900" />
 
           <div style={{ gridColumn: 'span 2', display: 'flex', flexDirection: 'column', gap: 5 }}>
@@ -463,25 +518,15 @@ function ProductModal({ product, onSave, onClose }) {
           <ImageFileField label="Imagen principal" value={form.image} onChange={v => set('image', v)} productId={product?.id} />
           <ImageFileField label="Imagen hover (opcional)" value={form.hoverImage} onChange={v => set('hoverImage', v)} productId={product?.id} />
 
-          <FormField label="Cantidad en stock (opcional)" value={form.stock} onChange={v => set('stock', v)} type="number" placeholder="Dejar vacío si no se controla" />
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-            <label style={lbl}>Disponibilidad</label>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, height: 38 }}>
-              <Toggle value={form.inStock} onChange={v => set('inStock', v)} />
-              <span style={{ fontSize: 13, color: form.inStock ? C.green : C.red, fontWeight: 600 }}>
-                {form.inStock ? 'En stock' : 'Sin stock'}
-              </span>
-            </div>
-          </div>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-            <label style={lbl}>Visibilidad en la tienda</label>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, height: 38 }}>
-              <Toggle value={form.published} onChange={v => set('published', v)} />
-              <span style={{ fontSize: 13, color: form.published ? C.green : C.text3, fontWeight: 600 }}>
-                {form.published ? 'Publicado' : 'Sin publicar (borrador)'}
-              </span>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                <label style={lbl}>Visibilidad en la tienda</label>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, height: 38 }}>
+                  <Toggle value={form.published} onChange={v => set('published', v)} />
+                  <span style={{ fontSize: 13, color: form.published ? C.green : C.text3, fontWeight: 600 }}>
+                    {form.published ? 'Publicado' : 'Sin publicar (borrador)'}
+                  </span>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -502,7 +547,7 @@ function ProductModal({ product, onSave, onClose }) {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 4 }}>
               {form.colors.map((c, idx) => (
                 <div key={idx} style={{
-                  display: 'grid', gridTemplateColumns: '38px 1fr 2fr auto', gap: 8, alignItems: 'center',
+                  display: 'grid', gridTemplateColumns: '38px minmax(130px, 1fr) minmax(220px, 1.5fr) auto', gap: 8, alignItems: 'center',
                   padding: 8, background: C.white, border: `1px solid ${C.border}`, borderRadius: 6,
                 }}>
                   <input
@@ -519,12 +564,11 @@ function ProductModal({ product, onSave, onClose }) {
                     placeholder="Nombre (ej: Negro)"
                     style={inp}
                   />
-                  <input
-                    type="text"
+                  <ImageFileField
+                    compact
                     value={c.image}
-                    onChange={e => setColor(idx, 'image', e.target.value)}
-                    placeholder="URL de la foto en este color"
-                    style={inp}
+                    onChange={value => setColor(idx, 'image', value)}
+                    productId={product?.id}
                   />
                   <button
                     type="button"
@@ -669,7 +713,7 @@ function OverviewTab({ products }) {
       border: `1px solid ${C.border}`,
       borderTop: `3px solid ${accent || C.border}`,
     }}>
-      <div style={{ fontSize: 26, fontWeight: 700, color: C.ink, fontFamily: "'Hanken Grotesk', sans-serif", lineHeight: 1 }}>{value}</div>
+      <div style={{ fontSize: 26, fontWeight: 600, color: C.ink, fontFamily: ADMIN_FONT, lineHeight: 1 }}>{value}</div>
       <div style={{ fontSize: 11, color: C.muted, letterSpacing: '0.06em', marginTop: 8, textTransform: 'uppercase' }}>{label}</div>
     </div>
   )
@@ -683,7 +727,7 @@ function OverviewTab({ products }) {
           <div style={{ fontSize: 11, color: C.text3, letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 600, marginBottom: 10 }}>
             Total recaudado — {monthLabel}
           </div>
-          <div style={{ fontSize: 34, fontWeight: 700, color: C.ink, fontFamily: "'Inter', system-ui, sans-serif", lineHeight: 1 }}>
+          <div style={{ fontSize: 34, fontWeight: 600, color: C.ink, fontFamily: ADMIN_FONT, lineHeight: 1 }}>
             {monthRevenue > 0 ? fmt(monthRevenue) : '—'}
           </div>
           <div style={{ fontSize: 12, color: C.muted, marginTop: 8 }}>
@@ -712,7 +756,7 @@ function OverviewTab({ products }) {
                   display: 'flex', alignItems: 'center', gap: 12, padding: '10px 0',
                   borderTop: i > 0 ? `1px solid ${C.hairline}` : 'none',
                 }}>
-                  <span style={{ fontSize: 12, fontWeight: 700, color: C.ink, fontFamily: 'monospace', flexShrink: 0 }}>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: C.ink, fontFamily: ADMIN_FONT, flexShrink: 0 }}>
                     #{o.order_number}
                   </span>
                   <div style={{ flex: 1, minWidth: 0 }}>
@@ -755,7 +799,7 @@ function OverviewTab({ products }) {
                   display: 'flex', alignItems: 'center', gap: 12, padding: '10px 0',
                   borderTop: i > 0 ? `1px solid ${C.hairline}` : 'none',
                 }}>
-                  <span style={{ fontSize: 12, fontWeight: 700, color: C.ink, fontFamily: 'monospace', flexShrink: 0 }}>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: C.ink, fontFamily: ADMIN_FONT, flexShrink: 0 }}>
                     #{o.order_number}
                   </span>
                   <div style={{ flex: 1, minWidth: 0 }}>
@@ -793,7 +837,7 @@ function OverviewTab({ products }) {
                     minWidth: 22, height: 22, borderRadius: '50%',
                     background: i === 0 ? C.amber : C.hairline,
                     color: i === 0 ? C.dark : C.text3,
-                    fontSize: 11, fontWeight: 700,
+                    fontSize: 11, fontWeight: 600,
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     flexShrink: 0,
                   }}>
@@ -860,7 +904,7 @@ function OverviewTab({ products }) {
                   <div style={{ fontSize: 12, color: C.text3 }}>{p.category}</div>
                 </div>
                 <span style={{
-                  fontSize: 12, fontWeight: 700, padding: '3px 10px', borderRadius: 20,
+                  fontSize: 12, fontWeight: 600, padding: '3px 10px', borderRadius: 20,
                   background: C.amberLight, color: C.amberDark,
                 }}>
                   {p.stock} unidades
@@ -913,7 +957,7 @@ function ProductsTab({ products, onUpdate, onAdd, onDelete }) {
       {/* Stats bar + add button */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-          <span style={pill('#F3F0EB', C.text3)}>{products.length} productos</span>
+          <span style={pill('#F3F4F6', C.text3)}>{products.length} productos</span>
           {outOfStock > 0 && <span style={pill(C.redLight, C.red)}>{outOfStock} sin stock</span>}
           {withOffer > 0 && <span style={pill(C.amberLight, C.amberDark)}>{withOffer} con oferta</span>}
         </div>
@@ -964,9 +1008,9 @@ function ProductsTab({ products, onUpdate, onAdd, onDelete }) {
             onMouseEnter={() => setHoveredRow(p.id)}
             onMouseLeave={() => setHoveredRow(null)}
             style={{
-              display: 'flex', alignItems: 'center', gap: 14, padding: '12px 16px',
+              display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px',
               borderBottom: i < filtered.length - 1 ? `1px solid ${C.hairline}` : 'none',
-              background: hoveredRow === p.id ? '#FAFAF8' : 'transparent',
+              background: hoveredRow === p.id ? '#F9FAFB' : 'transparent',
               transition: 'background 0.12s',
             }}
           >
@@ -990,13 +1034,13 @@ function ProductsTab({ products, onUpdate, onAdd, onDelete }) {
 
             {/* Price */}
             <div style={{ textAlign: 'right', flexShrink: 0, minWidth: 110 }}>
-              <div style={{ fontSize: 14, fontWeight: 700, color: C.ink }}>{fmt(p.price)}</div>
+              <div style={{ fontSize: 14, fontWeight: 600, color: C.ink }}>{fmt(p.price)}</div>
               {p.originalPrice && (
                 <div style={{ fontSize: 11, color: C.text3, textDecoration: 'line-through' }}>{fmt(p.originalPrice)}</div>
               )}
               {p.originalPrice && (
                 <span style={{
-                  fontSize: 10, fontWeight: 700, background: C.amberLight, color: C.amberDark,
+                  fontSize: 10, fontWeight: 600, background: C.amberLight, color: C.amberDark,
                   padding: '1px 6px', borderRadius: 10,
                 }}>
                   -{pct(p.price, p.originalPrice)}%
@@ -1105,7 +1149,7 @@ function OffersTab({ products, onUpdate }) {
       {/* Ofertas activas */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
         <h3 style={{ ...sectionTitle, margin: 0 }}>
-          Ofertas activas{activeOffers.length > 0 ? <span style={{ fontFamily: "'Inter', system-ui, sans-serif" }}> ({activeOffers.length})</span> : ''}
+          Ofertas activas{activeOffers.length > 0 ? <span style={{ fontFamily: ADMIN_FONT }}> ({activeOffers.length})</span> : ''}
         </h3>
         {activeOffers.length > 0 && (
           <button onClick={removeAllOffers} style={{ ...outlineBtn, color: C.red, borderColor: C.red, fontSize: 12 }}>
@@ -1136,11 +1180,11 @@ function OffersTab({ products, onUpdate }) {
                 <div style={{ fontSize: 12, color: C.text3 }}>{p.category}</div>
               </div>
               <div style={{ textAlign: 'right' }}>
-                <div style={{ fontSize: 14, fontWeight: 700, color: C.red }}>{fmt(p.price)}</div>
+                <div style={{ fontSize: 14, fontWeight: 600, color: C.red }}>{fmt(p.price)}</div>
                 <div style={{ fontSize: 12, color: C.text3, textDecoration: 'line-through' }}>{fmt(p.originalPrice)}</div>
               </div>
               <span style={{
-                fontSize: 12, fontWeight: 800, padding: '4px 10px', borderRadius: 20,
+                fontSize: 12, fontWeight: 600, padding: '4px 10px', borderRadius: 20,
                 background: C.amberLight, color: C.amberDark, flexShrink: 0,
               }}>
                 -{pct(p.price, p.originalPrice)}%
@@ -1285,31 +1329,31 @@ function SingleOfferForm({ products, onUpdate }) {
 const inp = {
   border: `1px solid ${C.border}`,
   borderRadius: 6,
-  padding: '8px 12px',
-  fontSize: 13,
+  padding: '7px 10px',
+  fontSize: 12.5,
   color: C.ink,
   background: C.white,
-  fontFamily: "'Hanken Grotesk', 'Inter', sans-serif",
+  fontFamily: ADMIN_FONT,
   outline: 'none',
   width: '100%',
   boxSizing: 'border-box',
   appearance: 'none',
 }
 const lbl = {
-  fontSize: 10,
-  fontWeight: 700,
+  fontSize: 9.5,
+  fontWeight: 600,
   letterSpacing: '0.1em',
   color: C.text3,
   textTransform: 'uppercase',
 }
 const solidBtn = {
-  padding: '8px 18px',
+  padding: '7px 15px',
   borderRadius: 6,
   border: 'none',
   cursor: 'pointer',
-  fontSize: 12,
-  fontWeight: 700,
-  fontFamily: "'Hanken Grotesk', 'Inter', sans-serif",
+  fontSize: 11.5,
+  fontWeight: 600,
+  fontFamily: ADMIN_FONT,
   letterSpacing: '0.05em',
   whiteSpace: 'nowrap',
 }
@@ -1320,25 +1364,25 @@ const outlineBtn = {
   color: C.text3,
 }
 const iconBtn = {
-  width: 30, height: 30,
+  width: 28, height: 28,
   borderRadius: 6, border: 'none',
-  cursor: 'pointer', fontSize: 14,
+  cursor: 'pointer', fontSize: 13,
   display: 'flex', alignItems: 'center', justifyContent: 'center',
   fontFamily: 'inherit',
   transition: 'opacity 0.15s',
 }
 const sectionTitle = {
-  fontFamily: "'Cormorant Garamond', serif",
-  fontSize: 19,
-  fontWeight: 400,
+  fontFamily: ADMIN_FONT,
+  fontSize: 17,
+  fontWeight: 500,
   color: C.ink,
-  margin: '0 0 14px',
+  margin: '0 0 12px',
   letterSpacing: '0.01em',
 }
 const pill = (bg, color) => ({
-  fontSize: 12,
+  fontSize: 11,
   fontWeight: 600,
-  padding: '4px 12px',
+  padding: '3px 10px',
   borderRadius: 20,
   background: bg,
   color,
@@ -1346,6 +1390,56 @@ const pill = (bg, color) => ({
 })
 
 // ── OrdersTab ─────────────────────────────────────────────────────────────────
+
+function TooltipIconButton({ label, color, onClick, disabled = false, children }) {
+  const [tooltip, setTooltip] = useState(null)
+
+  const showTooltip = (event) => {
+    if (disabled) return
+    const rect = event.currentTarget.getBoundingClientRect()
+    setTooltip({ left: rect.left + rect.width / 2, top: rect.bottom + 7 })
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        aria-label={label}
+        title={label}
+        disabled={disabled}
+        onClick={onClick}
+        onMouseEnter={showTooltip}
+        onMouseLeave={() => setTooltip(null)}
+        onFocus={showTooltip}
+        onBlur={() => setTooltip(null)}
+        style={{
+          ...iconBtn,
+          width: 24,
+          height: 24,
+          background: 'transparent',
+          color,
+          fontSize: 16,
+          fontWeight: 600,
+          opacity: disabled ? 0.35 : 1,
+          cursor: disabled ? 'not-allowed' : 'pointer',
+        }}
+      >
+        {children}
+      </button>
+      {tooltip && (
+        <span role="tooltip" style={{
+          position: 'fixed', left: tooltip.left, top: tooltip.top,
+          transform: 'translateX(-50%)', zIndex: 3000, pointerEvents: 'none',
+          padding: '5px 8px', borderRadius: 5, background: C.dark, color: '#fff',
+          fontSize: 10.5, fontWeight: 600, lineHeight: 1, whiteSpace: 'nowrap',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.18)',
+        }}>
+          {label}
+        </span>
+      )}
+    </>
+  )
+}
 
 const ORDER_STATUSES = [
   { key: 'all',             label: 'Todos' },
@@ -1361,15 +1455,15 @@ const ORDER_STATUSES = [
 ]
 
 const STATUS_STYLE = {
-  pending_payment: { bg: '#FEF6E4', color: '#B8821A' },
-  reserved:        { bg: '#FEF6E4', color: '#B8821A' },
-  paid:            { bg: '#EBF7F0', color: '#1a7a3d' },
-  preparing:       { bg: '#EFF6FF', color: '#1D4ED8' },
-  shipped:         { bg: '#F5F3FF', color: '#7C3AED' },
-  delivered:       { bg: '#EBF7F0', color: '#14532d' },
-  cancelled:       { bg: '#FFF2F2', color: '#CC0000' },
-  payment_failed:  { bg: '#FFF2F2', color: '#CC0000' },
-  expired:         { bg: '#FFF2F2', color: '#CC0000' },
+  pending_payment: { bg: '#FFF7E6', color: '#B8821A' },
+  reserved:        { bg: '#FFF7E6', color: '#B8821A' },
+  paid:            { bg: '#EAF7EF', color: '#1a7a3d' },
+  preparing:       { bg: '#FDECEC', color: '#CC0000' },
+  shipped:         { bg: '#FFF1F2', color: '#9F1239' },
+  delivered:       { bg: '#EAF7EF', color: '#14532d' },
+  cancelled:       { bg: '#FDECEC', color: '#CC0000' },
+  payment_failed:  { bg: '#FDECEC', color: '#CC0000' },
+  expired:         { bg: '#FDECEC', color: '#CC0000' },
 }
 
 const STATUS_LABEL = {
@@ -1393,10 +1487,10 @@ const fmtDate = (iso) =>
   })
 
 function StatusBadge({ status }) {
-  const s = STATUS_STYLE[status] || { bg: '#F3F0EB', color: '#6B6051' }
+  const s = STATUS_STYLE[status] || { bg: '#F3F4F6', color: C.text3 }
   return (
     <span style={{
-      fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 20,
+      fontSize: 11, fontWeight: 600, padding: '3px 10px', borderRadius: 20,
       background: s.bg, color: s.color, whiteSpace: 'nowrap',
     }}>
       {STATUS_LABEL[status] || status}
@@ -1443,7 +1537,7 @@ function OrderDetailModal({ order, onClose, onStatusChange }) {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
           <div>
             <p style={{ fontSize: 11, color: C.text3, letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 600 }}>Pedido</p>
-            <h2 style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 24, color: C.ink, margin: '4px 0 0', fontWeight: 400 }}>
+            <h2 style={{ fontFamily: ADMIN_FONT, fontSize: 24, color: C.ink, margin: '4px 0 0', fontWeight: 500 }}>
               #{order.order_number}
             </h2>
           </div>
@@ -1494,12 +1588,12 @@ function OrderDetailModal({ order, onClose, onStatusChange }) {
                 <p style={{ fontSize: 13, fontWeight: 600, color: C.ink, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.name}</p>
                 <p style={{ fontSize: 11, color: C.text3 }}>{item.quantity} × {fmt(item.price)}</p>
               </div>
-              <p style={{ fontSize: 13, fontWeight: 700, color: C.ink, flexShrink: 0 }}>{fmt(item.subtotal)}</p>
+              <p style={{ fontSize: 13, fontWeight: 600, color: C.ink, flexShrink: 0 }}>{fmt(item.subtotal)}</p>
             </div>
           ))}
           <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 18px', borderTop: `1px solid ${C.hairline}` }}>
-            <span style={{ fontSize: 14, fontWeight: 700, color: C.ink }}>Total</span>
-            <span style={{ fontSize: 16, fontWeight: 800, color: C.ink }}>{fmt(order.total_amount)}</span>
+            <span style={{ fontSize: 14, fontWeight: 600, color: C.ink }}>Total</span>
+            <span style={{ fontSize: 16, fontWeight: 600, color: C.ink }}>{fmt(order.total_amount)}</span>
           </div>
         </div>
 
@@ -1623,7 +1717,7 @@ function OrdersTab() {
 
       {/* ── Error ── */}
       {ordersError && (
-        <div style={{ background: '#FFF2F2', border: `1px solid ${C.red}`, borderRadius: 8, padding: '12px 16px', marginBottom: 16, color: C.red, fontSize: 13 }}>
+        <div style={{ background: C.redLight, border: `1px solid ${C.red}`, borderRadius: 8, padding: '12px 16px', marginBottom: 16, color: C.red, fontSize: 13 }}>
           {ordersError} — asegurate de que el backend esté corriendo.
         </div>
       )}
@@ -1641,7 +1735,7 @@ function OrdersTab() {
               <div style={{
                 display: 'grid',
                 gridTemplateColumns: '110px 130px 1fr 150px 90px 120px 80px',
-                gap: 8, padding: '10px 16px',
+                gap: 8, padding: '8px 14px',
                 borderBottom: `1px solid ${C.hairline}`,
                 background: C.paper,
               }}>
@@ -1656,14 +1750,14 @@ function OrdersTab() {
                   style={{
                     display: 'grid',
                     gridTemplateColumns: '110px 130px 1fr 150px 90px 120px 80px',
-                    gap: 8, padding: '12px 16px', alignItems: 'center',
+                    gap: 8, padding: '10px 14px', alignItems: 'center',
                     borderBottom: i < orders.length - 1 ? `1px solid ${C.hairline}` : 'none',
                     transition: 'background 0.12s',
                   }}
-                  onMouseEnter={(e) => (e.currentTarget.style.background = '#FAFAF8')}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = '#F9FAFB')}
                   onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
                 >
-                  <span style={{ fontSize: 12, fontWeight: 700, color: C.ink, fontFamily: 'monospace' }}>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: C.ink, fontFamily: ADMIN_FONT }}>
                     #{order.order_number}
                   </span>
                   <span style={{ fontSize: 11, color: C.text3 }}>
@@ -1675,7 +1769,7 @@ function OrdersTab() {
                   <span style={{ fontSize: 11, color: C.text3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {order.customer_email}
                   </span>
-                  <span style={{ fontSize: 13, fontWeight: 700, color: C.ink }}>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: C.ink }}>
                     {fmt(order.total_amount)}
                   </span>
                   <StatusBadge status={order.status} />
@@ -1722,7 +1816,7 @@ function StockAlertsTab({ products }) {
       </p>
 
       {stockAlertsError && (
-        <div style={{ background: '#FFF2F2', border: `1px solid ${C.red}`, borderRadius: 8, padding: '12px 16px', marginBottom: 16, color: C.red, fontSize: 13 }}>
+        <div style={{ background: C.redLight, border: `1px solid ${C.red}`, borderRadius: 8, padding: '12px 16px', marginBottom: 16, color: C.red, fontSize: 13 }}>
           {stockAlertsError} — asegurate de que el backend esté corriendo.
         </div>
       )}
@@ -1737,7 +1831,7 @@ function StockAlertsTab({ products }) {
             <>
               <div style={{
                 display: 'grid', gridTemplateColumns: '1fr 1fr 150px',
-                gap: 8, padding: '10px 16px',
+                gap: 8, padding: '8px 14px',
                 borderBottom: `1px solid ${C.hairline}`, background: C.paper,
               }}>
                 {['Producto', 'Email', 'Fecha'].map((h) => (
@@ -1750,7 +1844,7 @@ function StockAlertsTab({ products }) {
                   key={alert.id}
                   style={{
                     display: 'grid', gridTemplateColumns: '1fr 1fr 150px',
-                    gap: 8, padding: '12px 16px', alignItems: 'center',
+                    gap: 8, padding: '10px 14px', alignItems: 'center',
                     borderBottom: i < stockAlerts.length - 1 ? `1px solid ${C.hairline}` : 'none',
                   }}
                 >
@@ -1860,7 +1954,7 @@ function InventoryProductModal({ product, onSave, onClose }) {
         padding: 32, boxShadow: '0 24px 80px rgba(0,0,0,0.3)',
       }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-          <h2 style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 22, color: C.ink, margin: 0, fontWeight: 400 }}>
+          <h2 style={{ fontFamily: ADMIN_FONT, fontSize: 22, color: C.ink, margin: 0, fontWeight: 500 }}>
             {isNew ? 'Nuevo producto de inventario' : 'Editar producto de inventario'}
           </h2>
           <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.text3, fontSize: 18, lineHeight: 1 }}>✕</button>
@@ -2131,7 +2225,7 @@ function InvoiceReviewModal({ parsed, onConfirm, onClose }) {
         padding: 32, boxShadow: '0 24px 80px rgba(0,0,0,0.3)',
       }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-          <h2 style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 22, color: C.ink, margin: 0, fontWeight: 400 }}>
+          <h2 style={{ fontFamily: ADMIN_FONT, fontSize: 22, color: C.ink, margin: 0, fontWeight: 500 }}>
             Revisar factura/remito antes de sumar stock
           </h2>
           <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.text3, fontSize: 18, lineHeight: 1 }}>✕</button>
@@ -2174,53 +2268,61 @@ function InvoiceReviewModal({ parsed, onConfirm, onClose }) {
   )
 }
 
-// ── InventoryTab ──────────────────────────────────────────────────────────────
+// ── Productos unificados ─────────────────────────────────────────────────────
 const SUPPLIER_FILTERS = ['Todos', 'ALCIDES', 'KIAN', 'OTRO']
 const INV_PAGE_SIZE = 50
 
-function InventoryTab() {
+function UnifiedProductsTab() {
   const {
     inventory, inventoryTotal, inventoryLoading, inventoryError,
     importResult, importLoading, importError,
-    fetchInventory, createInventoryItem, updateInventoryItem, deleteInventoryItem,
-    adjustInventoryStock, uploadInventoryFile, updateProduct,
+    fetchInventory, createInventoryItem, updateInventoryItem, deleteInventoryItem, fetchCatalog,
+    adjustInventoryStocks, uploadInventoryFile,
     parseInvoicePdf, applyInvoiceLines,
   } = useAdmin()
 
   const [search, setSearch]           = useState('')
   const [supplierFilter, setSupplier] = useState('Todos')
+  const [publicationFilter, setPublicationFilter] = useState('Todos')
   const [lowStockOnly, setLowStockOnly] = useState(false)
   const [page, setPage]               = useState(1)
   const [editItem, setEditItem]       = useState(null)
   const [addOpen, setAddOpen]         = useState(false)
   const [confirmId, setConfirmId]     = useState(null)
-  const [publishItem, setPublishItem] = useState(null)
   const [showResult, setShowResult]   = useState(false)
   const [invoiceParsing, setInvoiceParsing] = useState(false)
   const [invoiceError, setInvoiceError]     = useState(null)
   const [invoiceParsed, setInvoiceParsed]   = useState(null)
+  const [stockDrafts, setStockDrafts]       = useState({})
+  const [stockSaving, setStockSaving]       = useState(false)
+  const [stockSaveError, setStockSaveError] = useState('')
+  const [hoveredProductId, setHoveredProductId] = useState(null)
 
   useEffect(() => {
     const filters = { page, limit: INV_PAGE_SIZE }
     if (search.trim()) filters.search = search.trim()
     if (supplierFilter !== 'Todos') filters.supplier = supplierFilter
+    if (publicationFilter !== 'Todos') filters.published = publicationFilter === 'Publicados' ? 'true' : 'false'
     if (lowStockOnly) filters.lowStock = 'true'
     fetchInventory(filters)
-  }, [page, search, supplierFilter, lowStockOnly, fetchInventory])
+  }, [page, search, supplierFilter, publicationFilter, lowStockOnly, fetchInventory])
 
   useEffect(() => {
     if (importResult) setShowResult(true)
   }, [importResult])
 
   const totalPages = Math.max(1, Math.ceil(inventoryTotal / INV_PAGE_SIZE))
+  const pendingStockCount = Object.keys(stockDrafts).length
 
   async function handleUpload(type, file) {
     try {
       await uploadInventoryFile(type, file)
+      await fetchCatalog()
       setPage(1)
       const filters = { page: 1, limit: INV_PAGE_SIZE }
       if (search.trim()) filters.search = search.trim()
       if (supplierFilter !== 'Todos') filters.supplier = supplierFilter
+      if (publicationFilter !== 'Todos') filters.published = publicationFilter === 'Publicados' ? 'true' : 'false'
       if (lowStockOnly) filters.lowStock = 'true'
       fetchInventory(filters)
     } catch {
@@ -2247,36 +2349,92 @@ function InventoryTab() {
 
   async function handleInvoiceConfirm(actions) {
     await applyInvoiceLines(actions)
+    await fetchCatalog()
     setPage(1)
     fetchInventory({ page: 1, limit: INV_PAGE_SIZE })
   }
 
-  async function handleAdjust(id, delta) {
-    await adjustInventoryStock(id, delta)
+  function queueStockChange(product, delta) {
+    if (stockSaving) return
+    setStockSaveError('')
+    setStockDrafts(current => {
+      const savedStock = Number(product.stock) || 0
+      const draft = current[product.id]
+      const nextValue = (draft?.value ?? savedStock) + delta
+      const next = { ...current }
+      if (nextValue === (draft?.base ?? savedStock)) delete next[product.id]
+      else next[product.id] = { base: draft?.base ?? savedStock, value: nextValue }
+      return next
+    })
+  }
+
+  function openProduct(product) {
+    const stockDraft = stockDrafts[product.id]
+    setEditItem(stockDraft ? { ...product, stock: stockDraft.value } : product)
+  }
+
+  async function handleSaveStockChanges() {
+    const changes = Object.entries(stockDrafts).map(([id, draft]) => ({
+      id,
+      delta: draft.value - draft.base,
+    })).filter(change => change.delta !== 0)
+    if (!changes.length || stockSaving) return
+
+    setStockSaving(true)
+    setStockSaveError('')
+    try {
+      await adjustInventoryStocks(changes)
+      setStockDrafts({})
+    } catch (err) {
+      setStockSaveError(err.message || 'No se pudieron guardar los cambios de stock')
+    } finally {
+      setStockSaving(false)
+    }
+  }
+
+  async function handleSave(data) {
+    const payload = toUnifiedProductPayload(data)
+    if (addOpen) await createInventoryItem(payload)
+    else await updateInventoryItem(editItem.id, payload)
+    if (editItem?.id) {
+      setStockDrafts(current => {
+        const next = { ...current }
+        delete next[editItem.id]
+        return next
+      })
+    }
+    await fetchCatalog()
     fetchInventory({
       page, limit: INV_PAGE_SIZE,
       ...(search.trim() ? { search: search.trim() } : {}),
       ...(supplierFilter !== 'Todos' ? { supplier: supplierFilter } : {}),
+      ...(publicationFilter !== 'Todos' ? { published: publicationFilter === 'Publicados' ? 'true' : 'false' } : {}),
       ...(lowStockOnly ? { lowStock: 'true' } : {}),
     })
   }
 
-  async function handleSave(payload) {
-    if (addOpen) await createInventoryItem(payload)
-    else await updateInventoryItem(editItem.id, payload)
-    fetchInventory({ page, limit: INV_PAGE_SIZE })
-  }
-
   async function handleDelete(id) {
     await deleteInventoryItem(id)
+    await fetchCatalog()
+    setStockDrafts(current => {
+      const next = { ...current }
+      delete next[id]
+      return next
+    })
     setConfirmId(null)
-    fetchInventory({ page, limit: INV_PAGE_SIZE })
+    fetchInventory({
+      page, limit: INV_PAGE_SIZE,
+      ...(search.trim() ? { search: search.trim() } : {}),
+      ...(supplierFilter !== 'Todos' ? { supplier: supplierFilter } : {}),
+      ...(publicationFilter !== 'Todos' ? { published: publicationFilter === 'Publicados' ? 'true' : 'false' } : {}),
+      ...(lowStockOnly ? { lowStock: 'true' } : {}),
+    })
   }
 
   return (
-    <div style={{ fontFamily: "'Hanken Grotesk', 'Inter', sans-serif" }}>
+    <div style={{ fontFamily: ADMIN_FONT }}>
       {/* Carga de excel */}
-      <h3 style={sectionTitle}>Importar desde Excel</h3>
+      <h3 style={sectionTitle}>Importaciones y movimientos de stock</h3>
       <div style={{
         display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
         gap: 12, marginBottom: 20,
@@ -2332,14 +2490,14 @@ function InventoryTab() {
       {showResult && importResult && (
         <div style={{ background: C.greenLight, border: `1px solid ${C.green}`, borderRadius: 8, padding: '14px 18px', marginBottom: 20 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-            <span style={{ fontSize: 13, fontWeight: 700, color: C.green }}>Importación completa</span>
+            <span style={{ fontSize: 13, fontWeight: 600, color: C.green }}>Importación completa</span>
             <button onClick={() => setShowResult(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.text3, fontSize: 14 }}>✕</button>
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            {importResult.totalRows !== undefined && <span style={pill('#F3F0EB', C.text3)}>{importResult.totalRows} filas leídas</span>}
+            {importResult.totalRows !== undefined && <span style={pill('#F3F4F6', C.text3)}>{importResult.totalRows} filas leídas</span>}
             {importResult.created !== undefined && <span style={pill(C.greenLight, C.green)}>{importResult.created} creados</span>}
             {importResult.updated !== undefined && <span style={pill(C.amberLight, C.amberDark)}>{importResult.updated} actualizados</span>}
-            {!!importResult.skipped && <span style={pill('#F3F0EB', C.text3)}>{importResult.skipped} omitidos</span>}
+            {!!importResult.skipped && <span style={pill('#F3F4F6', C.text3)}>{importResult.skipped} omitidos</span>}
           </div>
           {!!importResult.unmatched?.length && (
             <div style={{ marginTop: 10 }}>
@@ -2359,20 +2517,42 @@ function InventoryTab() {
         </div>
       )}
 
-      {/* Tabla de inventario */}
+      {/* Tabla unificada de productos */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 12 }}>
         <h3 style={{ ...sectionTitle, margin: 0 }}>
-          Inventario{inventoryTotal ? <span style={{ fontFamily: "'Inter', system-ui, sans-serif" }}> ({inventoryTotal})</span> : ''}
+          Todos los productos{inventoryTotal ? <span style={{ fontFamily: ADMIN_FONT }}> ({inventoryTotal})</span> : ''}
         </h3>
-        <button onClick={() => setAddOpen(true)} style={{ ...solidBtn, background: C.red, color: '#fff' }}>
-          + Nuevo producto
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {pendingStockCount > 0 && (
+            <>
+              <button
+                type="button"
+                onClick={() => setStockDrafts({})}
+                disabled={stockSaving}
+                style={{ ...outlineBtn, opacity: stockSaving ? 0.5 : 1 }}
+              >
+                Descartar
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveStockChanges}
+                disabled={stockSaving}
+                style={{ ...outlineBtn, borderColor: C.green, color: C.green, opacity: stockSaving ? 0.65 : 1 }}
+              >
+                {stockSaving ? 'Guardando...' : `Guardar stock (${pendingStockCount})`}
+              </button>
+            </>
+          )}
+          <button onClick={() => setAddOpen(true)} style={{ ...solidBtn, background: C.red, color: '#fff' }}>
+            + Nuevo producto
+          </button>
+        </div>
       </div>
 
       <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
         <input
           type="text"
-          placeholder="Buscar por código o descripción..."
+          placeholder="Buscar por código, nombre o descripción..."
           value={search}
           onChange={e => { setSearch(e.target.value); setPage(1) }}
           style={{ ...inp, flex: 1, minWidth: 200 }}
@@ -2393,11 +2573,33 @@ function InventoryTab() {
             </button>
           ))}
         </div>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          {['Todos', 'Publicados', 'Sin publicar'].map(status => (
+            <button
+              key={status}
+              onClick={() => { setPublicationFilter(status); setPage(1) }}
+              style={{
+                padding: '6px 14px', borderRadius: 20, border: 'none', cursor: 'pointer',
+                fontSize: 11, fontFamily: 'inherit', fontWeight: 600,
+                background: publicationFilter === status ? C.dark : C.hairline,
+                color: publicationFilter === status ? '#fff' : C.text2,
+              }}
+            >
+              {status}
+            </button>
+          ))}
+        </div>
         <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: C.text2, cursor: 'pointer' }}>
           <input type="checkbox" checked={lowStockOnly} onChange={e => { setLowStockOnly(e.target.checked); setPage(1) }} />
           Solo stock bajo
         </label>
       </div>
+
+      {stockSaveError && (
+        <div style={{ background: C.redLight, border: `1px solid ${C.red}`, borderRadius: 8, padding: '10px 14px', marginBottom: 16, color: C.red, fontSize: 12.5 }}>
+          {stockSaveError}
+        </div>
+      )}
 
       {inventoryError && (
         <div style={{ background: C.redLight, border: `1px solid ${C.red}`, borderRadius: 8, padding: '12px 16px', marginBottom: 16, color: C.red, fontSize: 13 }}>
@@ -2406,7 +2608,7 @@ function InventoryTab() {
       )}
 
       {!inventoryError && (
-        <div style={{ background: C.white, borderRadius: 10, border: `1px solid ${C.border}`, overflow: 'hidden' }}>
+        <div style={{ background: C.white, borderRadius: 10, border: `1px solid ${C.border}`, overflowX: 'auto' }}>
           {inventoryLoading ? (
             <div style={{ padding: '40px 20px', textAlign: 'center', color: C.muted, fontSize: 14 }}>Cargando...</div>
           ) : inventory.length === 0 ? (
@@ -2416,30 +2618,45 @@ function InventoryTab() {
           ) : (
             <>
               <div style={{
-                display: 'grid', gridTemplateColumns: '130px 1fr 130px 90px 90px 90px 70px 168px',
-                gap: 8, padding: '10px 16px', borderBottom: `1px solid ${C.hairline}`, background: C.paper,
+                display: 'grid', gridTemplateColumns: '56px minmax(220px, 1fr) 100px 105px 105px 70px 92px 120px', minWidth: 980,
+                gap: 8, padding: '8px 14px', borderBottom: `1px solid ${C.hairline}`, background: C.paper,
               }}>
-                {['Código', 'Descripción', 'Grupo/Subgrupo', 'P. costo', 'P. venta', 'P. c/IVA', 'Stock', 'Acciones'].map(h => (
+                {['Foto', 'Producto', 'Proveedor', 'P. costo', 'P. venta', 'Stock', 'Tienda', 'Acciones'].map(h => (
                   <span key={h} style={lbl}>{h}</span>
                 ))}
               </div>
-              {inventory.map((p, i) => (
+              {inventory.map((p, i) => {
+                const stockDraft = stockDrafts[p.id]
+                const displayedStock = stockDraft?.value ?? p.stock
+                return (
                 <div
                   key={p.id}
+                  onClick={() => openProduct(p)}
+                  onMouseEnter={() => setHoveredProductId(p.id)}
+                  onMouseLeave={() => setHoveredProductId(null)}
                   style={{
-                    display: 'grid', gridTemplateColumns: '130px 1fr 130px 90px 90px 90px 70px 168px',
-                    gap: 8, padding: '12px 16px', alignItems: 'center',
+                    display: 'grid', gridTemplateColumns: '56px minmax(220px, 1fr) 100px 105px 105px 70px 92px 120px', minWidth: 980,
+                    gap: 8, padding: '10px 14px', alignItems: 'center',
                     borderBottom: i < inventory.length - 1 ? `1px solid ${C.hairline}` : 'none',
+                    background: hoveredProductId === p.id ? '#F9FAFB' : C.white,
+                    cursor: 'pointer', transition: 'background 0.15s', outline: 'none',
                   }}
                 >
-                  <span style={{ fontSize: 12, fontWeight: 700, color: C.ink, fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {p.codigo}
-                  </span>
-                  <span style={{ fontSize: 13, color: C.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {p.descripcion || '—'}
-                  </span>
-                  <span style={{ fontSize: 12, color: C.text3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {[p.grupo, p.subgrupo].filter(Boolean).join(' · ') || '—'}
+                  {p.image_url ? (
+                    <img src={p.image_url} alt="" style={{ width: 44, height: 44, objectFit: 'cover', borderRadius: 6, border: `1px solid ${C.hairline}` }} />
+                  ) : (
+                    <div style={{ width: 44, height: 44, borderRadius: 6, background: C.hairline, display: 'grid', placeItems: 'center', color: C.muted, fontSize: 16 }}>□</div>
+                  )}
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: C.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {p.name || p.descripcion || 'Sin nombre'}
+                    </div>
+                    <div style={{ fontSize: 10.5, color: C.muted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {p.codigo}{p.category ? ` · ${p.category}` : ''}
+                    </div>
+                  </div>
+                  <span style={{ fontSize: 11.5, color: C.text3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {p.supplier || 'OTRO'}
                   </span>
                   <span style={{ fontSize: 12.5, color: C.text2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {p.precio_costo != null ? fmt(p.precio_costo) : '—'}
@@ -2447,31 +2664,44 @@ function InventoryTab() {
                   <span style={{ fontSize: 13, fontWeight: 600, color: C.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {p.precio_venta != null ? fmt(p.precio_venta) : '—'}
                   </span>
-                  <span style={{ fontSize: 12.5, color: C.text2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {p.precio_iva != null ? fmt(p.precio_iva) : '—'}
+                  <span style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
+                    fontSize: 12, fontWeight: 500, color: C.text2,
+                  }} title={stockDraft ? 'Cambio de stock pendiente de guardar' : 'Stock guardado'}>
+                    <span aria-hidden="true" style={{
+                      width: 7, height: 7, borderRadius: '50%', flexShrink: 0,
+                      background: stockDraft ? C.amber : displayedStock <= 0 ? C.red : displayedStock <= 5 ? C.amber : C.green,
+                    }} />
+                    {displayedStock}
                   </span>
                   <span style={{
-                    fontSize: 12, fontWeight: 700, textAlign: 'center', padding: '3px 8px', borderRadius: 20,
-                    background: p.stock <= 0 ? C.redLight : p.stock <= 5 ? C.amberLight : C.greenLight,
-                    color: p.stock <= 0 ? C.red : p.stock <= 5 ? C.amberDark : C.green,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
+                    fontSize: 10.5, fontWeight: 500, color: C.text2,
                   }}>
-                    {p.stock}
+                    <span aria-hidden="true" style={{
+                      width: 7, height: 7, borderRadius: '50%', flexShrink: 0,
+                      background: p.published ? C.green : C.muted,
+                    }} />
+                    {p.published ? 'Publicado' : 'Borrador'}
                   </span>
-                  <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
-                    <button onClick={() => handleAdjust(p.id, -1)} title="Restar 1" style={{ ...iconBtn, width: 24, height: 24, background: C.hairline, color: C.text2 }}>−</button>
-                    <button onClick={() => handleAdjust(p.id, 1)} title="Sumar 1" style={{ ...iconBtn, width: 24, height: 24, background: C.hairline, color: C.text2 }}>+</button>
-                    <button onClick={() => setEditItem(p)} title="Editar" style={{ ...iconBtn, width: 24, height: 24, background: C.amberLight, color: C.amberDark }}>✎</button>
-                    <button
-                      onClick={() => setPublishItem(p)}
-                      title={p.published ? 'Publicado en la tienda — editar' : 'Publicar en tienda'}
-                      style={{ ...iconBtn, width: 24, height: 24, background: p.published ? C.greenLight : C.hairline, color: p.published ? C.green : C.text2 }}
-                    >
-                      ↑
-                    </button>
-                    <button onClick={() => setConfirmId(p.id)} title="Eliminar" style={{ ...iconBtn, width: 24, height: 24, background: C.redLight, color: C.red }}>✕</button>
+                  <div
+                    onClick={event => event.stopPropagation()}
+                    onKeyDown={event => event.stopPropagation()}
+                    style={{ display: 'flex', gap: 4, flexShrink: 0 }}
+                  >
+                    <TooltipIconButton label="Restar stock" color={C.text3} disabled={stockSaving} onClick={() => queueStockChange(p, -1)}>−</TooltipIconButton>
+                    <TooltipIconButton label="Sumar stock" color={C.green} disabled={stockSaving} onClick={() => queueStockChange(p, 1)}>+</TooltipIconButton>
+                    <TooltipIconButton
+                      label="Editar producto"
+                      color={C.amberDark}
+                      disabled={stockSaving}
+                      onClick={() => openProduct(p)}
+                    >✎</TooltipIconButton>
+                    <TooltipIconButton label="Eliminar producto" color={C.red} disabled={stockSaving} onClick={() => setConfirmId(p.id)}>✕</TooltipIconButton>
                   </div>
                 </div>
-              ))}
+                )
+              })}
             </>
           )}
         </div>
@@ -2490,32 +2720,16 @@ function InventoryTab() {
       )}
 
       {(editItem || addOpen) && (
-        <InventoryProductModal
-          product={addOpen ? null : editItem}
+        <ProductModal
+          product={addOpen ? null : draftFromInventoryRow(editItem)}
           onSave={handleSave}
           onClose={() => { setEditItem(null); setAddOpen(false) }}
         />
       )}
 
-      {publishItem && (
-        <ProductModal
-          product={draftFromInventoryRow(publishItem)}
-          onSave={async (data) => {
-            await updateProduct(publishItem.id, data)
-            fetchInventory({
-              page, limit: INV_PAGE_SIZE,
-              ...(search.trim() ? { search: search.trim() } : {}),
-              ...(supplierFilter !== 'Todos' ? { supplier: supplierFilter } : {}),
-              ...(lowStockOnly ? { lowStock: 'true' } : {}),
-            })
-          }}
-          onClose={() => setPublishItem(null)}
-        />
-      )}
-
       {confirmId !== null && (
         <ConfirmModal
-          message="¿Eliminar este producto del inventario? Esta acción no se puede deshacer."
+          message="¿Eliminar definitivamente este producto? También dejará de mostrarse en la tienda. Esta acción no se puede deshacer."
           onConfirm={() => handleDelete(confirmId)}
           onCancel={() => setConfirmId(null)}
         />
@@ -2531,18 +2745,18 @@ const NAV_ITEMS = [
   { id: 'offers',       label: 'Ofertas',        Icon: TagIcon },
   { id: 'orders',       label: 'Pedidos',        Icon: ClipboardIcon },
   { id: 'stockAlerts',  label: 'Avisos de stock', Icon: BellIcon },
-  { id: 'inventory',    label: 'Inventario',     Icon: BoxIcon },
 ]
 
 export default function AdminDashboard() {
-  const { products, updateProduct, addProduct, deleteProduct, logout } = useAdmin()
+  const { products, updateProduct, logout } = useAdmin()
   const navigate  = useNavigate()
-  const [tab, setTab]           = useState('products')
+  const [tab, setTab]           = useState('overview')
 
   return (
     <div style={{
       display: 'flex', minHeight: '100vh',
-      fontFamily: "'Hanken Grotesk', 'Inter', system-ui, sans-serif",
+      fontFamily: ADMIN_FONT,
+      fontWeight: 400,
     }}>
       {/* ── Sidebar ───────────────────────────────────────── */}
       <aside style={{
@@ -2557,22 +2771,22 @@ export default function AdminDashboard() {
         flexShrink: 0,
       }}>
         {/* Brand */}
-        <div style={{ padding: '24px 18px 20px', borderBottom: `1px solid ${C.hairline}` }}>
-          <FenixLogo height={90} />
+        <div style={{ padding: '18px 16px 16px', borderBottom: `1px solid ${C.hairline}` }}>
+          <FenixLogo height={76} />
           <div style={{
             fontSize: 9,
             color: C.muted,
             letterSpacing: '0.18em',
-            marginTop: 10,
+            marginTop: 7,
             textTransform: 'uppercase',
-            fontFamily: "'Hanken Grotesk', sans-serif",
+            fontFamily: ADMIN_FONT,
           }}>
             Administración
           </div>
         </div>
 
         {/* Nav */}
-        <nav style={{ flex: 1, padding: '12px 8px' }}>
+        <nav style={{ flex: 1, padding: '9px 7px' }}>
           {NAV_ITEMS.map(item => (
             <button
               key={item.id}
@@ -2581,13 +2795,13 @@ export default function AdminDashboard() {
                 width: '100%',
                 display: 'flex',
                 alignItems: 'center',
-                padding: '10px 16px',
+                padding: '8px 14px',
                 borderRadius: 8,
                 border: 'none',
                 cursor: 'pointer',
                 background: tab === item.id ? 'rgba(204,0,0,0.08)' : 'transparent',
                 color: tab === item.id ? C.red : C.text3,
-                fontSize: 13,
+                fontSize: 12.5,
                 fontWeight: tab === item.id ? 600 : 400,
                 fontFamily: 'inherit',
                 marginBottom: 2,
@@ -2602,7 +2816,7 @@ export default function AdminDashboard() {
         </nav>
 
         {/* Bottom actions */}
-        <div style={{ padding: '12px 8px 24px', borderTop: `1px solid ${C.hairline}`, display: 'flex', flexDirection: 'column', gap: 2 }}>
+        <div style={{ padding: '9px 7px 18px', borderTop: `1px solid ${C.hairline}`, display: 'flex', flexDirection: 'column', gap: 2 }}>
           <button
             onClick={() => navigate('/')}
             style={{ ...sidebarAction, color: C.text3 }}
@@ -2623,35 +2837,30 @@ export default function AdminDashboard() {
         flex: 1,
         background: C.paper,
         minHeight: '100vh',
-        padding: '36px 40px',
+        padding: '28px 32px',
         overflow: 'auto',
       }}>
         {/* Page header */}
-        <div style={{ marginBottom: 32 }}>
+        <div style={{ marginBottom: 24 }}>
           <h1 style={{
-            fontFamily: "'Cormorant Garamond', serif",
-            fontSize: 32,
-            fontWeight: 400,
+            fontFamily: ADMIN_FONT,
+            fontSize: 27,
+            fontWeight: 500,
             color: C.ink,
             margin: 0,
             letterSpacing: '0.01em',
           }}>
             {NAV_ITEMS.find(i => i.id === tab)?.label}
           </h1>
-          <div style={{ width: 36, height: 3, background: C.red, borderRadius: 2, marginTop: 10 }} />
+          <div style={{ width: 32, height: 3, background: C.red, borderRadius: 2, marginTop: 8 }} />
         </div>
 
         {/* Tab content */}
         {tab === 'overview' && (
-          <OverviewTab products={products} />
+          <OverviewDashboard products={products} onNavigate={setTab} />
         )}
         {tab === 'products' && (
-          <ProductsTab
-            products={products}
-            onUpdate={updateProduct}
-            onAdd={addProduct}
-            onDelete={deleteProduct}
-          />
+          <UnifiedProductsTab />
         )}
         {tab === 'offers' && (
           <OffersTab
@@ -2665,9 +2874,6 @@ export default function AdminDashboard() {
         {tab === 'stockAlerts' && (
           <StockAlertsTab products={products} />
         )}
-        {tab === 'inventory' && (
-          <InventoryTab />
-        )}
       </main>
     </div>
   )
@@ -2678,11 +2884,11 @@ const sidebarAction = {
   alignItems: 'center',
   gap: 8,
   width: '100%',
-  padding: '8px 14px',
+  padding: '7px 12px',
   background: 'transparent',
   border: 'none',
   cursor: 'pointer',
-  fontSize: 12,
+  fontSize: 11.5,
   fontFamily: 'inherit',
   borderRadius: 6,
   textAlign: 'left',

@@ -34,16 +34,17 @@ export default function AdminLogin() {
   return (
     <div style={{
       minHeight: '100vh',
-      background: '#F7F4EF',
+      background: '#FFFFFF',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
       padding: 24,
-      fontFamily: "'Hanken Grotesk', 'Inter', system-ui, sans-serif",
+      fontFamily: 'Arial, Helvetica, sans-serif',
+      fontWeight: 400,
     }}>
       <div style={{
         background: '#FFFFFF',
-        border: '1px solid #E3DDD4',
+        border: '1px solid #DDE3EA',
         borderRadius: 16,
         padding: '52px 44px',
         width: '100%',
@@ -56,10 +57,10 @@ export default function AdminLogin() {
         </div>
 
         <h1 style={{
-          fontFamily: "'Cormorant Garamond', serif",
+          fontFamily: 'Arial, Helvetica, sans-serif',
           fontSize: 28,
-          fontWeight: 400,
-          color: '#16110B',
+          fontWeight: 500,
+          color: '#111827',
           margin: '0 0 6px',
           letterSpacing: '-0.01em',
           lineHeight: 1.2,
@@ -67,7 +68,7 @@ export default function AdminLogin() {
           Administración
         </h1>
         <p style={{
-          color: '#9A917F',
+          color: '#6B7280',
           fontSize: 10,
           letterSpacing: '0.2em',
           textTransform: 'uppercase',
@@ -86,15 +87,15 @@ export default function AdminLogin() {
             onFocus={() => setFocused(true)}
             onBlur={() => setFocused(false)}
             style={{
-              background: '#EDEBE7',
+              background: '#F3F4F6',
               border: `1px solid ${
                 error   ? '#CC0000' :
                 focused ? '#CC0000' :
-                          '#E3DDD4'
+                          '#DDE3EA'
               }`,
               borderRadius: 8,
               padding: '13px 16px',
-              color: '#16110B',
+              color: '#111827',
               fontSize: 14,
               outline: 'none',
               fontFamily: 'inherit',
@@ -115,13 +116,13 @@ export default function AdminLogin() {
             disabled={loading || !pwd}
             style={{
               marginTop: 4,
-              background: loading || !pwd ? '#E3DDD4' : '#CC0000',
-              color: loading || !pwd ? '#9A917F' : '#FFFFFF',
+              background: loading || !pwd ? '#E5E7EB' : '#CC0000',
+              color: loading || !pwd ? '#6B7280' : '#FFFFFF',
               border: 'none',
               borderRadius: 8,
               padding: '13px 24px',
               fontSize: 11,
-              fontWeight: 700,
+              fontWeight: 600,
               letterSpacing: '0.16em',
               textTransform: 'uppercase',
               cursor: loading || !pwd ? 'not-allowed' : 'pointer',
@@ -140,14 +141,14 @@ export default function AdminLogin() {
           style={{
             display: 'inline-block',
             marginTop: 36,
-            color: '#9A917F',
+            color: '#6B7280',
             fontSize: 11,
             letterSpacing: '0.1em',
             textDecoration: 'none',
             transition: 'color 0.2s',
           }}
-          onMouseEnter={e => e.currentTarget.style.color = '#3A2E23'}
-          onMouseLeave={e => e.currentTarget.style.color = '#9A917F'}
+          onMouseEnter={e => e.currentTarget.style.color = '#374151'}
+          onMouseLeave={e => e.currentTarget.style.color = '#6B7280'}
         >
           ← Volver a la tienda
         </a>

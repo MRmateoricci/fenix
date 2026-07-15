@@ -36,6 +36,7 @@ CREATE INDEX IF NOT EXISTS idx_orders_status        ON orders(status);
 CREATE INDEX IF NOT EXISTS idx_orders_created_at    ON orders(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_orders_mp_payment_id ON orders(mp_payment_id);
 CREATE INDEX IF NOT EXISTS idx_orders_customer_email ON orders(customer_email);
+CREATE INDEX IF NOT EXISTS idx_orders_paid_at ON orders(paid_at DESC) WHERE paid_at IS NOT NULL;
 
 CREATE OR REPLACE FUNCTION update_updated_at()
 RETURNS TRIGGER AS $$
@@ -148,13 +149,7 @@ CREATE TABLE IF NOT EXISTS products (
   stock             INTEGER       NOT NULL DEFAULT 0,
   source            VARCHAR(20)   NOT NULL DEFAULT 'manual'
                     CHECK (source IN ('catalog','price_list','sale','purchase','manual')),
-  supplier          VARCHAR(10)   GENERATED ALWAYS AS (
-                       CASE
-                         WHEN codigo LIKE 'ALC-%'        THEN 'ALCIDES'
-                         WHEN codigo ~ '^[0-9]+[A-Z]*$'  THEN 'KIAN'
-                         ELSE 'OTRO'
-                       END
-                     ) STORED,
+  supplier          VARCHAR(80)   NOT NULL DEFAULT 'OTRO',
   price_updated_at TIMESTAMPTZ,
   stock_updated_at TIMESTAMPTZ,
   created_at       TIMESTAMPTZ    NOT NULL DEFAULT NOW(),
@@ -190,7 +185,22 @@ ALTER TABLE products ADD COLUMN IF NOT EXISTS color_temp        NUMERIC(6,0);
 ALTER TABLE products ADD COLUMN IF NOT EXISTS ip_rating         VARCHAR(10);
 ALTER TABLE products ADD COLUMN IF NOT EXISTS material          VARCHAR(100);
 ALTER TABLE products ADD COLUMN IF NOT EXISTS cable_type        VARCHAR(60);
+ALTER TABLE products ADD COLUMN IF NOT EXISTS product_type      VARCHAR(150);
 ALTER TABLE products ADD COLUMN IF NOT EXISTS published         BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- `supplier` inicialmente se infería del código con una columna generada. Se
+-- conserva el valor ya calculado, pero pasa a ser editable desde el producto.
+ALTER TABLE products ALTER COLUMN supplier DROP EXPRESSION IF EXISTS;
+ALTER TABLE products ALTER COLUMN supplier TYPE VARCHAR(80);
+ALTER TABLE products ALTER COLUMN supplier SET DEFAULT 'OTRO';
+UPDATE products SET supplier = 'OTRO' WHERE supplier IS NULL OR BTRIM(supplier) = '';
+ALTER TABLE products ALTER COLUMN supplier SET NOT NULL;
+
+-- `cable_type` fue el primer filtro de nivel 3. `product_type` lo generaliza
+-- para todas las ramas del mismo árbol de categorías sin perder datos previos.
+UPDATE products
+SET product_type = cable_type
+WHERE product_type IS NULL AND cable_type IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_products_published ON products(published) WHERE published = TRUE;
 CREATE INDEX IF NOT EXISTS idx_products_category  ON products(category);

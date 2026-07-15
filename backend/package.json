@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "node --watch index.js",
     "start": "node index.js",
-    "db:migrate": "node -e \"import('./db/pool.js').then(m => m.runSchema())\""
+    "db:migrate": "node -e \"import('./db/pool.js').then(m => m.runSchema())\"",
+    "db:seed": "node db/seedStorefront.js",
+    "db:seed:demo": "node db/seedDemoProducts.js"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

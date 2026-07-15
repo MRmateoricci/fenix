@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
-import { categories, CATEGORY_NAV_LABEL, CATEGORY_SUBCATEGORIES, CABLE_TYPES } from '../data/products'
+import { categories, CATEGORY_NAV_LABEL } from '../data/products'
+import { getSubcategoryOptions, getProductTypeOptions } from '../data/categoryTree'
 import { useAdmin } from '../context/AdminContext'
 import ProductCard from '../components/ProductCard'
 import PageSEO from '../components/SEO'
@@ -53,7 +54,7 @@ function useFilterParams(priceMax) {
   const query              = searchParams.get('q') || ''
   const selectedCategories = searchParams.getAll('category')
   const sub                = searchParams.get('sub') || ''
-  const cableType          = searchParams.get('ctype') || ''
+  const productType        = searchParams.get('ctype') || searchParams.get('type') || ''
   const onlyInStock        = searchParams.get('stock') === '1'
   const sortBy             = searchParams.get('sort') || 'default'
   const minPrice           = Math.max(PRICE_MIN, Number(searchParams.get('min')) || PRICE_MIN)
@@ -101,15 +102,24 @@ function useFilterParams(priceMax) {
     if (value == null || value === '') p.delete('sub')
     else p.set('sub', value)
     p.delete('ctype')
+    p.delete('type')
+    setSearchParams(p, { replace: true })
+  }
+
+  function setProductType(value) {
+    const p = new URLSearchParams(searchParams)
+    p.delete('ctype')
+    p.delete('type')
+    if (value) p.set(sub === 'Cables Normalizados' ? 'ctype' : 'type', value)
     setSearchParams(p, { replace: true })
   }
 
   const hasActiveFilters =
-    query !== '' || selectedCategories.length > 0 || sub !== '' || cableType !== '' || onlyInStock ||
+    query !== '' || selectedCategories.length > 0 || sub !== '' || productType !== '' || onlyInStock ||
     sortBy !== 'default' || minPrice > PRICE_MIN || maxPrice < priceMax ||
     selectedColorTemps.length > 0 || selectedIPs.length > 0
 
-  return { query, selectedCategories, sub, cableType, onlyInStock, sortBy, minPrice, maxPrice, priceMax, selectedColorTemps, selectedIPs, set, setSub, toggleCategory, toggleMulti, clearAll, selectCategory, hasActiveFilters }
+  return { query, selectedCategories, sub, productType, onlyInStock, sortBy, minPrice, maxPrice, priceMax, selectedColorTemps, selectedIPs, set, setSub, setProductType, toggleCategory, toggleMulti, clearAll, selectCategory, hasActiveFilters }
 }
 
 // ─── Breadcrumb + title ────────────────────────────────────────────────────────
@@ -211,8 +221,8 @@ export default function Products() {
       ))
     if (filters.sub)
       list = list.filter(p => p.subcategory === filters.sub)
-    if (filters.cableType)
-      list = list.filter(p => p.cableType === filters.cableType)
+    if (filters.productType)
+      list = list.filter(p => (p.productType || p.cableType) === filters.productType)
     if (filters.onlyInStock)
       list = list.filter(p => p.inStock)
     if (filters.selectedColorTemps.length > 0)
@@ -226,7 +236,7 @@ export default function Products() {
       case 'name-az':    return [...list].sort((a, b) => a.name.localeCompare(b.name, 'es'))
       default:           return list
     }
-  }, [products, filters.query, filters.selectedCategories, filters.sub, filters.cableType, filters.onlyInStock, filters.sortBy, filters.minPrice, filters.maxPrice, filters.selectedColorTemps, filters.selectedIPs])
+  }, [products, filters.query, filters.selectedCategories, filters.sub, filters.productType, filters.onlyInStock, filters.sortBy, filters.minPrice, filters.maxPrice, filters.selectedColorTemps, filters.selectedIPs])
 
   const seoCategory = filters.selectedCategories.length === 1 ? filters.selectedCategories[0] : null
   const seoTitle = seoCategory
@@ -253,8 +263,8 @@ export default function Products() {
         {/* ── Subcategory filter ──────────────────────────────────────────── */}
         <SubcategoryTabs filters={filters} />
 
-        {/* ── Cable type filter ───────────────────────────────────────────── */}
-        <CableTypeTabs filters={filters} />
+        {/* ── Product type filter (level 3 of the header taxonomy) ─────────── */}
+        <ProductTypeTabs filters={filters} />
 
         {/* ── Search + sort row ───────────────────────────────────────────── */}
         <div style={{ display: 'flex', gap: 12, marginBottom: 28, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -382,17 +392,17 @@ function CategoryTabs({ filters }) {
 // ─── Subcategory tabs ──────────────────────────────────────────────────────────
 function SubcategoryTabs({ filters }) {
   const activeCategory = filters.selectedCategories.length === 1 ? filters.selectedCategories[0] : null
-  const subs = activeCategory ? CATEGORY_SUBCATEGORIES[activeCategory] : null
-  if (!subs) return null
+  const subs = activeCategory ? getSubcategoryOptions(activeCategory) : []
+  if (!subs.length) return null
 
   return (
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 28 }}>
       {subs.map((sub) => {
-        const isActive = filters.sub === sub
+        const isActive = filters.sub === sub.label
         return (
           <button
-            key={sub}
-            onClick={() => filters.setSub(isActive ? null : sub)}
+            key={sub.label}
+            onClick={() => filters.setSub(isActive ? null : sub.label)}
             style={{
               padding: '8px 16px', borderRadius: 999, cursor: 'pointer',
               border: `1px solid ${isActive ? T.ink : T.hairline}`,
@@ -406,7 +416,7 @@ function SubcategoryTabs({ filters }) {
             onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.borderColor = T.hairlineStrong }}
             onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.borderColor = T.hairline }}
           >
-            {sub}
+            {sub.label}
           </button>
         )
       })}
@@ -414,9 +424,13 @@ function SubcategoryTabs({ filters }) {
   )
 }
 
-// ─── Cable type tabs (solo dentro de "Cables Normalizados") ────────────────────
-function CableTypeTabs({ filters }) {
-  if (filters.sub !== 'Cables Normalizados') return null
+// ─── Level-3 tabs — sourced from the same tree as the header menu ─────────────
+function ProductTypeTabs({ filters }) {
+  const activeCategory = filters.selectedCategories.length === 1 ? filters.selectedCategories[0] : null
+  const types = activeCategory && filters.sub
+    ? getProductTypeOptions(activeCategory, filters.sub)
+    : []
+  if (!types.length) return null
 
   return (
     <div style={{
@@ -425,12 +439,12 @@ function CableTypeTabs({ filters }) {
       background: T.panel,
       marginBottom: 28,
     }}>
-      {CABLE_TYPES.map((type) => {
-        const isActive = filters.cableType === type
+      {types.map((type) => {
+        const isActive = filters.productType === type.label
         return (
           <button
-            key={type}
-            onClick={() => filters.set('ctype', isActive ? null : type)}
+            key={type.label}
+            onClick={() => filters.setProductType(isActive ? null : type.label)}
             style={{
               background: 'none', border: 'none', cursor: 'pointer',
               padding: '14px 22px',
@@ -445,7 +459,7 @@ function CableTypeTabs({ filters }) {
             onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.color = T.ink2 }}
             onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.color = T.muted }}
           >
-            {type}
+            {type.label}
           </button>
         )
       })}

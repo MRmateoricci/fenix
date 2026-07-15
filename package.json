@@ -3,10 +3,20 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  },
   "scripts": {
-    "dev": "vite",
+    "postinstall": "npm --prefix backend ci --no-audit --no-fund",
+    "dev": "concurrently --kill-others-on-fail --names FRONTEND,BACKEND --prefix-colors cyan,yellow \"vite\" \"npm --prefix backend run dev\"",
+    "dev:frontend": "vite",
+    "dev:backend": "npm --prefix backend run dev",
     "build": "vite build",
-    "preview": "vite preview"
+    "start": "npm --prefix backend start",
+    "preview": "vite preview",
+    "db:migrate": "npm --prefix backend run db:migrate",
+    "db:seed": "npm --prefix backend run db:seed",
+    "db:seed:demo": "npm --prefix backend run db:seed:demo"
   },
   "dependencies": {
     "react": "^19.0.0",
@@ -17,6 +27,7 @@
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.0",
     "@vitejs/plugin-react": "^6.0.2",
+    "concurrently": "^9.2.1",
     "tailwindcss": "^4.3.0",
     "vite": "^8.0.16"
   }

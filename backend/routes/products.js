@@ -117,6 +117,7 @@ const FIELD_TRANSFORMS = {
   grupo:             (v) => v,
   subgrupo:          (v) => v,
   medida:            (v) => v,
+  supplier:          (v) => String(v || 'OTRO').trim().toUpperCase(),
   precio_costo:      (v) => toNumber(v),
   precio_venta:      (v) => toNumber(v),
   precio_iva:        (v) => toNumber(v),
@@ -134,6 +135,7 @@ const FIELD_TRANSFORMS = {
   ip_rating:         (v) => v,
   material:          (v) => v,
   cable_type:        (v) => v,
+  product_type:      (v) => v,
   published:         (v) => Boolean(v),
 }
 const EDITABLE_FIELDS = Object.keys(FIELD_TRANSFORMS)
@@ -204,7 +206,61 @@ router.patch('/:id', async (req, res) => {
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
-// POST /api/products/:id/adjust-stock — ajuste manual +/- (no clampea a 0)
+// POST /api/products/stock/batch — aplica todos los cambios manuales pendientes
+// en una sola consulta. Se reciben deltas para no pisar ventas o compras que
+// hayan modificado el stock mientras el administrador tenía abierta la tabla.
+router.post('/stock/batch', async (req, res) => {
+  try {
+    const rawChanges = Array.isArray(req.body.changes) ? req.body.changes : []
+    if (!rawChanges.length || rawChanges.length > 200) {
+      return res.status(400).json({ error: 'Enviá entre 1 y 200 cambios de stock' })
+    }
+
+    const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+    const accumulated = new Map()
+    for (const change of rawChanges) {
+      const id = String(change?.id || '')
+      const delta = Number(change?.delta)
+      if (!uuidPattern.test(id) || !Number.isInteger(delta)) {
+        return res.status(400).json({ error: 'Hay un cambio de stock inválido' })
+      }
+      accumulated.set(id, (accumulated.get(id) || 0) + delta)
+    }
+
+    const changes = [...accumulated.entries()].filter(([, delta]) => delta !== 0)
+    if (!changes.length) return res.json({ products: [] })
+
+    const ids = changes.map(([id]) => id)
+    const deltas = changes.map(([, delta]) => delta)
+    const { rows } = await pool.query(
+      `WITH pending_change AS (
+         SELECT * FROM UNNEST($1::uuid[], $2::integer[]) AS item(id, delta)
+       ), validation AS (
+         SELECT COUNT(*)::integer AS found
+         FROM products product
+         INNER JOIN pending_change ON pending_change.id = product.id
+       )
+       UPDATE products AS product
+       SET stock = product.stock + change.delta,
+           stock_updated_at = NOW()
+       FROM pending_change AS change, validation
+       WHERE product.id = change.id
+         AND validation.found = CARDINALITY($1::uuid[])
+       RETURNING product.*`,
+      [ids, deltas]
+    )
+
+    if (rows.length !== changes.length) {
+      return res.status(404).json({ error: 'Uno o más productos ya no existen' })
+    }
+    res.json({ products: rows })
+  } catch (err) {
+    console.error('[POST /api/products/stock/batch]', err)
+    res.status(500).json({ error: 'Error interno' })
+  }
+})
+
+// POST /api/products/:id/adjust-stock — ajuste manual +/- individual
 // ─────────────────────────────────────────────────────────────────────────────
 router.post('/:id/adjust-stock', async (req, res) => {
   try {
