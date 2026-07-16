@@ -210,7 +210,7 @@ export default function Navbar() {
                 style={{
                   display: 'flex', alignItems: 'center', gap: 6,
                   background: 'none', border: 'none', cursor: 'pointer', padding: 0,
-                  fontFamily: "'Hanken Grotesk', system-ui, sans-serif",
+                  fontFamily: "var(--font-sans)",
                   fontSize: 13.5, fontWeight: 500,
                   color: ink,
                   opacity: 0.9,
@@ -240,7 +240,7 @@ export default function Navbar() {
                     onMouseEnter={() => category ? openCategoryMenu(category.label) : scheduleCategoryClose()}
                     style={{
                       textDecoration: 'none',
-                      fontFamily: "'Hanken Grotesk', system-ui, sans-serif",
+                      fontFamily: "var(--font-sans)",
                       fontSize: 13.5, fontWeight: isActiveCategory ? 500 : 400,
                       color: ink,
                       opacity: isActiveCategory ? 1 : 0.82,
@@ -276,7 +276,7 @@ export default function Navbar() {
                   background: 'transparent', border: 'none', outline: 'none',
                   borderBottom: `1px solid ${searchBorder}`,
                   width: 140, padding: '4px 26px 4px 0',
-                  fontFamily: "'Hanken Grotesk', system-ui, sans-serif",
+                  fontFamily: "var(--font-sans)",
                   fontSize: 13.5, color: ink,
                   transition: 'border-color .2s, color .3s',
                 }}
@@ -322,13 +322,13 @@ export default function Navbar() {
                           <img src={p.image} alt="" style={{ width: 40, height: 40, objectFit: 'cover', borderRadius: 2, flexShrink: 0 }} />
                           <span style={{ flex: 1, minWidth: 0 }}>
                             <span style={{
-                              display: 'block', fontFamily: "'Hanken Grotesk', system-ui, sans-serif",
+                              display: 'block', fontFamily: "var(--font-sans)",
                               fontSize: 13, color: '#16110B',
                               overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                             }}>
                               {p.name}
                             </span>
-                            <span style={{ display: 'block', fontFamily: "'Spline Sans Mono', monospace", fontSize: 11.5, color: '#8A8175' }}>
+                            <span style={{ display: 'block', fontFamily: "var(--font-sans)", fontSize: 11.5, color: '#8A8175' }}>
                               {fmtPrice(p.price)}
                             </span>
                           </span>
@@ -340,7 +340,7 @@ export default function Navbar() {
                         style={{
                           width: '100%', padding: '12px 14px', background: 'none', border: 'none',
                           borderTop: '1px solid #DED6C7', cursor: 'pointer', textAlign: 'left',
-                          fontFamily: "'Spline Sans Mono', monospace", fontSize: 11,
+                          fontFamily: "var(--font-sans)", fontSize: 11,
                           letterSpacing: '.08em', textTransform: 'uppercase', color: '#6B6051',
                         }}
                       >
@@ -349,7 +349,7 @@ export default function Navbar() {
                     </>
                   ) : (
                     <div style={{
-                      padding: '16px 14px', fontFamily: "'Hanken Grotesk', system-ui, sans-serif",
+                      padding: '16px 14px', fontFamily: "var(--font-sans)",
                       fontSize: 13, color: '#8A8175',
                     }}>
                       Sin resultados para "{searchQuery.trim()}"
@@ -387,7 +387,7 @@ export default function Navbar() {
                   {isAuthenticated ? (
                     <>
                       <div style={{ padding: '12px 14px', borderBottom: '1px solid #DED6C7' }}>
-                        <span style={{ fontFamily: "'Hanken Grotesk', system-ui, sans-serif", fontSize: 12.5, color: '#8A8175' }}>
+                        <span style={{ fontFamily: "var(--font-sans)", fontSize: 12.5, color: '#8A8175' }}>
                           Hola, {user.firstName}
                         </span>
                       </div>
@@ -459,7 +459,7 @@ export default function Navbar() {
                     border: 'none', cursor: 'pointer',
                     padding: '9px 10px', borderRadius: 2,
                     marginBottom: 2,
-                    fontFamily: "'Hanken Grotesk', system-ui, sans-serif",
+                    fontFamily: "var(--font-sans)",
                     fontSize: 14, fontWeight: activeCategoryLabel === cat.label ? 600 : 400,
                     color: '#16110B',
                     background: activeCategoryLabel === cat.label ? 'rgba(22,17,11,0.06)' : 'none',
@@ -487,7 +487,7 @@ export default function Navbar() {
                   onClick={(e) => { e.preventDefault(); goToCategory(activeCategory.to) }}
                   style={{
                     textDecoration: 'none', color: '#16110B',
-                    fontFamily: "'Hanken Grotesk', system-ui, sans-serif",
+                    fontFamily: "var(--font-sans)",
                     fontSize: 15, fontWeight: 500,
                   }}
                 >
@@ -522,7 +522,7 @@ function CategoryTreeNode({ node, depth, onNavigate }) {
       onClick={(e) => { e.preventDefault(); onNavigate(node.to) }}
       style={{
         textDecoration: 'none', color: '#16110B',
-        fontFamily: "'Hanken Grotesk', system-ui, sans-serif",
+        fontFamily: "var(--font-sans)",
         fontSize: depth === 0 ? 13.5 : 13,
         fontWeight: depth === 0 ? 600 : 400,
         opacity: depth === 0 ? 1 : 0.72,
@@ -535,7 +535,7 @@ function CategoryTreeNode({ node, depth, onNavigate }) {
     </a>
   ) : (
     <span style={{
-      fontFamily: "'Hanken Grotesk', system-ui, sans-serif",
+      fontFamily: "var(--font-sans)",
       fontSize: 13, color: '#6B6051',
     }}>
       {node.label}
@@ -566,7 +566,7 @@ function AccountMenuItem({ onClick, borderTop, children }) {
         display: 'block', width: '100%', padding: '11px 14px',
         background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left',
         borderTop: borderTop ? '1px solid #DED6C7' : 'none',
-        fontFamily: "'Hanken Grotesk', system-ui, sans-serif",
+        fontFamily: "var(--font-sans)",
         fontSize: 13.5, color: '#16110B',
       }}
       onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(22,17,11,0.05)')}
@@ -602,7 +602,7 @@ function CartButton({ totalItems, onClick, ink }) {
           position: 'absolute', top: -4, right: -5,
           minWidth: 16, height: 16, padding: '0 4px',
           background: '#CC0000', color: '#fff', borderRadius: 8,
-          fontFamily: "'Spline Sans Mono', monospace",
+          fontFamily: "var(--font-sans)",
           fontSize: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1,
         }}>
           {totalItems > 99 ? '99+' : totalItems}
@@ -653,7 +653,7 @@ function MobileMenu({ open, onClose, onNavigate, navigate }) {
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
               <path d="m15 18-6-6 6-6" />
             </svg>
-            <span style={{ fontFamily: "'Hanken Grotesk', system-ui, sans-serif", fontSize: 15, fontWeight: 600 }}>
+            <span style={{ fontFamily: "var(--font-sans)", fontSize: 15, fontWeight: 600 }}>
               {currentNode ? currentNode.label : 'Categoría'}
             </span>
           </button>
@@ -685,7 +685,7 @@ function MobileMenu({ open, onClose, onNavigate, navigate }) {
                 display: 'block', width: '100%', textAlign: 'left',
                 background: 'none', border: 'none', cursor: 'pointer',
                 padding: '12px 0', marginBottom: 8, borderBottom: '1px solid #2E2417',
-                fontFamily: "'Hanken Grotesk', system-ui, sans-serif",
+                fontFamily: "var(--font-sans)",
                 fontSize: 15, fontWeight: 600, color: '#E0A24A',
               }}
             >
@@ -707,7 +707,7 @@ function MobileMenu({ open, onClose, onNavigate, navigate }) {
                 width: '100%', textAlign: 'left',
                 background: 'none', border: 'none', cursor: interactive ? 'pointer' : 'default',
                 padding: '13px 0', borderBottom: '1px solid #241C12',
-                fontFamily: "'Hanken Grotesk', system-ui, sans-serif",
+                fontFamily: "var(--font-sans)",
                 fontSize: 15.5, color: interactive ? '#F2EBDC' : '#8C8270',
               }}
             >
@@ -730,7 +730,7 @@ function MobileMenu({ open, onClose, onNavigate, navigate }) {
             onClick={(e) => { e.preventDefault(); setCatPath([]) }}
             style={{
               textDecoration: 'none', color: '#F2EBDC',
-              fontFamily: "'Cormorant Garamond', serif",
+              fontFamily: 'var(--font-sans)',
               fontSize: 'clamp(34px, 5.4vw, 62px)',
               fontWeight: 500, lineHeight: 1.15, letterSpacing: '-.015em',
               transition: 'color .15s',
@@ -747,7 +747,7 @@ function MobileMenu({ open, onClose, onNavigate, navigate }) {
               onClick={(e) => onNavigate(item, e)}
               style={{
                 textDecoration: 'none', color: '#F2EBDC',
-                fontFamily: "'Cormorant Garamond', serif",
+                fontFamily: 'var(--font-sans)',
                 fontSize: 'clamp(34px, 5.4vw, 62px)',
                 fontWeight: 500, lineHeight: 1.15, letterSpacing: '-.015em',
                 transition: 'color .15s',
@@ -763,7 +763,7 @@ function MobileMenu({ open, onClose, onNavigate, navigate }) {
 
       <div style={{
         position: 'relative', padding: '0 24px 40px',
-        fontFamily: "'Spline Sans Mono', monospace", fontSize: 12, color: '#8C8270',
+        fontFamily: "var(--font-sans)", fontSize: 12, color: '#8C8270',
         display: 'flex', gap: 26, flexWrap: 'wrap',
       }}>
         <span>C. Cantilo 745 · City Bell</span>

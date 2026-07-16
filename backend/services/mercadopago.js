@@ -5,6 +5,62 @@ const client = new MercadoPagoConfig({
   accessToken: process.env.MP_ACCESS_TOKEN,
 })
 
+function parseBaseUrl(value, variableName) {
+  const raw = value?.trim().replace(/\/+$/, '')
+  if (!raw) throw new Error(`${variableName} no está configurada`)
+
+  let url
+  try {
+    url = new URL(raw)
+  } catch {
+    throw new Error(`${variableName} debe ser una URL absoluta válida`)
+  }
+
+  if (!['http:', 'https:'].includes(url.protocol)) {
+    throw new Error(`${variableName} debe usar http o https`)
+  }
+
+  return { value: raw, url }
+}
+
+function isLocalUrl(url) {
+  return ['localhost', '127.0.0.1', '::1'].includes(url.hostname)
+}
+
+function getMercadoPagoUrls() {
+  const appBase = parseBaseUrl(process.env.APP_BASE_URL, 'APP_BASE_URL')
+  const frontendBase = parseBaseUrl(process.env.FRONTEND_BASE_URL, 'FRONTEND_BASE_URL')
+
+  // Mercado Pago no acepta localhost/127.0.0.1 en back_urls. Durante el
+  // desarrollo usamos el túnel público del backend como puente y Express
+  // redirige luego al frontend local (ver backend/index.js).
+  const returnBase = isLocalUrl(frontendBase.url) ? appBase : frontendBase
+
+  if (isLocalUrl(returnBase.url)) {
+    throw new Error(
+      'Mercado Pago necesita una URL pública para regresar al sitio. Configurá APP_BASE_URL con HTTPS (por ejemplo, ngrok).'
+    )
+  }
+
+  if (returnBase.url.protocol !== 'https:') {
+    throw new Error('La URL pública de retorno de Mercado Pago debe usar HTTPS')
+  }
+
+  if (isLocalUrl(appBase.url)) {
+    throw new Error(
+      'Mercado Pago necesita una URL pública para el webhook. Configurá APP_BASE_URL con HTTPS (por ejemplo, ngrok).'
+    )
+  }
+  if (appBase.url.protocol !== 'https:') {
+    throw new Error('APP_BASE_URL debe usar HTTPS para recibir notificaciones de Mercado Pago')
+  }
+
+  return {
+    returnBaseUrl: returnBase.value,
+    webhookBaseUrl: appBase.value,
+  }
+}
+
 /**
  * Crea una preferencia de Checkout Pro en MercadoPago.
  * @param {object} order - Fila de la tabla orders
@@ -12,6 +68,7 @@ const client = new MercadoPagoConfig({
  */
 export async function createPreference(order) {
   const preference = new Preference(client)
+  const { returnBaseUrl, webhookBaseUrl } = getMercadoPagoUrls()
 
   const nameParts = order.customer_name.split(' ')
   const firstName = nameParts[0]
@@ -48,12 +105,12 @@ export async function createPreference(order) {
       phone: { number: order.customer_phone },
     },
     back_urls: {
-      success: `${process.env.FRONTEND_BASE_URL}/order-confirmation?orderId=${order.id}&status=success`,
-      failure: `${process.env.FRONTEND_BASE_URL}/order-confirmation?orderId=${order.id}&status=failure`,
-      pending: `${process.env.FRONTEND_BASE_URL}/order-confirmation?orderId=${order.id}&status=pending`,
+      success: `${returnBaseUrl}/order-confirmation?orderId=${order.id}&status=success`,
+      failure: `${returnBaseUrl}/order-confirmation?orderId=${order.id}&status=failure`,
+      pending: `${returnBaseUrl}/order-confirmation?orderId=${order.id}&status=pending`,
     },
     auto_return: 'approved',
-    notification_url: `${process.env.APP_BASE_URL}/api/webhooks/mercadopago`,
+    notification_url: `${webhookBaseUrl}/api/webhooks/mercadopago`,
     statement_descriptor: 'Fenix Electricidad',
   }
 

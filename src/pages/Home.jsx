@@ -187,7 +187,6 @@ export default function Home() {
         <CategoriasSection />
         <DestacadosSection />
         <MostSearchedSection />
-        <CatalogoBand />
         <HistoriaSection />
         <ResenasSection />
         <ContactoSection />
@@ -281,7 +280,7 @@ function HeroSection({ pageReady }) {
       {/* Content */}
       <div style={{ position: 'relative', zIndex: 2, padding: '90px 30px 44px', maxWidth: 900 }}>
         <div style={{
-          fontFamily: "'Spline Sans Mono', monospace",
+          fontFamily: "var(--font-sans)",
           fontSize: 12.5, letterSpacing: '.26em', textTransform: 'uppercase',
           color: 'rgba(242,235,220,0.72)', marginBottom: 20,
           ...rise(reached.eyebrow, '0.7s'),
@@ -289,10 +288,10 @@ function HeroSection({ pageReady }) {
           City Bell · desde 1977
         </div>
         <h1 style={{
-          fontFamily: "'Cormorant Garamond', serif",
-          fontWeight: 500, margin: 0,
+          fontFamily: "'Cormorant Garamond', Georgia, serif",
+          fontWeight: 600, margin: 0,
           fontSize: 'clamp(48px, 7vw, 100px)',
-          lineHeight: .96, letterSpacing: '-.02em',
+          lineHeight: .9, letterSpacing: '-.025em',
           color: '#F7F4EF',
           textShadow: '0 4px 32px rgba(0,0,0,0.35)',
           ...rise(reached.h1, '0.8s'),
@@ -404,7 +403,7 @@ function CategoryCard({ cat, onClick }) {
           }
         </div>
         <div style={{ padding: '14px 4px 4px', textAlign: 'center' }}>
-          <span style={{ fontFamily: "'Hanken Grotesk', system-ui, sans-serif", fontWeight: 700, fontSize: 18, color: T.ink }}>
+          <span style={{ fontFamily: "var(--font-sans)", fontWeight: 700, fontSize: 18, color: T.ink }}>
             {cat.name}
           </span>
         </div>
@@ -482,21 +481,24 @@ function DestacadosSection() {
   if (featured.length === 0) return null
 
   return (
-    <section id="destacados" style={{ padding: '74px 0 26px', scrollMarginTop: 90 }}>
+    <section
+      id="destacados"
+      style={{
+        margin: '18px 0 0',
+        padding: '14px 24px',
+        scrollMarginTop: 90,
+      }}
+    >
       <Reveal>
-        <div style={{ maxWidth: 1320, margin: '0 auto 42px', padding: '0 40px', textAlign: 'center' }}>
-          <Link to="/products?category=Promociones" style={{ textDecoration: 'none' }}>
-            <h2 style={{
-              fontFamily: "'Cormorant Garamond', serif", fontWeight: 400,
-              fontSize: 'clamp(32px, 3.8vw, 52px)', lineHeight: 1.0,
-              margin: 0, color: T.ink, letterSpacing: '-.015em',
-            }}>
-              Promociones
-            </h2>
-          </Link>
+        <div className="fnx-tonal-product-section">
+          <div className="fnx-tonal-product-section__header">
+            <Link to="/products?category=Promociones" style={{ textDecoration: 'none' }}>
+              <h2 className="fnx-tonal-product-section__title">Promociones</h2>
+            </Link>
+          </div>
+          <InfiniteProductCarousel products={featured} onAdd={addItem} label="Promociones" />
         </div>
       </Reveal>
-      <InfiniteProductCarousel products={featured} onAdd={addItem} label="Promociones" />
     </section>
   )
 }
@@ -530,19 +532,22 @@ function MostSearchedSection() {
   if (mostSearched.length === 0) return null
 
   return (
-    <section id="mas-buscados" style={{ padding: '66px 0 26px', scrollMarginTop: 90 }}>
+    <section
+      id="mas-buscados"
+      style={{
+        margin: '18px 0 0',
+        padding: '14px 24px',
+        scrollMarginTop: 90,
+      }}
+    >
       <Reveal>
-        <div style={{ maxWidth: 1320, margin: '0 auto 38px', padding: '0 40px', textAlign: 'center' }}>
-          <h2 style={{
-            fontFamily: "'Cormorant Garamond', serif", fontWeight: 400,
-            fontSize: 'clamp(32px, 3.8vw, 52px)', lineHeight: 1,
-            margin: 0, color: T.ink, letterSpacing: '-.015em',
-          }}>
-            Los más buscados
-          </h2>
+        <div className="fnx-tonal-product-section fnx-tonal-product-section--alternate">
+          <div className="fnx-tonal-product-section__header">
+            <h2 className="fnx-tonal-product-section__title">Los más buscados</h2>
+          </div>
+          <InfiniteProductCarousel products={mostSearched} onAdd={addItem} label="Los más buscados" />
         </div>
       </Reveal>
-      <InfiniteProductCarousel products={mostSearched} onAdd={addItem} label="Los más buscados" />
     </section>
   )
 }
@@ -664,7 +669,7 @@ function FeaturedCard({ product, onAdd }) {
       style={{
         display: 'flex', flexDirection: 'column',
         height: '100%',
-        transform: cardHovered ? 'translateY(-5px)' : 'translateY(0)',
+        transform: cardHovered ? 'translateY(-3px)' : 'translateY(0)',
         transition: 'transform .38s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
       }}
       onMouseEnter={() => setCardHovered(true)}
@@ -698,16 +703,16 @@ function FeaturedCard({ product, onAdd }) {
                 transition: 'transform .6s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
               }} />
           }
-          <span style={{ position: 'absolute', top: 12, left: 13, fontFamily: "'Inter', system-ui, sans-serif", fontSize: 10, letterSpacing: '.08em', color: T.text3, zIndex: 1 }}>
+          <span style={{ position: 'absolute', top: 9, left: 10, fontFamily: "'Inter', system-ui, sans-serif", fontSize: 9, letterSpacing: '.07em', color: T.text3, zIndex: 1 }}>
             {product.category}
           </span>
           {product.originalPrice && (
             <span style={{
-              position: 'absolute', top: 12, right: 13, zIndex: 1,
+              position: 'absolute', top: 9, right: 10, zIndex: 1,
               background: T.amber, color: '#fff',
               fontFamily: "'Inter', system-ui, sans-serif",
-              fontSize: 11, fontWeight: 600, letterSpacing: '.03em',
-              padding: '3px 8px', borderRadius: 2,
+              fontSize: 10, fontWeight: 600, letterSpacing: '.02em',
+              padding: '2px 6px', borderRadius: 2,
             }}>
               -{Math.round((1 - product.price / product.originalPrice) * 100)}%
             </span>
@@ -724,10 +729,10 @@ function FeaturedCard({ product, onAdd }) {
             <span style={{
               background: T.cream,
               color: T.ink,
-              fontSize: 12, fontWeight: 500,
+              fontSize: 10, fontWeight: 500,
               letterSpacing: '.15em', textTransform: 'uppercase',
-              padding: '12px 24px', borderRadius: 2,
-              fontFamily: "'Hanken Grotesk', system-ui, sans-serif",
+              padding: '9px 16px', borderRadius: 2,
+              fontFamily: "var(--font-sans)",
               transform: cardHovered ? 'translateY(0)' : 'translateY(10px)',
               transition: 'transform .35s ease',
             }}>
@@ -736,23 +741,23 @@ function FeaturedCard({ product, onAdd }) {
           </div>
         </div>
       </Link>
-      <div style={{ padding: '16px 2px 0', display: 'flex', flexDirection: 'column', flex: 1 }}>
+      <div style={{ padding: '10px 2px 0', display: 'flex', flexDirection: 'column', flex: 1 }}>
         <Link to={`/products/${product.id}`} style={{ textDecoration: 'none', color: 'inherit' }}>
-          <h3 style={{ fontFamily: "'Inter', system-ui, sans-serif", fontWeight: 400, fontSize: 14, lineHeight: 1.4, margin: '0 0 12px', color: T.ink }}>
+          <h3 style={{ fontFamily: "'Inter', system-ui, sans-serif", fontWeight: 400, fontSize: 12.5, lineHeight: 1.35, margin: '0 0 8px', color: T.ink }}>
             {product.name}
           </h3>
         </Link>
         <div style={{
           marginTop: 'auto',
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
-          borderTop: `1px solid ${T.hairline}`, paddingTop: 13,
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+          borderTop: `1px solid ${T.hairline}`, paddingTop: 9,
         }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-            <span style={{ fontFamily: "'Inter', system-ui, sans-serif", fontSize: 14, fontWeight: 500, color: T.ink }}>
+            <span style={{ fontFamily: "'Inter', system-ui, sans-serif", fontSize: 13, fontWeight: 500, color: T.ink }}>
               {fmt(product.price)}
             </span>
             {product.originalPrice && (
-              <span style={{ fontFamily: "'Inter', system-ui, sans-serif", fontSize: 12, color: T.muted2, textDecoration: 'line-through' }}>
+              <span style={{ fontFamily: "'Inter', system-ui, sans-serif", fontSize: 10.5, color: T.muted2, textDecoration: 'line-through' }}>
                 {fmt(product.originalPrice)}
               </span>
             )}
@@ -763,10 +768,10 @@ function FeaturedCard({ product, onAdd }) {
             style={{
               background: 'none', border: 'none',
               cursor: product.inStock ? 'pointer' : 'default',
-              fontSize: 13, fontWeight: 500,
+              fontSize: 11.5, fontWeight: 500,
               color: addHover && product.inStock ? T.red : T.ink,
-              display: 'inline-flex', alignItems: 'center', gap: 6,
-              padding: '4px 0',
+              display: 'inline-flex', alignItems: 'center', gap: 4,
+              padding: '3px 0',
               borderBottom: `1px solid ${addHover && product.inStock ? T.red : T.hairlineStrong}`,
               transition: 'color .15s, border-color .15s',
               fontFamily: "'Inter', system-ui, sans-serif",
@@ -787,99 +792,56 @@ function FeaturedCard({ product, onAdd }) {
   )
 }
 
-// ─── 3b. Separador catálogo ────────────────────────────────────────────────────
-const BAND_ITEMS = [
-  'Iluminación', 'Lámparas LED', 'Exterior', 'Materiales eléctricos',
-  'Apliques', 'Tiras LED', 'Plafones', 'City Bell',
-]
-
-function CatalogoBand() {
-  const items = [...BAND_ITEMS, ...BAND_ITEMS]
-  return (
-    <div style={{
-      margin: '64px 0 0',
-      borderTop: `1px solid ${T.hairline}`,
-      borderBottom: `1px solid ${T.hairline}`,
-      overflow: 'hidden',
-      background: T.panel,
-      padding: '18px 0',
-    }}>
-      <div
-        className="fnx-marquee-track"
-        style={{
-          display: 'flex', gap: 0,
-          width: 'max-content',
-          animation: 'fnx-marquee 28s linear infinite',
-        }}
-      >
-        {items.map((item, i) => (
-          <span
-            key={i}
-            style={{
-              fontFamily: "'Spline Sans Mono', monospace",
-              fontSize: 11, letterSpacing: '.22em', textTransform: 'uppercase',
-              color: i % 2 === 0 ? T.ink : T.muted2,
-              padding: '0 38px',
-              whiteSpace: 'nowrap',
-              display: 'inline-flex', alignItems: 'center', gap: 38,
-            }}
-          >
-            {item}
-            <span style={{ width: 4, height: 4, borderRadius: '50%', background: T.hairlineStrong, display: 'inline-block' }} />
-          </span>
-        ))}
-      </div>
-    </div>
-  )
-}
-
 // ─── 4. La casa ────────────────────────────────────────────────────────────────
 function HistoriaSection() {
   return (
     <section
       id="historia"
-      style={{ marginTop: 84, background: T.dark, color: '#EAE2D3', position: 'relative', overflow: 'hidden', scrollMarginTop: 90 }}
+      className="fnx-historia-section"
+      style={{ marginTop: 84, scrollMarginTop: 90 }}
     >
-      <div aria-hidden="true" style={{ position: 'absolute', top: '-14%', right: '-4%', width: 480, height: 480, background: 'radial-gradient(circle, rgba(224,162,74,0.16) 0%, rgba(224,162,74,0.04) 42%, transparent 68%)', pointerEvents: 'none' }} />
-      <div
-        className="fnx-historia-grid"
-        style={{ maxWidth: 1320, margin: '0 auto', padding: '90px 40px', display: 'grid', gridTemplateColumns: '0.86fr 1.14fr', gap: 60, alignItems: 'center', position: 'relative' }}
-      >
-        <Reveal y={40}>
-          <figure style={{ margin: 0 }}>
-            <div style={{ aspectRatio: '3/4', borderRadius: 3, overflow: 'hidden', background: '#241B12', border: '1px solid #2E2417', position: 'relative' }}>
-              <img
-                src={localImg}
-                alt="El local Fénix"
-                style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block', opacity: 0.88 }}
-              />
-            </div>
-          </figure>
-        </Reveal>
+      <div className="fnx-historia-card" style={{ background: T.dark, color: '#EAE2D3' }}>
+        <div aria-hidden="true" style={{ position: 'absolute', top: '-14%', right: '-4%', width: 480, height: 480, background: 'radial-gradient(circle, rgba(224,162,74,0.16) 0%, rgba(224,162,74,0.04) 42%, transparent 68%)', pointerEvents: 'none' }} />
+        <div
+          className="fnx-historia-grid"
+          style={{ maxWidth: 1320, margin: '0 auto', padding: '90px 40px', display: 'grid', gridTemplateColumns: '0.86fr 1.14fr', gap: 60, alignItems: 'center', position: 'relative' }}
+        >
+          <Reveal y={40}>
+            <figure style={{ margin: 0 }}>
+              <div style={{ aspectRatio: '3/4', borderRadius: 3, overflow: 'hidden', background: '#241B12', border: '1px solid #2E2417', position: 'relative' }}>
+                <img
+                  src={localImg}
+                  alt="El local Fénix"
+                  style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block', opacity: 0.88 }}
+                />
+              </div>
+            </figure>
+          </Reveal>
 
-        <Reveal delay={150} y={40}>
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 24 }}>
-            <span style={{ fontFamily: "'Spline Sans Mono', monospace", fontSize: 12, color: '#9A8B6E' }}>Quiénes somos</span>
-            <span style={{ width: 34, height: 1, background: '#473A28' }} />
+          <Reveal delay={150} y={40}>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 24 }}>
+              <span style={{ fontFamily: "var(--font-sans)", fontSize: 12, color: '#9A8B6E' }}>Quiénes somos</span>
+              <span style={{ width: 34, height: 1, background: '#473A28' }} />
+            </div>
+            <p style={{
+              fontFamily: 'var(--font-sans)',
+              fontSize: 'clamp(26px, 2.9vw, 40px)', lineHeight: 1.32,
+              fontWeight: 400, margin: 0, color: '#F2EBDC', letterSpacing: '-.005em',
+            }}>
+              Abrimos en <span style={{ fontVariantNumeric: 'lining-nums', fontFeatureSettings: '"lnum" 1' }}>1977</span> con una idea simple, y todavía la sostenemos: asesorar de verdad, no solo vender una lámpara.
+            </p>
+            <p style={{ fontFamily: 'var(--font-sans)', fontSize: 15.5, lineHeight: 1.75, color: '#A99E8B', margin: '28px 0 0', maxWidth: 520 }}>
+              Tres generaciones de la misma familia atendieron este mostrador. Conocemos cada proyecto por su nombre y elegimos los productos que pondríamos en nuestra propia casa.
+            </p>
+            <div style={{ fontFamily: "var(--font-sans)", fontSize: 12, color: '#8C8270', marginTop: 38, borderTop: '1px solid #2E2417', paddingTop: 18 }}>
+              Familia Fénix — tres generaciones en City Bell
+            </div>
           </div>
-          <p style={{
-            fontFamily: "'Playfair Display', Georgia, serif",
-            fontSize: 'clamp(26px, 2.9vw, 40px)', lineHeight: 1.32,
-            fontWeight: 400, margin: 0, color: '#F2EBDC', letterSpacing: '-.005em',
-          }}>
-            Abrimos en <span style={{ fontVariantNumeric: 'lining-nums', fontFeatureSettings: '"lnum" 1' }}>1977</span> con una idea simple, y todavía la sostenemos: asesorar de verdad, no solo vender una lámpara.
-          </p>
-          <p style={{ fontFamily: 'Georgia, serif', fontSize: 15.5, lineHeight: 1.75, color: '#A99E8B', margin: '28px 0 0', maxWidth: 520 }}>
-            Tres generaciones de la misma familia atendieron este mostrador. Conocemos cada proyecto por su nombre y elegimos los productos que pondríamos en nuestra propia casa.
-          </p>
-          <div style={{ fontFamily: "'Spline Sans Mono', monospace", fontSize: 12, color: '#8C8270', marginTop: 38, borderTop: '1px solid #2E2417', paddingTop: 18 }}>
-            Familia Fénix — tres generaciones en City Bell
-          </div>
+          </Reveal>
         </div>
-        </Reveal>
+        <style>{`.fnx-historia-grid { grid-template-columns: 1fr !important; } @media (min-width: 860px) { .fnx-historia-grid { grid-template-columns: 0.86fr 1.14fr !important; } }`}</style>
       </div>
-      <style>{`.fnx-historia-grid { grid-template-columns: 1fr !important; } @media (min-width: 860px) { .fnx-historia-grid { grid-template-columns: 0.86fr 1.14fr !important; } }`}</style>
     </section>
   )
 }
@@ -892,11 +854,11 @@ function ContactoSection() {
         {/* Info */}
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
-            <span style={{ fontFamily: "'Spline Sans Mono', monospace", fontSize: 12, color: T.muted }}>El local</span>
+            <span style={{ fontFamily: "var(--font-sans)", fontSize: 12, color: T.muted }}>El local</span>
             <span style={{ width: 34, height: 1, background: T.hairlineStrong }} />
           </div>
           <h2 style={{
-            fontFamily: "'Cormorant Garamond', serif", fontWeight: 400,
+            fontFamily: 'var(--font-sans)', fontWeight: 400,
             fontSize: 'clamp(32px, 3.8vw, 52px)', lineHeight: 1.0,
             margin: '0 0 30px', color: T.ink, letterSpacing: '-.015em',
           }}>
@@ -909,7 +871,7 @@ function ContactoSection() {
               { label: 'teléfono', value: '(221) 480-1977' },
             ].map(({ label, value }) => (
               <div key={label} style={{ display: 'flex', gap: 18, padding: '17px 0', borderBottom: `1px solid ${T.hairline}` }}>
-                <span style={{ fontFamily: "'Spline Sans Mono', monospace", fontSize: 11, color: T.muted2, minWidth: 88, paddingTop: 3 }}>
+                <span style={{ fontFamily: "var(--font-sans)", fontSize: 11, color: T.muted2, minWidth: 88, paddingTop: 3 }}>
                   {label}
                 </span>
                 <span style={{ fontSize: 16, color: T.ink2, lineHeight: 1.5 }}>{value}</span>
@@ -940,7 +902,7 @@ function ContactoSection() {
               referrerPolicy="no-referrer-when-downgrade"
             />
           </div>
-          <figcaption style={{ fontFamily: "'Spline Sans Mono', monospace", fontSize: 10.5, color: T.muted2, marginTop: 11 }}>
+          <figcaption style={{ fontFamily: "var(--font-sans)", fontSize: 10.5, color: T.muted2, marginTop: 11 }}>
             MAPA · C. Cantilo 745, City Bell
           </figcaption>
         </figure>
@@ -963,7 +925,7 @@ function WaButton() {
         fontSize: 14, fontWeight: 500, padding: '14px 26px', borderRadius: 2,
         display: 'inline-flex', alignItems: 'center', gap: 9,
         transition: 'background .15s',
-        fontFamily: "'Hanken Grotesk', system-ui, sans-serif",
+        fontFamily: "var(--font-sans)",
       }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
@@ -985,7 +947,7 @@ function ComoLlegarLink() {
         fontSize: 14.5, fontWeight: 500,
         borderBottom: `1px solid ${hovered ? T.ink : T.hairlineStrong}`, paddingBottom: 3,
         transition: 'border-color .15s',
-        fontFamily: "'Hanken Grotesk', system-ui, sans-serif",
+        fontFamily: "var(--font-sans)",
       }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
@@ -1054,11 +1016,11 @@ function ResenasSection() {
         <Reveal>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 20, marginBottom: 40, flexWrap: 'wrap' }}>
           <div>
-            <span style={{ fontFamily: "'Spline Sans Mono', monospace", fontSize: 11, letterSpacing: '.14em', textTransform: 'uppercase', color: T.muted2, display: 'block', marginBottom: 10 }}>
+            <span style={{ fontFamily: "var(--font-sans)", fontSize: 11, letterSpacing: '.14em', textTransform: 'uppercase', color: T.muted2, display: 'block', marginBottom: 10 }}>
               Opiniones
             </span>
             <h2 style={{
-              fontFamily: "'Cormorant Garamond', serif", fontWeight: 400,
+              fontFamily: 'var(--font-sans)', fontWeight: 400,
               fontSize: 'clamp(26px, 3vw, 40px)', color: T.ink, margin: 0, lineHeight: 1.1,
             }}>
               Lo que dicen nuestros clientes
@@ -1068,7 +1030,7 @@ function ResenasSection() {
             display: 'inline-flex', alignItems: 'center', gap: 8,
             padding: '8px 16px', borderRadius: 999,
             background: '#FBF8F3', border: '1px solid #DED6C7',
-            fontFamily: "'Spline Sans Mono', monospace", fontSize: 11, color: T.muted,
+            fontFamily: "var(--font-sans)", fontSize: 11, color: T.muted,
           }}>
             <svg width="13" height="13" viewBox="0 0 24 24" fill="#4285F4" stroke="none">
               <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>

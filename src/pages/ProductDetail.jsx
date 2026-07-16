@@ -17,29 +17,41 @@ const fmt = (n) =>
 
 const REVIEWS_API = import.meta.env.VITE_API_URL || ''
 
-function useProductReviews(productId) {
+function useProductReviews(productId, authKey) {
   const [reviews, setReviews] = useState([])
   const [average, setAverage] = useState(0)
   const [count, setCount]     = useState(0)
   const [loading, setLoading] = useState(true)
+  const [eligibility, setEligibility] = useState({
+    authenticated: false,
+    emailVerified: false,
+    hasDeliveredOrder: false,
+    canReview: false,
+  })
 
   const reload = useCallback(() => {
     if (productId == null) return
     setLoading(true)
-    fetch(`${REVIEWS_API}/api/reviews/${productId}`)
+    fetch(`${REVIEWS_API}/api/reviews/${productId}`, { credentials: 'include' })
       .then((res) => (res.ok ? res.json() : { reviews: [], average: 0, count: 0 }))
       .then((data) => {
         setReviews(data.reviews)
         setAverage(data.average)
         setCount(data.count)
+        setEligibility(data.eligibility || {
+          authenticated: false,
+          emailVerified: false,
+          hasDeliveredOrder: false,
+          canReview: false,
+        })
       })
       .catch(() => {})
       .finally(() => setLoading(false))
-  }, [productId])
+  }, [productId, authKey])
 
   useEffect(() => { reload() }, [reload])
 
-  return { reviews, average, count, loading, reload }
+  return { reviews, average, count, loading, eligibility, reload }
 }
 
 export default function ProductDetail() {
@@ -47,10 +59,10 @@ export default function ProductDetail() {
   const navigate = useNavigate()
   const { addItem } = useCart()
   const { products } = useAdmin()
-  const { isAuthenticated } = useAuth()
+  const { isAuthenticated, user } = useAuth()
   const { isFavorite, toggleFavorite } = useFavorites()
   const product = products.find(p => p.id === id)
-  const reviewsData = useProductReviews(product?.id)
+  const reviewsData = useProductReviews(product?.id, `${isAuthenticated}-${user?.emailVerified}`)
 
   const [qty, setQty]     = useState(1)
   const [added, setAdded] = useState(false)
@@ -60,6 +72,14 @@ export default function ProductDetail() {
   useEffect(() => {
     setSelectedColor(product?.colors?.[0] ?? null)
     setSelectedSize(product?.sizes?.[0] ?? null)
+  }, [product?.id])
+
+  useEffect(() => {
+    if (product && window.location.hash === '#reviews') {
+      window.requestAnimationFrame(() => {
+        document.getElementById('reviews')?.scrollIntoView({ block: 'start' })
+      })
+    }
   }, [product?.id])
 
   function handleToggleFavorite() {
@@ -142,8 +162,8 @@ export default function ProductDetail() {
         schema={productSchema}
       />
       {/* ── Main section ─────────────────────────────────────────────────────── */}
-      <div style={{ backgroundColor: 'var(--color-bg)', minHeight: '100vh' }}>
-        <div style={{ maxWidth: 1200, margin: '0 auto', padding: '32px 32px 80px' }}>
+      <div style={{ backgroundColor: 'var(--color-bg)' }}>
+        <div style={{ maxWidth: 1200, margin: '0 auto', padding: '32px 32px 24px' }}>
 
           {/* Breadcrumb */}
           <nav style={{
@@ -726,15 +746,17 @@ function StarRating({ value, onChange, size = 18, readOnly = false }) {
 }
 
 function ReviewsSection({ product, reviewsData }) {
-  const { user, isAuthenticated } = useAuth()
+  const { user, isAuthenticated, resendVerificationEmail } = useAuth()
   const navigate = useNavigate()
 
-  const { reviews, average, count, loading, reload: load } = reviewsData
+  const { reviews, average, count, loading, eligibility, reload: load } = reviewsData
 
   const [rating, setRating]     = useState(0)
   const [comment, setComment]   = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError]       = useState(null)
+  const [resending, setResending] = useState(false)
+  const [verificationMessage, setVerificationMessage] = useState(null)
 
   const myReview = reviews.find((r) => r.userId === user?.id)
 
@@ -755,7 +777,10 @@ function ReviewsSection({ product, reviewsData }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ productId: product.id, rating, comment }),
       })
-      if (!res.ok) throw new Error('No pudimos guardar tu reseña. Probá de nuevo.')
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.error || 'No pudimos guardar tu reseña. Probá de nuevo.')
+      }
       await load()
     } catch (err) {
       setError(err.message)
@@ -774,8 +799,21 @@ function ReviewsSection({ product, reviewsData }) {
     }
   }
 
+  async function handleResendVerification() {
+    setVerificationMessage(null)
+    setResending(true)
+    try {
+      await resendVerificationEmail()
+      setVerificationMessage({ type: 'success', text: 'Te enviamos un nuevo enlace de verificación.' })
+    } catch (err) {
+      setVerificationMessage({ type: 'error', text: err.message })
+    } finally {
+      setResending(false)
+    }
+  }
+
   return (
-    <section id="reviews" style={{ backgroundColor: 'var(--color-bg)', paddingTop: 64, scrollMarginTop: 96 }}>
+    <section id="reviews" style={{ backgroundColor: 'var(--color-bg)', paddingTop: 24, scrollMarginTop: 96 }}>
       <div style={{ maxWidth: 1200, margin: '0 auto', padding: '0 32px' }}>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 28, flexWrap: 'wrap' }}>
@@ -803,7 +841,7 @@ function ReviewsSection({ product, reviewsData }) {
           {!isAuthenticated ? (
             <p style={{ fontSize: 14, color: 'var(--color-text-muted)', margin: 0 }}>
               <button
-                onClick={() => navigate('/login')}
+                onClick={() => navigate('/login', { state: { from: `/products/${product.id}#reviews` } })}
                 style={{
                   background: 'none', border: 'none', padding: 0,
                   color: 'var(--color-primary)', cursor: 'pointer',
@@ -812,7 +850,41 @@ function ReviewsSection({ product, reviewsData }) {
               >
                 Iniciá sesión
               </button>{' '}
-              para dejar tu reseña de este producto.
+              para dejar una reseña cuando tu pedido haya sido entregado.
+            </p>
+          ) : loading ? (
+            <p style={{ fontSize: 14, color: 'var(--color-text-muted)', margin: 0 }}>
+              Comprobando si podés reseñar este producto…
+            </p>
+          ) : !eligibility.emailVerified ? (
+            <div>
+              <p style={{ fontSize: 14, color: 'var(--color-text-muted)', margin: 0 }}>
+                Confirmá que <strong>{user.email}</strong> es tuyo antes de publicar una reseña.
+              </p>
+              <button
+                type="button"
+                onClick={handleResendVerification}
+                disabled={resending}
+                style={{
+                  marginTop: 10, color: 'var(--color-primary)', fontSize: 13,
+                  fontWeight: 600, textDecoration: 'underline',
+                  cursor: resending ? 'not-allowed' : 'pointer',
+                }}
+              >
+                {resending ? 'Enviando…' : 'Reenviar email de verificación'}
+              </button>
+              {verificationMessage && (
+                <p style={{
+                  fontSize: 12, margin: '8px 0 0',
+                  color: verificationMessage.type === 'success' ? '#166534' : 'var(--color-primary)',
+                }}>
+                  {verificationMessage.text}
+                </p>
+              )}
+            </div>
+          ) : !eligibility.hasDeliveredOrder ? (
+            <p style={{ fontSize: 14, color: 'var(--color-text-muted)', margin: 0 }}>
+              La reseña se habilitará cuando tengas un pedido entregado que incluya este producto.
             </p>
           ) : (
             <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>

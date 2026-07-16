@@ -60,11 +60,11 @@ export default function Profesionales() {
       <section style={{ background: T.dark, color: T.cream, overflow: 'hidden', position: 'relative', padding: '100px 40px' }}>
         <div aria-hidden="true" style={{ position: 'absolute', top: '10%', right: '5%', width: 420, height: 420, background: 'radial-gradient(circle, rgba(204,0,0,0.12) 0%, transparent 65%)', pointerEvents: 'none' }} />
         <div style={{ maxWidth: 760, position: 'relative' }}>
-          <span style={{ fontFamily: "'Spline Sans Mono', monospace", fontSize: 11, letterSpacing: '.14em', textTransform: 'uppercase', color: T.accent, display: 'block', marginBottom: 20 }}>
+          <span style={{ fontFamily: "var(--font-sans)", fontSize: 11, letterSpacing: '.14em', textTransform: 'uppercase', color: T.accent, display: 'block', marginBottom: 20 }}>
             Para profesionales
           </span>
           <h1 style={{
-            fontFamily: "'Cormorant Garamond', serif",
+            fontFamily: 'var(--font-sans)',
             fontSize: 'clamp(44px, 5.5vw, 80px)', fontWeight: 400,
             lineHeight: 1.0, letterSpacing: '-.015em',
             color: T.cream, margin: '0 0 28px',
@@ -72,7 +72,7 @@ export default function Profesionales() {
             Para los que construyen con luz
           </h1>
           <p style={{
-            fontFamily: 'Georgia, serif', fontSize: 18,
+            fontFamily: 'var(--font-sans)', fontSize: 18,
             lineHeight: 1.72, color: T.muted, margin: '0 0 40px', maxWidth: 560,
           }}>
             Trabajamos con electricistas, arquitectos y constructoras desde hace más de cuatro décadas. Sabemos lo que necesita una obra: stock, precio, asesoramiento y documentación.
@@ -124,7 +124,7 @@ export default function Profesionales() {
       <section style={{ background: T.paper }}>
         <div style={{ maxWidth: 1320, margin: '0 auto', padding: '80px 40px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 48 }}>
-            <span style={{ fontFamily: "'Spline Sans Mono', monospace", fontSize: 12, color: '#9A917F' }}>Qué ofrecemos</span>
+            <span style={{ fontFamily: "var(--font-sans)", fontSize: 12, color: '#9A917F' }}>Qué ofrecemos</span>
             <span style={{ flex: 1, height: 1, background: T.hairline }} />
           </div>
 
@@ -134,7 +134,7 @@ export default function Profesionales() {
                 <div style={{ width: 40, height: 40, background: T.surface2, borderRadius: 2, display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 20 }}>
                   <b.icon />
                 </div>
-                <h2 style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 20, fontWeight: 600, color: T.ink, margin: '0 0 10px' }}>
+                <h2 style={{ fontFamily: 'var(--font-sans)', fontSize: 20, fontWeight: 600, color: T.ink, margin: '0 0 10px' }}>
                   {b.title}
                 </h2>
                 <p style={{ fontFamily: "'Inter', system-ui, sans-serif", fontSize: 14, lineHeight: 1.7, color: '#6B6051', margin: 0 }}>
@@ -151,10 +151,10 @@ export default function Profesionales() {
         <div style={{ maxWidth: 1320, margin: '0 auto', padding: '72px 40px' }}>
           <div style={{ display: 'flex', gap: 64, alignItems: 'flex-start', flexWrap: 'wrap' }}>
             <div style={{ flex: '1 1 300px' }}>
-              <span style={{ fontFamily: "'Spline Sans Mono', monospace", fontSize: 11, letterSpacing: '.14em', textTransform: 'uppercase', color: '#9A917F', display: 'block', marginBottom: 16 }}>
+              <span style={{ fontFamily: "var(--font-sans)", fontSize: 11, letterSpacing: '.14em', textTransform: 'uppercase', color: '#9A917F', display: 'block', marginBottom: 16 }}>
                 Para quién
               </span>
-              <h2 style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 'clamp(28px, 3.5vw, 44px)', fontWeight: 400, color: T.ink, margin: '0 0 16px' }}>
+              <h2 style={{ fontFamily: 'var(--font-sans)', fontSize: 'clamp(28px, 3.5vw, 44px)', fontWeight: 400, color: T.ink, margin: '0 0 16px' }}>
                 Trabajamos con profesionales del sector
               </h2>
               <p style={{ fontFamily: "'Inter', system-ui, sans-serif", fontSize: 14.5, lineHeight: 1.72, color: '#6B6051', margin: 0, maxWidth: 420 }}>
@@ -183,7 +183,7 @@ export default function Profesionales() {
 
       {/* ── CTA final ───────────────────────────────────────────────────────── */}
       <section style={{ background: T.dark, padding: '80px 40px', textAlign: 'center' }}>
-        <h2 style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 'clamp(28px, 3.5vw, 48px)', fontWeight: 400, color: T.cream, margin: '0 0 16px' }}>
+        <h2 style={{ fontFamily: 'var(--font-sans)', fontSize: 'clamp(28px, 3.5vw, 48px)', fontWeight: 400, color: T.cream, margin: '0 0 16px' }}>
           ¿Tenés un proyecto en mente?
         </h2>
         <p style={{ fontFamily: "'Inter', system-ui, sans-serif", fontSize: 14, color: T.muted, margin: '0 0 32px' }}>

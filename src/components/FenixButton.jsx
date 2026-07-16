@@ -55,7 +55,7 @@ export default function FenixButton({ onClick, href, type = 'button', disabled =
       {/* Texto */}
       <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1 }}>
         <span style={{
-          fontFamily: "'Hanken Grotesk', system-ui, sans-serif",
+          fontFamily: "var(--font-sans)",
           fontWeight: 800,
           fontSize: 20,
           letterSpacing: '.18em',
@@ -68,7 +68,7 @@ export default function FenixButton({ onClick, href, type = 'button', disabled =
           FÉNIX
         </span>
         <span style={{
-          fontFamily: "'Hanken Grotesk', system-ui, sans-serif",
+          fontFamily: "var(--font-sans)",
           fontWeight: 400,
           fontSize: 9,
           letterSpacing: '.06em',

@@ -20,12 +20,14 @@ export async function sendMail({ to, subject, html }) {
   const t = getTransporter()
   if (!t) {
     console.warn('[mailer] GMAIL_USER/GMAIL_APP_PASSWORD no configurados — mail no enviado:', subject)
-    return
+    return false
   }
   try {
     await t.sendMail({ from: `"Fénix Iluminación" <${process.env.GMAIL_USER}>`, to, subject, html })
+    return true
   } catch (err) {
     console.error('[mailer] Error al enviar mail:', err.message)
+    return false
   }
 }
 
@@ -49,6 +51,66 @@ function itemsRows(order) {
   return (order.items || [])
     .map((i) => `<tr><td style="padding:4px 8px">${i.name}</td><td style="padding:4px 8px">${i.quantity}</td><td style="padding:4px 8px">${fmt(i.subtotal)}</td></tr>`)
     .join('')
+}
+
+const appBaseUrl = () =>
+  (process.env.FRONTEND_BASE_URL || process.env.APP_BASE_URL || 'http://localhost:5173').replace(/\/$/, '')
+
+const escapeHtml = (value = '') =>
+  String(value)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;')
+
+export function emailVerificationEmail({ firstName, token }) {
+  const verifyUrl = `${appBaseUrl()}/verify-email?token=${encodeURIComponent(token)}`
+  return {
+    subject: 'Confirmá tu email en Fénix Iluminación',
+    html: `
+      <div style="font-family:Arial,sans-serif;color:#16110B;line-height:1.6;max-width:560px">
+        <h2>Confirmá tu dirección de email</h2>
+        <p>Hola ${escapeHtml(firstName)}. Para comprobar que esta casilla es tuya, confirmala desde el siguiente botón.</p>
+        <p style="margin:24px 0">
+          <a href="${verifyUrl}" style="display:inline-block;background:#CC0000;color:#fff;text-decoration:none;padding:12px 20px;border-radius:8px;font-weight:600">
+            Confirmar mi email
+          </a>
+        </p>
+        <p style="font-size:13px;color:#6B6257">El enlace vence en 24 horas. Si no creaste esta cuenta, podés ignorar este mensaje.</p>
+      </div>
+    `,
+  }
+}
+
+export function reviewInvitationEmail(order) {
+  const uniqueItems = [...new Map(
+    (order.items || []).filter((item) => item?.id).map((item) => [item.id, item])
+  ).values()]
+
+  const productLinks = uniqueItems.map((item) => {
+    const reviewUrl = `${appBaseUrl()}/products/${encodeURIComponent(item.id)}#reviews`
+    return `
+      <div style="border-top:1px solid #E0DAD0;padding:14px 0">
+        <strong>${escapeHtml(item.name || 'Producto')}</strong>
+        <div style="margin-top:8px">
+          <a href="${reviewUrl}" style="color:#CC0000;font-weight:600">Dejar una reseña</a>
+        </div>
+      </div>
+    `
+  }).join('')
+
+  return {
+    subject: `¿Qué te parecieron los productos de tu pedido ${order.order_number}?`,
+    html: `
+      <div style="font-family:Arial,sans-serif;color:#16110B;line-height:1.6;max-width:560px">
+        <h2>Tu opinión nos ayuda mucho</h2>
+        <p>Hola ${escapeHtml(order.customer_name)}. Como tu pedido <strong>${escapeHtml(order.order_number)}</strong> ya fue entregado, nos gustaría saber qué te parecieron los productos.</p>
+        ${productLinks}
+        <p style="font-size:13px;color:#6B6257">Para publicar la reseña, iniciá sesión con la cuenta que hizo el pedido.</p>
+      </div>
+    `,
+  }
 }
 
 // ── Mail al cliente confirmando el pedido/reserva ────────────────────────────

@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from 'react'
 import { Link, useSearchParams, Navigate } from 'react-router-dom'
 import { OrderItemsBlock } from '../components/OrderItemsBlock'
+import { useCart } from '../context/CartContext'
 
 const API_BASE = import.meta.env.VITE_API_URL || ''
 
@@ -17,6 +18,7 @@ const STATUS_LABELS = {
 }
 
 export default function OrderConfirmation() {
+  const { clearCart }       = useCart()
   const [searchParams]    = useSearchParams()
   const mpStatus          = searchParams.get('status')   // success | failure | pending
   const orderId           = searchParams.get('orderId')
@@ -58,6 +60,12 @@ export default function OrderConfirmation() {
 
     fetchOrder()
   }, [orderId, mpStatus])
+
+  useEffect(() => {
+    if (['paid', 'preparing', 'shipped', 'delivered', 'reserved'].includes(order?.status)) {
+      clearCart()
+    }
+  }, [order?.status])
 
   // Sin parámetros → redirigir a home
   if (!orderId && !loading) return <Navigate to="/" replace />

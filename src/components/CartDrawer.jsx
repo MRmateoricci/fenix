@@ -69,7 +69,7 @@ export default function CartDrawer({ open, onClose }) {
           borderBottom: `1px solid ${T.hairline}`,
         }}>
           <h2 style={{
-            fontFamily: "'Cormorant Garamond', serif",
+            fontFamily: 'var(--font-sans)',
             fontWeight: 400, fontSize: 22, color: T.ink, margin: 0,
           }}>
             Tu carrito
@@ -106,7 +106,7 @@ export default function CartDrawer({ open, onClose }) {
                 <path d="M9 7a3 3 0 0 1 6 0" />
               </svg>
               <p style={{
-                fontFamily: "'Hanken Grotesk', system-ui, sans-serif",
+                fontFamily: "var(--font-sans)",
                 fontSize: 15, color: T.muted, margin: 0,
               }}>
                 Tu carrito está vacío
@@ -138,14 +138,14 @@ export default function CartDrawer({ open, onClose }) {
               justifyContent: 'space-between', marginBottom: 20,
             }}>
               <span style={{
-                fontFamily: "'Spline Sans Mono', monospace",
+                fontFamily: "var(--font-sans)",
                 fontSize: 11, letterSpacing: '.15em', textTransform: 'uppercase',
                 color: T.muted2,
               }}>
                 Subtotal
               </span>
               <span style={{
-                fontFamily: "'Spline Sans Mono', monospace",
+                fontFamily: "var(--font-sans)",
                 fontSize: 19, fontWeight: 500, color: T.ink,
               }}>
                 {fmt(totalPrice)}
@@ -180,7 +180,7 @@ function CartItem({ item, onRemove, onUpdate }) {
       {/* Info */}
       <div style={{ flex: 1, minWidth: 0 }}>
         <p style={{
-          fontFamily: "'Cormorant Garamond', serif",
+          fontFamily: 'var(--font-sans)',
           fontSize: 15, fontWeight: 400, color: T.ink,
           margin: '0 0 3px',
           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
@@ -188,7 +188,7 @@ function CartItem({ item, onRemove, onUpdate }) {
           {item.name}
         </p>
         <p style={{
-          fontFamily: "'Spline Sans Mono', monospace",
+          fontFamily: "var(--font-sans)",
           fontSize: 9.5, letterSpacing: '.1em', textTransform: 'uppercase',
           color: T.muted2, margin: '0 0 12px',
         }}>
@@ -225,7 +225,7 @@ function CartItem({ item, onRemove, onUpdate }) {
               )
               if (i === 0) return [el, <span key="qty" style={{
                 width: 28, textAlign: 'center',
-                fontFamily: "'Spline Sans Mono', monospace",
+                fontFamily: "var(--font-sans)",
                 fontSize: 13, color: T.ink,
               }}>{item.quantity}</span>]
               return [...acc, el]
@@ -233,7 +233,7 @@ function CartItem({ item, onRemove, onUpdate }) {
           </div>
 
           <span style={{
-            fontFamily: "'Spline Sans Mono', monospace",
+            fontFamily: "var(--font-sans)",
             fontSize: 14, fontWeight: 500, color: T.ink,
           }}>
             {fmt(item.price * item.quantity)}
@@ -270,7 +270,7 @@ function CtaButton({ onClick, children, fullWidth }) {
       style={{
         width: fullWidth ? '100%' : 'auto',
         background: T.ink, color: T.paper, border: 'none', cursor: 'pointer',
-        fontFamily: "'Hanken Grotesk', system-ui, sans-serif",
+        fontFamily: "var(--font-sans)",
         fontSize: 12.5, fontWeight: 500,
         letterSpacing: '.15em', textTransform: 'uppercase',
         padding: fullWidth ? '15px 0' : '13px 28px',

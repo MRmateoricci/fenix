@@ -10,7 +10,7 @@ export default function Login() {
   const location = useLocation()
   const redirectTo = location.state?.from || '/'
 
-  const [email, setEmail]       = useState('')
+  const [email, setEmail]       = useState(location.state?.email || '')
   const [password, setPassword] = useState('')
   const [error, setError]       = useState(null)
   const [loading, setLoading]   = useState(false)

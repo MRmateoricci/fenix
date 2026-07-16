@@ -5,7 +5,7 @@ import { Field, DarkInput, PrimaryBtn } from '../components/AuthFormKit'
 import PageSEO from '../components/SEO'
 
 export default function Account() {
-  const { user, updateProfile } = useAuth()
+  const { user, updateProfile, resendVerificationEmail } = useAuth()
 
   const [formData, setFormData] = useState({
     firstName:  user.firstName  || '',
@@ -18,6 +18,8 @@ export default function Account() {
   const [saved, setSaved]     = useState(false)
   const [error, setError]     = useState(null)
   const [saving, setSaving]   = useState(false)
+  const [verificationStatus, setVerificationStatus] = useState(null)
+  const [resendingVerification, setResendingVerification] = useState(false)
 
   function setField(key, value) {
     setFormData((prev) => ({ ...prev, [key]: value }))
@@ -35,6 +37,19 @@ export default function Account() {
       setError(err.message)
     } finally {
       setSaving(false)
+    }
+  }
+
+  async function handleResendVerification() {
+    setVerificationStatus(null)
+    setResendingVerification(true)
+    try {
+      await resendVerificationEmail()
+      setVerificationStatus({ type: 'success', text: 'Te enviamos un nuevo enlace de verificación.' })
+    } catch (err) {
+      setVerificationStatus({ type: 'error', text: err.message })
+    } finally {
+      setResendingVerification(false)
     }
   }
 
@@ -86,6 +101,36 @@ export default function Account() {
               boxShadow: '0 2px 16px rgba(0,0,0,0.06)',
             }}
           >
+            {!user.emailVerified && (
+              <div style={{
+                padding: '1rem', marginBottom: '1.5rem', borderRadius: 12,
+                backgroundColor: '#FFF6E5', border: '1px solid #EBCB87',
+              }}>
+                <p style={{ margin: 0, fontSize: '0.875rem', color: '#694B0C' }}>
+                  Confirmá que <strong>{user.email}</strong> es tuyo. La verificación es necesaria para publicar reseñas.
+                </p>
+                <button
+                  type="button"
+                  onClick={handleResendVerification}
+                  disabled={resendingVerification}
+                  style={{
+                    marginTop: '0.75rem', color: 'var(--color-primary)', fontWeight: 600,
+                    fontSize: '0.82rem', textDecoration: 'underline',
+                    cursor: resendingVerification ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  {resendingVerification ? 'Enviando…' : 'Reenviar email de verificación'}
+                </button>
+                {verificationStatus && (
+                  <p style={{
+                    margin: '0.5rem 0 0', fontSize: '0.78rem',
+                    color: verificationStatus.type === 'success' ? '#166534' : 'var(--color-primary)',
+                  }}>
+                    {verificationStatus.text}
+                  </p>
+                )}
+              </div>
+            )}
             <h2
               style={{
                 fontFamily: 'var(--font-serif)', fontSize: '1.35rem', fontWeight: 400,

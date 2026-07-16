@@ -84,20 +84,20 @@ export default function Nosotros() {
 
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 24 }}>
-              <span style={{ fontFamily: "'Spline Sans Mono', monospace", fontSize: 12, color: T.accent }}>City Bell · desde 1977</span>
+              <span style={{ fontFamily: "var(--font-sans)", fontSize: 12, color: T.accent }}>City Bell · desde 1977</span>
               <span style={{ width: 34, height: 1, background: '#473A28' }} />
             </div>
             <h1 style={{
-              fontFamily: "'Cormorant Garamond', serif",
+              fontFamily: 'var(--font-sans)',
               fontSize: 'clamp(38px, 4.5vw, 64px)', lineHeight: 1.05,
               fontWeight: 400, margin: '0 0 28px', color: T.cream, letterSpacing: '-.01em',
             }}>
               Cuarenta y ocho años iluminando City Bell
             </h1>
-            <p style={{ fontFamily: 'Georgia, serif', fontSize: 16, lineHeight: 1.78, color: T.muted, margin: 0, maxWidth: 520 }}>
+            <p style={{ fontFamily: 'var(--font-sans)', fontSize: 16, lineHeight: 1.78, color: T.muted, margin: 0, maxWidth: 520 }}>
               Abrimos en 1977 con una idea simple, y todavía la sostenemos: asesorar de verdad, no solo vender una lámpara. Tres generaciones de la misma familia atendieron este mostrador.
             </p>
-            <div style={{ fontFamily: "'Spline Sans Mono', monospace", fontSize: 12, color: T.muted2, marginTop: 38, borderTop: `1px solid ${T.border}`, paddingTop: 18 }}>
+            <div style={{ fontFamily: "var(--font-sans)", fontSize: 12, color: T.muted2, marginTop: 38, borderTop: `1px solid ${T.border}`, paddingTop: 18 }}>
               Familia Fénix — tres generaciones en City Bell
             </div>
           </div>
@@ -115,7 +115,7 @@ export default function Nosotros() {
       <section style={{ background: T.paper }}>
         <div style={{ maxWidth: 1320, margin: '0 auto', padding: '90px 40px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 48 }}>
-            <span style={{ fontFamily: "'Spline Sans Mono', monospace", fontSize: 12, color: '#9A917F' }}>Historia</span>
+            <span style={{ fontFamily: "var(--font-sans)", fontSize: 12, color: '#9A917F' }}>Historia</span>
             <span style={{ flex: 1, height: 1, background: '#DED6C7' }} />
           </div>
 
@@ -130,10 +130,10 @@ export default function Nosotros() {
                   borderTopColor: i === 0 ? T.red : '#DED6C7',
                 }}
               >
-                <span style={{ fontFamily: "'Spline Sans Mono', monospace", fontSize: 28, fontWeight: 400, color: T.red, display: 'block', marginBottom: 8 }}>
+                <span style={{ fontFamily: "var(--font-sans)", fontSize: 28, fontWeight: 400, color: T.red, display: 'block', marginBottom: 8 }}>
                   {g.year}
                 </span>
-                <h2 style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 22, fontWeight: 600, color: T.ink, margin: '0 0 14px' }}>
+                <h2 style={{ fontFamily: 'var(--font-sans)', fontSize: 22, fontWeight: 600, color: T.ink, margin: '0 0 14px' }}>
                   {g.title}
                 </h2>
                 <p style={{ fontFamily: "'Inter', system-ui, sans-serif", fontSize: 14.5, lineHeight: 1.7, color: '#6B6051', margin: 0 }}>
@@ -149,7 +149,7 @@ export default function Nosotros() {
       <section style={{ background: '#EDE9E2' }}>
         <div style={{ maxWidth: 1320, margin: '0 auto', padding: '80px 40px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 48 }}>
-            <span style={{ fontFamily: "'Spline Sans Mono', monospace", fontSize: 12, color: '#9A917F' }}>Lo que nos define</span>
+            <span style={{ fontFamily: "var(--font-sans)", fontSize: 12, color: '#9A917F' }}>Lo que nos define</span>
             <span style={{ flex: 1, height: 1, background: '#C9BFAF' }} />
           </div>
 
@@ -157,7 +157,7 @@ export default function Nosotros() {
             {VALORES.map((v) => (
               <div key={v.label} style={{ background: '#F7F4EF', padding: '32px', borderRadius: 3, border: '1px solid #DED6C7' }}>
                 <div style={{ width: 32, height: 3, background: T.red, marginBottom: 20 }} />
-                <h3 style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 22, fontWeight: 600, color: T.ink, margin: '0 0 12px' }}>
+                <h3 style={{ fontFamily: 'var(--font-sans)', fontSize: 22, fontWeight: 600, color: T.ink, margin: '0 0 12px' }}>
                   {v.label}
                 </h3>
                 <p style={{ fontFamily: "'Inter', system-ui, sans-serif", fontSize: 14.5, lineHeight: 1.7, color: '#6B6051', margin: 0 }}>
@@ -171,10 +171,10 @@ export default function Nosotros() {
 
       {/* ── CTA final ───────────────────────────────────────────────────────── */}
       <section style={{ background: T.dark, textAlign: 'center', padding: '80px 40px' }}>
-        <p style={{ fontFamily: "'Spline Sans Mono', monospace", fontSize: 12, color: T.accent, marginBottom: 16 }}>
+        <p style={{ fontFamily: "var(--font-sans)", fontSize: 12, color: T.accent, marginBottom: 16 }}>
           Pasá a vernos
         </p>
-        <h2 style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 'clamp(30px, 4vw, 52px)', fontWeight: 400, color: T.cream, margin: '0 0 28px' }}>
+        <h2 style={{ fontFamily: 'var(--font-sans)', fontSize: 'clamp(30px, 4vw, 52px)', fontWeight: 400, color: T.cream, margin: '0 0 28px' }}>
           C. Cantilo 745, City Bell, La Plata
         </h2>
         <p style={{ fontFamily: "'Inter', system-ui, sans-serif", fontSize: 14, color: T.muted, marginBottom: 32 }}>

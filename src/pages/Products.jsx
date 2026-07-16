@@ -190,7 +190,7 @@ function CatalogHeader({ filters }) {
       {/* Page title */}
       <h1 style={{
         position: 'relative', zIndex: 1,
-        fontFamily: "'Cormorant Garamond', 'Cormorant Garamond', serif",
+        fontFamily: 'var(--font-sans)',
         fontWeight: 400, fontSize: 'clamp(40px, 5vw, 68px)',
         lineHeight: 0.96, letterSpacing: '-.01em',
         color: T.ink, margin: 0,
@@ -287,7 +287,7 @@ export default function Products() {
                 paddingTop: 11, paddingBottom: 11,
                 background: T.panel, border: `1px solid ${T.hairline}`,
                 borderRadius: 2, outline: 'none',
-                fontFamily: "'Hanken Grotesk', system-ui, sans-serif",
+                fontFamily: "var(--font-sans)",
                 fontSize: 13.5, color: T.ink,
               }}
               onFocus={(e) => (e.currentTarget.style.borderColor = T.hairlineStrong)}
@@ -303,7 +303,7 @@ export default function Products() {
               padding: '11px 14px',
               background: T.panel, border: `1px solid ${T.hairline}`,
               borderRadius: 2, outline: 'none', cursor: 'pointer',
-              fontFamily: "'Hanken Grotesk', system-ui, sans-serif",
+              fontFamily: "var(--font-sans)",
               fontSize: 13.5, color: T.ink,
               minWidth: 220,
             }}
@@ -370,7 +370,7 @@ function CategoryTabs({ filters }) {
             style={{
               background: 'none', border: 'none', cursor: 'pointer',
               padding: '13px 22px',
-              fontFamily: "'Hanken Grotesk', system-ui, sans-serif",
+              fontFamily: "var(--font-sans)",
               fontSize: 13.5, fontWeight: isActive ? 500 : 400,
               color: isActive ? T.ink : T.muted,
               borderBottom: `2px solid ${isActive ? T.ink : 'transparent'}`,
@@ -408,7 +408,7 @@ function SubcategoryTabs({ filters }) {
               border: `1px solid ${isActive ? T.ink : T.hairline}`,
               background: isActive ? T.ink : 'transparent',
               color: isActive ? T.paper : T.muted,
-              fontFamily: "'Hanken Grotesk', system-ui, sans-serif",
+              fontFamily: "var(--font-sans)",
               fontSize: 13, fontWeight: isActive ? 500 : 400,
               whiteSpace: 'nowrap',
               transition: 'background .15s, border-color .15s, color .15s',
@@ -448,7 +448,7 @@ function ProductTypeTabs({ filters }) {
             style={{
               background: 'none', border: 'none', cursor: 'pointer',
               padding: '14px 22px',
-              fontFamily: "'Hanken Grotesk', system-ui, sans-serif",
+              fontFamily: "var(--font-sans)",
               fontSize: 13.5, fontWeight: isActive ? 600 : 400,
               color: isActive ? T.ink : T.muted,
               borderBottom: `2px solid ${isActive ? T.ink : 'transparent'}`,
@@ -478,7 +478,7 @@ function FilterPanel({ filters }) {
             width: '100%', padding: '9px 0', borderRadius: 2,
             border: `1px solid ${T.hairlineStrong}`, background: 'transparent',
             color: T.text3,
-            fontFamily: "'Spline Sans Mono', monospace",
+            fontFamily: "var(--font-sans)",
             fontSize: 10, letterSpacing: '.16em', textTransform: 'uppercase',
             cursor: 'pointer', transition: 'border-color .15s, color .15s',
           }}
@@ -491,7 +491,7 @@ function FilterPanel({ filters }) {
 
       {/* Categories */}
       <div>
-        <div style={{ fontFamily: "'Spline Sans Mono', monospace", fontSize: 10, letterSpacing: '.18em', textTransform: 'uppercase', color: T.muted2, marginBottom: 14 }}>
+        <div style={{ fontFamily: "var(--font-sans)", fontSize: 10, letterSpacing: '.18em', textTransform: 'uppercase', color: T.muted2, marginBottom: 14 }}>
           Categoría
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -516,10 +516,10 @@ function FilterPanel({ filters }) {
                   )}
                 </div>
                 <input type="checkbox" checked={checked} onChange={() => filters.toggleCategory(cat)} style={{ display: 'none' }} />
-                <span style={{ fontFamily: "'Hanken Grotesk', system-ui, sans-serif", fontSize: 13.5, color: checked ? T.ink : T.muted, transition: 'color .15s' }}>
+                <span style={{ fontFamily: "var(--font-sans)", fontSize: 13.5, color: checked ? T.ink : T.muted, transition: 'color .15s' }}>
                   {cat}
                 </span>
-                <span style={{ fontFamily: "'Spline Sans Mono', monospace", fontSize: 11, color: T.muted2, marginLeft: 'auto' }}>
+                <span style={{ fontFamily: "var(--font-sans)", fontSize: 11, color: T.muted2, marginLeft: 'auto' }}>
                   {products.filter(p => p.category === cat).length}
                 </span>
               </label>
@@ -532,11 +532,11 @@ function FilterPanel({ filters }) {
 
       {/* Availability */}
       <div>
-        <div style={{ fontFamily: "'Spline Sans Mono', monospace", fontSize: 10, letterSpacing: '.18em', textTransform: 'uppercase', color: T.muted2, marginBottom: 14 }}>
+        <div style={{ fontFamily: "var(--font-sans)", fontSize: 10, letterSpacing: '.18em', textTransform: 'uppercase', color: T.muted2, marginBottom: 14 }}>
           Disponibilidad
         </div>
         <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }}>
-          <span style={{ fontFamily: "'Hanken Grotesk', system-ui, sans-serif", fontSize: 13.5, color: T.ink }}>
+          <span style={{ fontFamily: "var(--font-sans)", fontSize: 13.5, color: T.ink }}>
             Solo disponibles
           </span>
           <div
@@ -564,7 +564,7 @@ function FilterPanel({ filters }) {
 
       {/* Price */}
       <div>
-        <div style={{ fontFamily: "'Spline Sans Mono', monospace", fontSize: 10, letterSpacing: '.18em', textTransform: 'uppercase', color: T.muted2, marginBottom: 14 }}>
+        <div style={{ fontFamily: "var(--font-sans)", fontSize: 10, letterSpacing: '.18em', textTransform: 'uppercase', color: T.muted2, marginBottom: 14 }}>
           Precio
         </div>
         <PriceRangeSlider
@@ -581,7 +581,7 @@ function FilterPanel({ filters }) {
 
       {/* Temperatura de color */}
       <div>
-        <div style={{ fontFamily: "'Spline Sans Mono', monospace", fontSize: 10, letterSpacing: '.18em', textTransform: 'uppercase', color: T.muted2, marginBottom: 14 }}>
+        <div style={{ fontFamily: "var(--font-sans)", fontSize: 10, letterSpacing: '.18em', textTransform: 'uppercase', color: T.muted2, marginBottom: 14 }}>
           Temperatura de color
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -611,7 +611,7 @@ function FilterPanel({ filters }) {
                   )}
                 </div>
                 <input type="checkbox" checked={checked} onChange={() => filters.toggleMulti('ct', value)} style={{ display: 'none' }} />
-                <span style={{ fontFamily: "'Hanken Grotesk', system-ui, sans-serif", fontSize: 13.5, color: checked ? T.ink : T.muted, transition: 'color .15s' }}>
+                <span style={{ fontFamily: "var(--font-sans)", fontSize: 13.5, color: checked ? T.ink : T.muted, transition: 'color .15s' }}>
                   {label}
                 </span>
               </label>
@@ -624,7 +624,7 @@ function FilterPanel({ filters }) {
 
       {/* Grado IP */}
       <div>
-        <div style={{ fontFamily: "'Spline Sans Mono', monospace", fontSize: 10, letterSpacing: '.18em', textTransform: 'uppercase', color: T.muted2, marginBottom: 14 }}>
+        <div style={{ fontFamily: "var(--font-sans)", fontSize: 10, letterSpacing: '.18em', textTransform: 'uppercase', color: T.muted2, marginBottom: 14 }}>
           Protección (IP)
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -649,7 +649,7 @@ function FilterPanel({ filters }) {
                   )}
                 </div>
                 <input type="checkbox" checked={checked} onChange={() => filters.toggleMulti('ip', ip)} style={{ display: 'none' }} />
-                <span style={{ fontFamily: "'Hanken Grotesk', system-ui, sans-serif", fontSize: 13.5, color: checked ? T.ink : T.muted, transition: 'color .15s' }}>
+                <span style={{ fontFamily: "var(--font-sans)", fontSize: 13.5, color: checked ? T.ink : T.muted, transition: 'color .15s' }}>
                   {ip}
                 </span>
               </label>
@@ -677,8 +677,8 @@ function PriceRangeSlider({ min, max, value, onChange }) {
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
-        <span style={{ fontFamily: "'Spline Sans Mono', monospace", fontSize: 12, color: T.ink }}>{fmt(lo)}</span>
-        <span style={{ fontFamily: "'Spline Sans Mono', monospace", fontSize: 12, color: T.ink }}>{fmt(hi)}</span>
+        <span style={{ fontFamily: "var(--font-sans)", fontSize: 12, color: T.ink }}>{fmt(lo)}</span>
+        <span style={{ fontFamily: "var(--font-sans)", fontSize: 12, color: T.ink }}>{fmt(hi)}</span>
       </div>
       <div style={{ position: 'relative', height: 6, borderRadius: 3, background: T.surface2 }}>
         <div style={{
@@ -731,7 +731,7 @@ function FilterDrawer({ open, onClose, filters }) {
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           padding: '18px 24px', borderBottom: `1px solid ${T.hairline}`,
         }}>
-          <span style={{ fontFamily: "'Cormorant Garamond', serif", fontWeight: 400, fontSize: 20, color: T.ink }}>Filtros</span>
+          <span style={{ fontFamily: 'var(--font-sans)', fontWeight: 400, fontSize: 20, color: T.ink }}>Filtros</span>
           <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: T.muted, display: 'flex', padding: 4 }} aria-label="Cerrar">
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
               <path d="m6 6 12 12M18 6 6 18" />
@@ -747,7 +747,7 @@ function FilterDrawer({ open, onClose, filters }) {
             style={{
               width: '100%', padding: '13px 0', borderRadius: 2,
               background: T.ink, color: T.paper, border: 'none', cursor: 'pointer',
-              fontFamily: "'Hanken Grotesk', system-ui, sans-serif",
+              fontFamily: "var(--font-sans)",
               fontSize: 13.5, fontWeight: 500, letterSpacing: '.04em',
               transition: 'opacity .15s',
             }}
@@ -770,10 +770,10 @@ function EmptyState({ onClear }) {
         <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /><line x1="8" y1="11" x2="14" y2="11" />
       </svg>
       <div>
-        <p style={{ fontFamily: "'Cormorant Garamond', serif", fontWeight: 400, fontSize: 22, color: T.ink, marginBottom: 8 }}>
+        <p style={{ fontFamily: 'var(--font-sans)', fontWeight: 400, fontSize: 22, color: T.ink, marginBottom: 8 }}>
           Sin resultados
         </p>
-        <p style={{ fontFamily: "'Hanken Grotesk', system-ui, sans-serif", fontSize: 14, color: T.muted }}>
+        <p style={{ fontFamily: "var(--font-sans)", fontSize: 14, color: T.muted }}>
           Intentá con otros términos o eliminá algunos filtros
         </p>
       </div>
@@ -783,7 +783,7 @@ function EmptyState({ onClear }) {
           padding: '11px 26px', borderRadius: 2,
           border: `1px solid ${T.hairlineStrong}`, background: 'transparent',
           color: T.ink, cursor: 'pointer',
-          fontFamily: "'Hanken Grotesk', system-ui, sans-serif",
+          fontFamily: "var(--font-sans)",
           fontSize: 13, fontWeight: 500, letterSpacing: '.06em',
           transition: 'background .15s',
         }}

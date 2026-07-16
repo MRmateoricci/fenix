@@ -39,7 +39,7 @@ export default function AdminLogin() {
       alignItems: 'center',
       justifyContent: 'center',
       padding: 24,
-      fontFamily: 'Arial, Helvetica, sans-serif',
+      fontFamily: 'var(--font-sans)',
       fontWeight: 400,
     }}>
       <div style={{
@@ -57,7 +57,7 @@ export default function AdminLogin() {
         </div>
 
         <h1 style={{
-          fontFamily: 'Arial, Helvetica, sans-serif',
+          fontFamily: 'var(--font-sans)',
           fontSize: 28,
           fontWeight: 500,
           color: '#111827',

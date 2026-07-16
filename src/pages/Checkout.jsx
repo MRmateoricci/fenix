@@ -4,6 +4,7 @@ import { useCart } from '../context/CartContext'
 import { useAuth } from '../context/AuthContext'
 import PageSEO from '../components/SEO'
 import { getShippingForCP, SHIPPING_ZONES } from '../config/shipping'
+import mercadoPagoLogo from '../assets/mercado-pago-horizontal.svg'
 
 const API_BASE = import.meta.env.VITE_API_URL || ''
 
@@ -59,11 +60,16 @@ function validateStep2(d, shippingZone) {
 export default function Checkout() {
   const navigate = useNavigate()
   const { items, totalPrice, clearCart } = useCart()
-  const { user, authLoading } = useAuth()
+  const { user, authLoading, updateProfile } = useAuth()
   const [step, setStep]             = useState(1)
   const [errors, setErrors]         = useState({})
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState(null)
+  const [profileSaving, setProfileSaving] = useState(false)
+  const [profileError, setProfileError] = useState(null)
+  const [authResolved, setAuthResolved] = useState(false)
+  const [emailChecking, setEmailChecking] = useState(false)
+  const [accountLoginRequired, setAccountLoginRequired] = useState(false)
 
   const [formData, setFormData] = useState({
     nombre:       user?.firstName  || '',
@@ -98,6 +104,19 @@ export default function Checkout() {
       codigoPostal: prev.codigoPostal || user.postalCode || '',
     }))
   }, [authLoading, user])
+
+  const missingAccountFields = {
+    nombre:   !!user && !user.firstName?.trim(),
+    apellido: !!user && !user.lastName?.trim(),
+    telefono: !!user && !user.phone?.trim(),
+  }
+  const needsPersonalData = !user || Object.values(missingAccountFields).some(Boolean)
+
+  useEffect(() => {
+    if (authLoading || authResolved) return
+    setAuthResolved(true)
+    if (user && !needsPersonalData) setStep(2)
+  }, [authLoading, authResolved, user, needsPersonalData])
 
   const shippingZone = useMemo(() => {
     if (formData.deliveryType !== 'delivery') return null
@@ -135,19 +154,102 @@ export default function Checkout() {
   function setField(key, value) {
     setFormData((prev) => ({ ...prev, [key]: value }))
     if (errors[key]) setErrors((prev) => { const e = { ...prev }; delete e[key]; return e })
+    if (key === 'email') {
+      setAccountLoginRequired(false)
+      setProfileError(null)
+    }
   }
 
-  function handleStep1() {
+  async function saveProfileChanges(changes) {
+    if (!user || Object.keys(changes).length === 0) return
+
+    setProfileError(null)
+    setProfileSaving(true)
+    try {
+      await updateProfile(changes)
+    } catch (err) {
+      setProfileError(err.message || 'No pudimos guardar los datos en tu cuenta.')
+      throw err
+    } finally {
+      setProfileSaving(false)
+    }
+  }
+
+  async function handleStep1() {
     const e = validateStep1(formData)
     if (Object.keys(e).length) { setErrors(e); return }
+
+    if (!user) {
+      setProfileError(null)
+      setEmailChecking(true)
+      try {
+        const res = await fetch(`${API_BASE}/api/auth/email-status`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: formData.email }),
+        })
+        const data = await res.json().catch(() => ({}))
+        if (!res.ok) throw new Error(data.error || 'No pudimos verificar el email.')
+        if (data.hasAccount) {
+          setAccountLoginRequired(true)
+          setEmailChecking(false)
+          return
+        }
+      } catch (err) {
+        setProfileError(err.message || 'No pudimos verificar el email.')
+        setEmailChecking(false)
+        return
+      }
+      setEmailChecking(false)
+    }
+
+    if (user) {
+      const profileChanges = {}
+      if (formData.nombre.trim() && formData.nombre.trim() !== (user.firstName || '').trim()) {
+        profileChanges.firstName = formData.nombre.trim()
+      }
+      if (formData.apellido.trim() && formData.apellido.trim() !== (user.lastName || '').trim()) {
+        profileChanges.lastName = formData.apellido.trim()
+      }
+      if (formData.telefono.trim() && formData.telefono.trim() !== (user.phone || '').trim()) {
+        profileChanges.phone = formData.telefono.trim()
+      }
+
+      try {
+        await saveProfileChanges(profileChanges)
+      } catch {
+        return
+      }
+    }
+
     setErrors({})
     setStep(2)
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
-  function handleStep2() {
+  async function handleStep2() {
     const e = validateStep2(formData, shippingZone)
     if (Object.keys(e).length) { setErrors(e); return }
+
+    if (user && formData.deliveryType === 'delivery') {
+      const profileChanges = {}
+      if (formData.direccion.trim() && formData.direccion.trim() !== (user.address || '').trim()) {
+        profileChanges.address = formData.direccion.trim()
+      }
+      if (formData.ciudad.trim() && formData.ciudad.trim() !== (user.city || '').trim()) {
+        profileChanges.city = formData.ciudad.trim()
+      }
+      if (formData.codigoPostal.trim() && formData.codigoPostal.trim() !== (user.postalCode || '').trim()) {
+        profileChanges.postalCode = formData.codigoPostal.trim()
+      }
+
+      try {
+        await saveProfileChanges(profileChanges)
+      } catch {
+        return
+      }
+    }
+
     setErrors({})
     setStep(3)
     window.scrollTo({ top: 0, behavior: 'smooth' })
@@ -159,27 +261,45 @@ export default function Checkout() {
     try {
       const res = await fetch(`${API_BASE}/api/orders`, {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ customer: formData, items }),
       })
       if (!res.ok) {
         const data = await res.json().catch(() => ({}))
+        if (data.code === 'ACCOUNT_LOGIN_REQUIRED') {
+          setAccountLoginRequired(true)
+          setStep(1)
+          setSubmitting(false)
+          return
+        }
         throw new Error(data.error || 'Error al crear el pedido')
       }
       const { orderId, checkoutUrl } = await res.json()
-      clearCart()
       if (checkoutUrl) {
         sessionStorage.setItem('fenix_pending_order_id', orderId)
         window.location.href = checkoutUrl
       } else {
         // Pago en el local: no hay redirección a Mercado Pago, el pedido ya
         // quedó reservado.
+        clearCart()
         navigate(`/order-confirmation?orderId=${orderId}&status=success`)
       }
     } catch (err) {
       setSubmitError(err.message || 'No pudimos procesar tu pedido. Intentá de nuevo.')
       setSubmitting(false)
     }
+  }
+
+  if (authLoading || !authResolved) {
+    return (
+      <>
+        <PageSEO title="Finalizar compra" description="Completá tu pedido en Fénix Iluminación." url="/checkout" />
+        <div className="fnx-checkout-loading">
+          Preparando tu compra...
+        </div>
+      </>
+    )
   }
 
   if (items.length === 0 && step < 3) {
@@ -204,7 +324,7 @@ export default function Checkout() {
     <>
     <PageSEO title="Finalizar compra" description="Completá tu pedido en Fénix Iluminación. Pagá con MercadoPago o coordiná por WhatsApp." url="/checkout" />
     <div style={{ backgroundColor: 'var(--color-bg)', minHeight: '100vh' }}>
-      <div style={{ maxWidth: '42rem', margin: '0 auto', padding: '3rem 1.5rem 6rem' }}>
+      <div style={{ maxWidth: '70rem', margin: '0 auto', padding: '3rem 1.5rem 6rem' }}>
 
         <h1
           style={{
@@ -222,25 +342,75 @@ export default function Checkout() {
 
         <Stepper current={step} />
 
+        <div className="fnx-checkout-layout">
+          <aside className="fnx-checkout-summary-column">
+            <OrderSummary items={items} totalPrice={totalPrice} deliveryType={formData.deliveryType} shippingZone={shippingZone} shippingCost={shippingCost} orderTotal={orderTotal} />
+          </aside>
+
+          <main className="fnx-checkout-step-column">
         {/* ── Step 1: Datos personales ── */}
         {step === 1 && (
-          <StepPanel title="Datos personales">
+          <StepPanel title={user ? 'Completá tus datos' : 'Datos personales'}>
+            {user && (
+              <div className="fnx-checkout-account-note">
+                <CheckSmall />
+                <div>
+                  <strong>Ya usamos los datos de tu cuenta.</strong>
+                  <span> Solo necesitamos completar la información que falta para este pedido.</span>
+                </div>
+              </div>
+            )}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-              <Field label="Nombre" error={errors.nombre}>
-                <DarkInput placeholder="Juan" value={formData.nombre} onChange={(v) => setField('nombre', v)} hasError={!!errors.nombre} />
-              </Field>
-              <Field label="Apellido" error={errors.apellido}>
-                <DarkInput placeholder="Pérez" value={formData.apellido} onChange={(v) => setField('apellido', v)} hasError={!!errors.apellido} />
-              </Field>
-              <Field label="Email" error={errors.email} className="sm:col-span-2">
-                <DarkInput type="email" placeholder="juan@email.com" value={formData.email} onChange={(v) => setField('email', v)} hasError={!!errors.email} />
-              </Field>
-              <Field label="Teléfono" error={errors.telefono} className="sm:col-span-2">
-                <DarkInput type="tel" placeholder="11-1234-5678" value={formData.telefono} onChange={(v) => setField('telefono', v)} hasError={!!errors.telefono} />
-              </Field>
+              {(!user || missingAccountFields.nombre) && (
+                <Field label="Nombre" error={errors.nombre}>
+                  <DarkInput placeholder="Juan" value={formData.nombre} onChange={(v) => setField('nombre', v)} hasError={!!errors.nombre} />
+                </Field>
+              )}
+              {(!user || missingAccountFields.apellido) && (
+                <Field label="Apellido" error={errors.apellido}>
+                  <DarkInput placeholder="Pérez" value={formData.apellido} onChange={(v) => setField('apellido', v)} hasError={!!errors.apellido} />
+                </Field>
+              )}
+              {!user && (
+                <Field label="Email" error={errors.email} className="sm:col-span-2">
+                  <DarkInput type="email" placeholder="juan@email.com" value={formData.email} onChange={(v) => setField('email', v)} hasError={!!errors.email} />
+                </Field>
+              )}
+              {(!user || missingAccountFields.telefono) && (
+                <Field label="Teléfono" error={errors.telefono} className="sm:col-span-2">
+                  <DarkInput type="tel" placeholder="11-1234-5678" value={formData.telefono} onChange={(v) => setField('telefono', v)} hasError={!!errors.telefono} />
+                </Field>
+              )}
             </div>
+            {profileError && (
+              <p style={{ fontSize: '0.8rem', color: 'var(--color-primary)', marginTop: '1rem' }}>
+                {profileError}
+              </p>
+            )}
+            {accountLoginRequired && !user && (
+              <div className="fnx-checkout-login-required">
+                <div>
+                  <strong>Este email ya tiene una cuenta.</strong>
+                  <span> Iniciá sesión para continuar y asociar correctamente el pedido.</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => navigate('/login', {
+                    state: { from: '/checkout', email: formData.email.trim().toLowerCase() },
+                  })}
+                >
+                  Iniciar sesión
+                </button>
+              </div>
+            )}
             <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '2rem' }}>
-              <PrimaryBtn onClick={handleStep1}>Continuar <ArrowRightIcon /></PrimaryBtn>
+              <PrimaryBtn onClick={handleStep1} disabled={profileSaving || emailChecking || accountLoginRequired}>
+                {profileSaving
+                  ? 'Guardando...'
+                  : emailChecking
+                    ? 'Verificando...'
+                    : 'Continuar'} {!profileSaving && !emailChecking && <ArrowRightIcon />}
+              </PrimaryBtn>
             </div>
           </StepPanel>
         )}
@@ -444,9 +614,17 @@ export default function Checkout() {
               </div>
             )}
 
+            {profileError && (
+              <p style={{ fontSize: '0.8rem', color: 'var(--color-primary)', margin: '0 0 1rem' }}>
+                {profileError}
+              </p>
+            )}
+
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '2rem' }}>
-              <GhostBtn onClick={() => setStep(1)}><ArrowLeftIcon /> Volver</GhostBtn>
-              <PrimaryBtn onClick={handleStep2}>Continuar <ArrowRightIcon /></PrimaryBtn>
+              <GhostBtn onClick={() => needsPersonalData ? setStep(1) : navigate('/cart')} disabled={profileSaving}><ArrowLeftIcon /> Volver</GhostBtn>
+              <PrimaryBtn onClick={handleStep2} disabled={profileSaving}>
+                {profileSaving ? 'Guardando...' : 'Continuar'} {!profileSaving && <ArrowRightIcon />}
+              </PrimaryBtn>
             </div>
           </StepPanel>
         )}
@@ -501,27 +679,19 @@ export default function Checkout() {
                   <button
                     onClick={handleConfirm}
                     disabled={submitting}
-                    style={{
-                      width: '100%',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: '0.625rem',
-                      padding: '1rem 1.5rem',
-                      borderRadius: '0.75rem',
-                      fontSize: '0.9rem',
-                      fontWeight: 600,
-                      letterSpacing: '0.02em',
-                      backgroundColor: submitting ? 'var(--color-text-muted)' : payInStore ? 'var(--color-primary)' : '#009EE3',
-                      color: '#fff',
-                      cursor: submitting ? 'not-allowed' : 'pointer',
-                      transition: 'background-color 150ms ease',
-                    }}
-                    onMouseEnter={(e) => { if (!submitting) e.currentTarget.style.backgroundColor = payInStore ? 'var(--color-primary-hover)' : '#0082BB' }}
-                    onMouseLeave={(e) => { if (!submitting) e.currentTarget.style.backgroundColor = payInStore ? 'var(--color-primary)' : '#009EE3' }}
+                    className={payInStore ? 'fnx-confirm-order-button' : 'fnx-mercadopago-button'}
+                    aria-label={payInStore ? 'Confirmar reserva' : 'Pagar con Mercado Pago'}
                   >
-                    {!payInStore && <MpIcon />}
-                    {submitting ? 'Procesando...' : payInStore ? 'Confirmar reserva' : 'Pagar con MercadoPago'}
+                    {submitting ? (
+                      'Procesando...'
+                    ) : payInStore ? (
+                      'Confirmar reserva'
+                    ) : (
+                      <>
+                        <span>Pagar con</span>
+                        <img src={mercadoPagoLogo} alt="Mercado Pago" />
+                      </>
+                    )}
                   </button>
                 )
               })()}
@@ -535,9 +705,8 @@ export default function Checkout() {
           </StepPanel>
         )}
 
-        {/* ── Resumen del pedido (todos los steps) ── */}
-        <OrderSummary items={items} totalPrice={totalPrice} deliveryType={formData.deliveryType} shippingZone={shippingZone} shippingCost={shippingCost} orderTotal={orderTotal} />
-
+          </main>
+        </div>
       </div>
     </div>
     </>
@@ -549,7 +718,6 @@ function OrderSummary({ items, totalPrice, deliveryType, shippingZone, shippingC
   return (
     <div
       style={{
-        marginTop: '1.25rem',
         backgroundColor: 'var(--color-surface)',
         border: '1px solid var(--color-border)',
         borderRadius: '1rem',
@@ -798,7 +966,7 @@ function Field({ label, error, className = '', children }) {
   )
 }
 
-function DarkInput({ type = 'text', placeholder, value, onChange, hasError, min }) {
+function DarkInput({ type = 'text', placeholder, value, onChange, hasError, min, readOnly = false }) {
   return (
     <input
       type={type}
@@ -806,6 +974,7 @@ function DarkInput({ type = 'text', placeholder, value, onChange, hasError, min 
       value={value}
       onChange={(e) => onChange(e.target.value)}
       min={min}
+      readOnly={readOnly}
       className="dark-input"
       style={{
         width: '100%',
@@ -813,10 +982,11 @@ function DarkInput({ type = 'text', placeholder, value, onChange, hasError, min 
         borderRadius: '0.625rem',
         fontSize: '0.9rem',
         outline: 'none',
-        backgroundColor: 'var(--color-surface-2)',
+        backgroundColor: readOnly ? 'var(--color-border)' : 'var(--color-surface-2)',
         border: `1.5px solid ${hasError ? 'var(--color-primary)' : 'var(--color-border)'}`,
         color: 'var(--color-text)',
         transition: 'border-color 150ms ease',
+        cursor: readOnly ? 'not-allowed' : 'text',
       }}
       onFocus={(e) => { if (!hasError) e.currentTarget.style.borderColor = 'var(--color-primary)' }}
       onBlur={(e)  => { if (!hasError) e.currentTarget.style.borderColor = 'var(--color-border)' }}
@@ -824,10 +994,11 @@ function DarkInput({ type = 'text', placeholder, value, onChange, hasError, min 
   )
 }
 
-function PrimaryBtn({ onClick, children }) {
+function PrimaryBtn({ onClick, disabled = false, children }) {
   return (
     <button
       onClick={onClick}
+      disabled={disabled}
       style={{
         display: 'inline-flex',
         alignItems: 'center',
@@ -836,12 +1007,13 @@ function PrimaryBtn({ onClick, children }) {
         borderRadius: '0.75rem',
         fontSize: '0.875rem',
         fontWeight: 600,
-        backgroundColor: 'var(--color-primary)',
+        backgroundColor: disabled ? 'var(--color-text-muted)' : 'var(--color-primary)',
         color: '#fff',
         transition: 'background-color 150ms ease',
+        cursor: disabled ? 'not-allowed' : 'pointer',
       }}
-      onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
-      onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
+      onMouseEnter={(e) => { if (!disabled) e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)' }}
+      onMouseLeave={(e) => { if (!disabled) e.currentTarget.style.backgroundColor = 'var(--color-primary)' }}
     >
       {children}
     </button>
@@ -921,12 +1093,3 @@ function MapPinIcon() {
   )
 }
 
-function MpIcon() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <circle cx="24" cy="24" r="24" fill="#fff" fillOpacity="0.2"/>
-      <path d="M8 24C8 15.163 15.163 8 24 8s16 7.163 16 16-7.163 16-16 16S8 32.837 8 24z" fill="#fff" fillOpacity="0.15"/>
-      <text x="50%" y="54%" dominantBaseline="middle" textAnchor="middle" fill="#fff" fontSize="13" fontWeight="bold" fontFamily="Arial,sans-serif">MP</text>
-    </svg>
-  )
-}

@@ -25,6 +25,7 @@ import Register from './pages/Register'
 import Account from './pages/Account'
 import Favorites from './pages/Favorites'
 import Orders from './pages/Orders'
+import VerifyEmail from './pages/VerifyEmail'
 
 function MpReturnGuard() {
   const navigate = useNavigate()
@@ -114,6 +115,7 @@ export default function App() {
                   <Route path="/profesionales" element={<Profesionales />} />
                   <Route path="/login" element={<Login />} />
                   <Route path="/register" element={<Register />} />
+                  <Route path="/verify-email" element={<VerifyEmail />} />
                   <Route
                     path="/account"
                     element={

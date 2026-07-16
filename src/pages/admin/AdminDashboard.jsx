@@ -27,7 +27,7 @@ const C = {
   greenLight:  '#EAF7EF',
   sidebar:     218,
 }
-const ADMIN_FONT = "Arial, Helvetica, sans-serif"
+const ADMIN_FONT = "var(--font-sans)"
 
 const CATS = Object.keys(CATEGORY_NAV_LABEL)
 
@@ -1655,6 +1655,64 @@ function OrderDetailModal({ order, onClose, onStatusChange }) {
   )
 }
 
+const DELIVERY_WORK_STATUSES = ['paid', 'preparing', 'shipped']
+const PICKUP_WORK_STATUSES = ['reserved', 'paid', 'preparing']
+const WORK_STATUS_PRIORITY = {
+  reserved: 0,
+  paid: 1,
+  preparing: 2,
+  shipped: 3,
+}
+
+function OperationalOrdersSection({ title, subtitle, orders, emptyText, type, onSelect }) {
+  return (
+    <section className={`adm-work-queue adm-work-queue--${type}`}>
+      <div className="adm-work-queue__head">
+        <div>
+          <h2>{title}</h2>
+          <p>{subtitle}</p>
+        </div>
+        <span>{orders.length}</span>
+      </div>
+
+      {orders.length === 0 ? (
+        <div className="adm-work-queue__empty">{emptyText}</div>
+      ) : (
+        <div className="adm-work-queue__list">
+          {orders.map((order) => (
+            <article className="adm-work-order" key={order.id}>
+              <div className="adm-work-order__top">
+                <strong>#{order.order_number}</strong>
+                <StatusBadge status={order.status} />
+              </div>
+              <div className="adm-work-order__customer">{order.customer_name}</div>
+              <div className="adm-work-order__destination">
+                {type === 'delivery' ? (
+                  <>
+                    <b>Enviar a</b>
+                    <span>{order.address || 'Dirección sin completar'}{order.city ? `, ${order.city}` : ''}{order.postal_code ? ` (CP ${order.postal_code})` : ''}</span>
+                    {order.estimated_delivery_date && <small>Entrega estimada: {fmtPickupDate(order.estimated_delivery_date)}</small>}
+                  </>
+                ) : (
+                  <>
+                    <b>Retiro en el local</b>
+                    <span>{order.pickup_date ? `Retira el ${fmtPickupDate(order.pickup_date)}` : 'Fecha de retiro sin definir'}</span>
+                    <small>{order.status === 'reserved' ? 'Cobrar al momento de retirar' : 'Pedido pagado'}</small>
+                  </>
+                )}
+              </div>
+              <div className="adm-work-order__footer">
+                <span>{fmt(order.total_amount)}</span>
+                <button onClick={() => onSelect(order)}>Ver pedido</button>
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
+  )
+}
+
 function OrdersTab() {
   const { orders, ordersTotal, ordersLoading, ordersError, fetchOrders, updateOrderStatus } = useAdmin()
   const [statusFilter, setStatusFilter] = useState('all')
@@ -1662,23 +1720,76 @@ function OrdersTab() {
   const [selectedOrder, setSelectedOrder] = useState(null)
 
   useEffect(() => {
-    const filters = {}
-    if (statusFilter !== 'all') filters.status = statusFilter
-    if (search.trim()) filters.search = search.trim()
-    fetchOrders(filters)
-  }, [statusFilter, search, fetchOrders])
+    fetchOrders({ limit: 500 })
+  }, [fetchOrders])
+
+  const filteredOrders = useMemo(() => {
+    const term = search.trim().toLowerCase()
+    return orders.filter((order) => {
+      if (statusFilter !== 'all' && order.status !== statusFilter) return false
+      if (!term) return true
+      return [order.customer_name, order.customer_email, order.order_number]
+        .some((value) => String(value || '').toLowerCase().includes(term))
+    })
+  }, [orders, search, statusFilter])
+
+  const ordersToShip = useMemo(() =>
+    orders
+      .filter((order) =>
+        order.delivery_type === 'delivery'
+        && DELIVERY_WORK_STATUSES.includes(order.status)
+      )
+      .sort((a, b) =>
+        (WORK_STATUS_PRIORITY[a.status] - WORK_STATUS_PRIORITY[b.status])
+        || new Date(a.estimated_delivery_date || a.created_at) - new Date(b.estimated_delivery_date || b.created_at)
+      ),
+  [orders])
+
+  const pickupsToManage = useMemo(() =>
+    orders
+      .filter((order) =>
+        order.delivery_type === 'pickup'
+        && PICKUP_WORK_STATUSES.includes(order.status)
+      )
+      .sort((a, b) =>
+        (WORK_STATUS_PRIORITY[a.status] - WORK_STATUS_PRIORITY[b.status])
+        || new Date(a.pickup_date || a.created_at) - new Date(b.pickup_date || b.created_at)
+      ),
+  [orders])
 
   async function handleStatusChange(id, status) {
     await updateOrderStatus(id, status)
-    // Refresca con los filtros actuales
-    const filters = {}
-    if (statusFilter !== 'all') filters.status = statusFilter
-    if (search.trim()) filters.search = search.trim()
-    fetchOrders(filters)
+    fetchOrders({ limit: 500 })
   }
 
   return (
     <div>
+      <div className="adm-work-queues">
+        <OperationalOrdersSection
+          title="Pedidos a enviar"
+          subtitle="Pagados, en preparación o en camino"
+          orders={ordersToShip}
+          emptyText="No hay envíos pendientes."
+          type="delivery"
+          onSelect={setSelectedOrder}
+        />
+        <OperationalOrdersSection
+          title="Retiros en el local"
+          subtitle="Reservados o pagados pendientes de retiro"
+          orders={pickupsToManage}
+          emptyText="No hay retiros pendientes."
+          type="pickup"
+          onSelect={setSelectedOrder}
+        />
+      </div>
+
+      <div className="adm-orders-history-head">
+        <div>
+          <h2>Todos los pedidos</h2>
+          <p>Historial y búsqueda por estado</p>
+        </div>
+      </div>
+
       {/* ── Filtros de estado ── */}
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 16 }}>
         {ORDER_STATUSES.map((s) => (
@@ -1712,7 +1823,9 @@ function OrdersTab() {
 
       {/* ── Total ── */}
       <p style={{ fontSize: 12, color: C.muted, marginBottom: 12 }}>
-        {ordersLoading ? 'Cargando...' : `${ordersTotal} pedido${ordersTotal !== 1 ? 's' : ''}`}
+        {ordersLoading
+          ? 'Cargando...'
+          : `${filteredOrders.length}${filteredOrders.length !== ordersTotal ? ` de ${ordersTotal}` : ''} pedido${filteredOrders.length !== 1 ? 's' : ''}`}
       </p>
 
       {/* ── Error ── */}
@@ -1725,7 +1838,7 @@ function OrdersTab() {
       {/* ── Tabla ── */}
       {!ordersLoading && !ordersError && (
         <div style={{ background: C.white, borderRadius: 10, border: `1px solid ${C.border}`, overflow: 'hidden' }}>
-          {orders.length === 0 ? (
+          {filteredOrders.length === 0 ? (
             <div style={{ padding: '40px 20px', textAlign: 'center', color: C.muted, fontSize: 14 }}>
               No hay pedidos que coincidan con el filtro.
             </div>
@@ -1744,14 +1857,14 @@ function OrdersTab() {
                 ))}
               </div>
 
-              {orders.map((order, i) => (
+              {filteredOrders.map((order, i) => (
                 <div
                   key={order.id}
                   style={{
                     display: 'grid',
                     gridTemplateColumns: '110px 130px 1fr 150px 90px 120px 80px',
                     gap: 8, padding: '10px 14px', alignItems: 'center',
-                    borderBottom: i < orders.length - 1 ? `1px solid ${C.hairline}` : 'none',
+                    borderBottom: i < filteredOrders.length - 1 ? `1px solid ${C.hairline}` : 'none',
                     transition: 'background 0.12s',
                   }}
                   onMouseEnter={(e) => (e.currentTarget.style.background = '#F9FAFB')}
@@ -1794,6 +1907,36 @@ function OrdersTab() {
           onStatusChange={handleStatusChange}
         />
       )}
+
+      <style>{`
+        .adm-work-queues { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; margin-bottom:28px; }
+        .adm-work-queue { min-width:0; background:${C.white}; border:1px solid ${C.border}; border-radius:10px; overflow:hidden; box-shadow:0 3px 14px rgba(15,23,42,.04); }
+        .adm-work-queue--delivery { border-top:3px solid ${C.red}; }
+        .adm-work-queue--pickup { border-top:3px solid ${C.amber}; }
+        .adm-work-queue__head { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; padding:16px 18px; border-bottom:1px solid ${C.hairline}; }
+        .adm-work-queue__head h2,.adm-orders-history-head h2 { margin:0; color:${C.ink}; font:600 16px/1.2 ${ADMIN_FONT}; }
+        .adm-work-queue__head p,.adm-orders-history-head p { margin:5px 0 0; color:${C.muted}; font-size:11px; }
+        .adm-work-queue__head > span { display:grid; place-items:center; min-width:28px; height:28px; padding:0 8px; border-radius:20px; background:${C.hairline}; color:${C.ink}; font-size:12px; font-weight:700; }
+        .adm-work-queue--delivery .adm-work-queue__head > span { background:${C.redLight}; color:${C.red}; }
+        .adm-work-queue--pickup .adm-work-queue__head > span { background:${C.amberLight}; color:${C.amberDark}; }
+        .adm-work-queue__list { max-height:440px; overflow-y:auto; }
+        .adm-work-queue__empty { padding:30px 18px; text-align:center; color:${C.muted}; font-size:12px; }
+        .adm-work-order { padding:14px 18px; border-bottom:1px solid ${C.hairline}; }
+        .adm-work-order:last-child { border-bottom:0; }
+        .adm-work-order__top,.adm-work-order__footer { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+        .adm-work-order__top > strong { color:${C.ink}; font:600 12px ${ADMIN_FONT}; }
+        .adm-work-order__customer { margin-top:8px; color:${C.ink}; font-size:13px; font-weight:600; }
+        .adm-work-order__destination { display:flex; flex-direction:column; gap:2px; margin-top:7px; min-width:0; color:${C.text3}; font-size:11px; }
+        .adm-work-order__destination b { color:${C.ink}; font-size:10px; text-transform:uppercase; letter-spacing:.06em; }
+        .adm-work-order__destination span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        .adm-work-order__destination small { color:${C.muted}; font-size:10.5px; }
+        .adm-work-order__footer { margin-top:12px; padding-top:10px; border-top:1px solid ${C.hairline}; }
+        .adm-work-order__footer > span { color:${C.ink}; font-size:13px; font-weight:700; }
+        .adm-work-order__footer button { border:0; border-radius:6px; padding:6px 11px; background:${C.dark}; color:#fff; cursor:pointer; font:600 10.5px ${ADMIN_FONT}; }
+        .adm-work-order__footer button:hover { background:${C.darkHover}; }
+        .adm-orders-history-head { margin-bottom:14px; }
+        @media (max-width:980px) { .adm-work-queues { grid-template-columns:1fr; } }
+      `}</style>
     </div>
   )
 }
@@ -2751,6 +2894,14 @@ export default function AdminDashboard() {
   const { products, updateProduct, logout } = useAdmin()
   const navigate  = useNavigate()
   const [tab, setTab]           = useState('overview')
+  const mainRef = useRef(null)
+
+  function changeTab(nextTab) {
+    setTab(nextTab)
+    requestAnimationFrame(() => {
+      mainRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
+    })
+  }
 
   return (
     <div style={{
@@ -2790,7 +2941,7 @@ export default function AdminDashboard() {
           {NAV_ITEMS.map(item => (
             <button
               key={item.id}
-              onClick={() => setTab(item.id)}
+              onClick={() => changeTab(item.id)}
               style={{
                 width: '100%',
                 display: 'flex',
@@ -2833,7 +2984,7 @@ export default function AdminDashboard() {
       </aside>
 
       {/* ── Main content ─────────────────────────────────── */}
-      <main style={{
+      <main ref={mainRef} style={{
         flex: 1,
         background: C.paper,
         minHeight: '100vh',
@@ -2857,7 +3008,7 @@ export default function AdminDashboard() {
 
         {/* Tab content */}
         {tab === 'overview' && (
-          <OverviewDashboard products={products} onNavigate={setTab} />
+          <OverviewDashboard products={products} onNavigate={changeTab} />
         )}
         {tab === 'products' && (
           <UnifiedProductsTab />

@@ -3,6 +3,7 @@ import { pool } from '../db/pool.js'
 import { MercadoPagoConfig, Payment } from 'mercadopago'
 import crypto from 'crypto'
 import { releaseOrderStock } from '../services/stockReservation.js'
+import { sendOrderConfirmationNotifications } from '../services/orderNotifications.js'
 import { RELEASES_STOCK } from './orders.js'
 import 'dotenv/config'
 
@@ -11,7 +12,7 @@ const mpClient = new MercadoPagoConfig({ accessToken: process.env.MP_ACCESS_TOKE
 
 // ── Verifica la firma HMAC-SHA256 que envía MercadoPago ───────────────────────
 // Docs: https://www.mercadopago.com.ar/developers/es/docs/notifications/webhooks
-function verifyMpSignature(req) {
+export function verifyMpSignature(req) {
   const secret = process.env.MP_WEBHOOK_SECRET
   if (!secret) return true // skip en dev si no está configurado
 
@@ -27,9 +28,19 @@ function verifyMpSignature(req) {
 
   const ts     = parts['ts']
   const v1     = parts['v1']
-  const dataId = req.query['data.id'] || req.body?.data?.id || ''
+  if (!ts || !v1) return false
 
-  const manifest = `id:${dataId};request-id:${xRequestId};ts:${ts};`
+  // Mercado Pago firma el `data.id` de la URL, no el que viene en el body.
+  // Si un campo no está presente debe omitirse por completo del manifiesto.
+  const requestUrl = new URL(req.originalUrl || req.url, 'http://localhost')
+  const dataId = requestUrl.searchParams.get('data.id')
+    || requestUrl.searchParams.get('data_id')
+
+  const manifest = [
+    dataId ? `id:${String(dataId).toLowerCase()};` : '',
+    xRequestId ? `request-id:${xRequestId};` : '',
+    `ts:${ts};`,
+  ].join('')
   const expected = crypto
     .createHmac('sha256', secret)
     .update(manifest)
@@ -61,18 +72,25 @@ router.post('/mercadopago', async (req, res) => {
   // Responder 200 rápido para que MP no reintente
   res.status(200).send('OK')
 
-  if (!verifyMpSignature(req)) {
-    console.warn('[webhook] Firma MP inválida — ignorando')
-    return
+  const signatureValid = verifyMpSignature(req)
+  if (!signatureValid) {
+    // No confiamos en el contenido del webhook. De todos modos podemos usar
+    // únicamente su ID como disparador y consultar el pago con nuestro access
+    // token: la API de Mercado Pago será la fuente de verdad.
+    console.warn('[webhook] Firma MP inválida — verificando el pago contra la API')
   }
 
-  const { type, data } = req.body
+  const requestUrl = new URL(req.originalUrl || req.url, 'http://localhost')
+  const type = req.body?.type || requestUrl.searchParams.get('type')
+  const paymentId = req.body?.data?.id
+    || requestUrl.searchParams.get('data.id')
+    || requestUrl.searchParams.get('data_id')
 
-  if (type !== 'payment' || !data?.id) return
+  if (type !== 'payment' || !paymentId) return
 
   try {
     const paymentApi = new Payment(mpClient)
-    const mpPayment  = await paymentApi.get({ id: data.id })
+    const mpPayment  = await paymentApi.get({ id: paymentId })
 
     const mpStatus      = mpPayment.status
     const externalRef   = mpPayment.external_reference  // UUID de la orden
@@ -93,6 +111,9 @@ router.post('/mercadopago', async (req, res) => {
 
     if (RELEASES_STOCK.includes(newStatus)) {
       await releaseOrderStock(externalRef)
+    }
+    if (newStatus === 'paid') {
+      await sendOrderConfirmationNotifications(externalRef)
     }
 
     console.log(`[webhook] Orden ${externalRef} → ${newStatus} (MP: ${mpStatus})`)

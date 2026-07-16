@@ -98,11 +98,11 @@ export default function FAQ() {
 
           {/* Header */}
           <div style={{ marginBottom: 64 }}>
-            <span style={{ fontFamily: "'Spline Sans Mono', monospace", fontSize: 11, letterSpacing: '.14em', textTransform: 'uppercase', color: T.muted2, display: 'block', marginBottom: 14 }}>
+            <span style={{ fontFamily: "var(--font-sans)", fontSize: 11, letterSpacing: '.14em', textTransform: 'uppercase', color: T.muted2, display: 'block', marginBottom: 14 }}>
               FAQ
             </span>
             <h1 style={{
-              fontFamily: "'Cormorant Garamond', serif",
+              fontFamily: 'var(--font-sans)',
               fontSize: 'clamp(38px, 5vw, 64px)', fontWeight: 400,
               lineHeight: 1.0, letterSpacing: '-.01em',
               color: T.ink, margin: 0,
@@ -116,7 +116,7 @@ export default function FAQ() {
             <div key={section.section} style={{ marginBottom: 56 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 28 }}>
                 <h2 style={{
-                  fontFamily: "'Spline Sans Mono', monospace",
+                  fontFamily: "var(--font-sans)",
                   fontSize: 11, letterSpacing: '.14em', textTransform: 'uppercase',
                   color: T.muted2, margin: 0, whiteSpace: 'nowrap',
                 }}>
@@ -186,7 +186,7 @@ export default function FAQ() {
             marginTop: 16, padding: '32px', background: T.panel,
             border: `1px solid ${T.hairline}`, borderRadius: 3, textAlign: 'center',
           }}>
-            <p style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 22, fontWeight: 400, color: T.ink, margin: '0 0 16px' }}>
+            <p style={{ fontFamily: 'var(--font-sans)', fontSize: 22, fontWeight: 400, color: T.ink, margin: '0 0 16px' }}>
               ¿No encontraste lo que buscabas?
             </p>
             <a

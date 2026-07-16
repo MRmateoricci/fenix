@@ -6,7 +6,9 @@ import { attachUserIfPresent, requireAuth } from '../middleware/requireAuth.js'
 import { reserveStock, releaseOrderStock, InsufficientStockError } from '../services/stockReservation.js'
 import { estimateDeliveryDate } from '../services/correoArgentino.js'
 import { getShippingForCP } from '../config/shipping.js'
-import { sendMail, customerConfirmationEmail, adminNewOrderEmail } from '../services/mailer.js'
+import { sendOrderConfirmationNotifications } from '../services/orderNotifications.js'
+import { sendReviewInvitationForOrder } from '../services/reviewInvitations.js'
+import { isValidEmail, normalizeEmail } from '../utils/email.js'
 import 'dotenv/config'
 
 const router = Router()
@@ -41,8 +43,9 @@ router.post('/', attachUserIfPresent, async (req, res) => {
     const deliveryType  = customer?.deliveryType
     const pickupDate    = customer?.pickupDate
     const paymentMethod = customer?.paymentMethod || 'mercadopago'
+    let customerEmail   = normalizeEmail(customer?.email)
 
-    if (!customer?.email || !customer?.nombre || !items?.length) {
+    if (!isValidEmail(customerEmail) || !customer?.nombre || !items?.length) {
       return res.status(400).json({ error: 'Faltan campos requeridos' })
     }
     if (!['pickup', 'delivery'].includes(deliveryType)) {
@@ -56,6 +59,26 @@ router.post('/', attachUserIfPresent, async (req, res) => {
     }
     if (deliveryType === 'pickup' && !pickupDate) {
       return res.status(400).json({ error: 'Falta la fecha de retiro' })
+    }
+
+    if (req.userId) {
+      const { rows: users } = await pool.query(
+        'SELECT email FROM users WHERE id = $1',
+        [req.userId]
+      )
+      if (!users.length) return res.status(401).json({ error: 'Sesión inválida' })
+      customerEmail = users[0].email
+    } else {
+      const existingUser = await pool.query(
+        'SELECT 1 FROM users WHERE email = $1 LIMIT 1',
+        [customerEmail]
+      )
+      if (existingUser.rows.length) {
+        return res.status(409).json({
+          code: 'ACCOUNT_LOGIN_REQUIRED',
+          error: 'Este email ya tiene una cuenta. Iniciá sesión para continuar con la compra.',
+        })
+      }
     }
 
     // Precio y stock disponible se recalculan contra la DB — nunca se confía
@@ -132,7 +155,7 @@ router.post('/', attachUserIfPresent, async (req, res) => {
         [
           orderNumber, initialStatus,
           `${customer.nombre} ${customer.apellido}`.trim(),
-          customer.email,
+          customerEmail,
           customer.telefono,
           deliveryType,
           customer.direccion    || null,
@@ -162,21 +185,44 @@ router.post('/', attachUserIfPresent, async (req, res) => {
 
     let checkoutUrl = null
     if (paymentMethod === 'mercadopago') {
-      const { preferenceId, initPoint, sandboxInitPoint } = await createPreference(order)
+      let preference
+      try {
+        preference = await createPreference(order)
+      } catch (err) {
+        await pool.query(
+          `UPDATE orders
+           SET status = 'payment_failed',
+               mp_status = 'preference_creation_failed'
+           WHERE id = $1`,
+          [order.id]
+        )
+        await releaseOrderStock(order.id)
+        throw err
+      }
+
+      const { preferenceId, initPoint, sandboxInitPoint } = preference
 
       await pool.query(
         'UPDATE orders SET mp_preference_id = $1 WHERE id = $2',
         [preferenceId, order.id]
       )
 
-      const isProd = process.env.NODE_ENV === 'production'
-      checkoutUrl  = isProd ? initPoint : sandboxInitPoint
+      // El entorno de pago depende de las credenciales, no de NODE_ENV.
+      // Un token APP_USR crea pagos reales aunque el backend se ejecute
+      // localmente; un token TEST debe usar siempre el checkout sandbox.
+      const usesProductionCredentials = process.env.MP_ACCESS_TOKEN
+        ?.trim()
+        .startsWith('APP_USR-')
+      checkoutUrl = usesProductionCredentials ? initPoint : sandboxInitPoint
     }
 
-    // Mails best-effort — nunca deben tumbar una compra/reserva ya confirmada.
-    sendMail({ to: order.customer_email, ...customerConfirmationEmail(order) })
-    if (process.env.ADMIN_NOTIFICATION_EMAIL) {
-      sendMail({ to: process.env.ADMIN_NOTIFICATION_EMAIL, ...adminNewOrderEmail(order) })
+    // Las reservas para pagar en el local quedan confirmadas al crearse.
+    // Los pedidos de Mercado Pago se notifican recién cuando el webhook
+    // confirma el estado `paid`.
+    if (paymentMethod === 'pay_in_store') {
+      sendOrderConfirmationNotifications(order.id).catch((err) => {
+        console.error('[order confirmation notifications]', err)
+      })
     }
 
     res.status(201).json({
@@ -350,6 +396,12 @@ router.patch('/:id/status', requireAdmin, async (req, res) => {
 
     if (RELEASES_STOCK.includes(status)) {
       await releaseOrderStock(req.params.id)
+    }
+    if (status === 'delivered') {
+      await sendReviewInvitationForOrder(req.params.id)
+    }
+    if (status === 'paid' || status === 'reserved') {
+      await sendOrderConfirmationNotifications(req.params.id)
     }
 
     res.json(rows[0])

@@ -29,7 +29,7 @@ export default function Footer() {
               <FenixLogo />
             </div>
             <p style={{
-              fontFamily: "'Cormorant Garamond', serif", fontStyle: 'italic',
+              fontFamily: 'var(--font-sans)', fontStyle: 'italic',
               fontWeight: 400, fontSize: 15, lineHeight: 1.55, color: '#8C8270', margin: 0,
             }}>
               Iluminando los hogares de City Bell desde 1977.
@@ -41,7 +41,7 @@ export default function Footer() {
             {/* Tienda */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
               <span style={{
-                fontFamily: "'Spline Sans Mono', monospace",
+                fontFamily: "var(--font-sans)",
                 fontSize: 10.5, color: '#6B6151', marginBottom: 3,
               }}>
                 tienda
@@ -64,7 +64,7 @@ export default function Footer() {
             {/* Información */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
               <span style={{
-                fontFamily: "'Spline Sans Mono', monospace",
+                fontFamily: "var(--font-sans)",
                 fontSize: 10.5, color: '#6B6151', marginBottom: 3,
               }}>
                 información
@@ -78,7 +78,7 @@ export default function Footer() {
           {/* Contacto */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
               <span style={{
-                fontFamily: "'Spline Sans Mono', monospace",
+                fontFamily: "var(--font-sans)",
                 fontSize: 10.5, color: '#6B6151', marginBottom: 3,
               }}>
                 contacto
@@ -115,7 +115,7 @@ export default function Footer() {
         <div style={{
           display: 'flex', justifyContent: 'space-between', gap: 16,
           flexWrap: 'wrap', paddingTop: 22,
-          fontFamily: "'Spline Sans Mono', monospace", fontSize: 11, color: '#6B6151',
+          fontFamily: "var(--font-sans)", fontSize: 11, color: '#6B6151',
         }}>
           <span>© 1977–{year} Fénix Electricidad e Iluminación</span>
           <span>City Bell · La Plata · Buenos Aires</span>

@@ -345,9 +345,10 @@ PostgreSQL continúa siendo un proceso/recurso separado. `npm run dev` coordina 
 | --- | --- |
 | `products` | Inventario interno y catálogo público. `published` determina si aparece en la tienda. |
 | `orders` | Pedidos, datos de entrega, pago, snapshot de ítems y control de reservas. |
-| `users` | Cuentas de clientes y datos de contacto. |
+| `users` | Cuentas de clientes, datos de contacto y estado de verificación del email. |
+| `email_verification_tokens` | Enlaces de un solo uso y vencimiento para confirmar el email. |
 | `favorites` | Relación entre usuarios y productos favoritos. |
-| `reviews` | Calificación y comentario, una reseña por usuario/producto. |
+| `reviews` | Calificación y comentario, una reseña por usuario/producto entregado. |
 | `stock_alerts` | Solicitudes de aviso cuando vuelve el stock. Admite invitados. |
 
 `products` cumple dos funciones para evitar catálogos duplicados:
@@ -356,6 +357,8 @@ PostgreSQL continúa siendo un proceso/recurso separado. `npm run dev` coordina 
 - Campos de tienda: `name`, `category`, imágenes, descripción, variantes y `published`.
 
 Los pedidos guardan los productos en `items` como JSONB. Es un snapshot: aunque después cambie el nombre o precio del producto, el pedido conserva lo comprado en ese momento.
+
+Las reseñas requieren una cuenta con email confirmado y al menos un pedido en estado `delivered` que contenga el producto. Al marcar un pedido como entregado se envía, una sola vez, un correo con enlaces directos para reseñar sus productos.
 
 ### Estados de pedido
 
@@ -381,6 +384,7 @@ Los pedidos guardan los productos en `items` como JSONB. Es un snapshot: aunque 
 | `/order-confirmation` | Resultado de compra/reserva |
 | `/track-order` | Seguimiento público |
 | `/login` / `/register` | Acceso de clientes |
+| `/verify-email` | Confirmación del email mediante token |
 | `/account` | Perfil autenticado |
 | `/favorites` | Favoritos autenticados |
 | `/orders` | Historial autenticado |
@@ -399,6 +403,7 @@ La API responde JSON, salvo la descarga/servicio de archivos estáticos en `/upl
 - `GET /api/reviews/:productId`
 - `GET /api/shipping/estimate?postalCode=1900`
 - `POST /api/orders`
+- `POST /api/auth/verify-email`
 - `GET /api/orders/public/:id`
 - `GET /api/orders/track/:orderNumber`
 - `POST /api/stock-alerts`
@@ -413,9 +418,10 @@ La sesión se guarda en la cookie HTTP-only `fenix_session`.
 - `POST /api/auth/logout`
 - `GET /api/auth/me`
 - `PATCH /api/auth/me`
+- `POST /api/auth/resend-verification`
 - `GET /api/orders/mine`
 - `GET`, `POST` y `DELETE /api/favorites`
-- `POST` y `DELETE /api/reviews`
+- `POST` y `DELETE /api/reviews`; publicar exige email confirmado y compra entregada
 
 ### Administración
 
@@ -472,13 +478,22 @@ MP_ACCESS_TOKEN=TEST-...
 MP_WEBHOOK_SECRET=...
 ```
 
-La URL notificada será:
+Mercado Pago no acepta `localhost` en `back_urls`. En desarrollo, el backend
+usa `APP_BASE_URL` como retorno público y luego redirige el navegador a
+`FRONTEND_BASE_URL`. La URL notificada será:
 
 ```text
 https://TU_SUBDOMINIO.ngrok-free.app/api/webhooks/mercadopago
 ```
 
-En desarrollo el backend usa `sandbox_init_point`; con `NODE_ENV=production` usa `init_point`.
+El checkout se selecciona según las credenciales: los access tokens `TEST-...`
+usan sandbox y los tokens productivos `APP_USR-...` usan el checkout real,
+aunque el backend esté ejecutándose localmente.
+
+La firma configurada en `MP_WEBHOOK_SECRET` debe pertenecer al mismo modo y a
+la misma aplicación que `MP_ACCESS_TOKEN`. Si la firma no coincide, el backend
+consulta el pago por ID con el access token antes de actualizar el pedido, por
+lo que nunca confía solamente en el contenido recibido por el webhook.
 
 ## Panel administrativo y seguridad
 

@@ -85,10 +85,16 @@ function MetricIcon({ type }) {
   return <svg viewBox="0 0 24 24" aria-hidden="true">{paths[type]}</svg>
 }
 
-function MetricCard({ label, value, detail, trend, type, tone }) {
+function MetricCard({ label, value, detail, trend, type, tone, onClick }) {
   const trendPositive = trend != null && trend >= 0
+  const Component = onClick ? 'button' : 'div'
   return (
-    <div className="adm-metric-card" style={{ '--metric-tone': tone }}>
+    <Component
+      className={`adm-metric-card${onClick ? ' adm-metric-card--clickable' : ''}`}
+      style={{ '--metric-tone': tone }}
+      onClick={onClick}
+      type={onClick ? 'button' : undefined}
+    >
       <div className="adm-metric-top">
         <span>{label}</span>
         <span className="adm-metric-icon"><MetricIcon type={type} /></span>
@@ -99,7 +105,7 @@ function MetricCard({ label, value, detail, trend, type, tone }) {
           <><span style={{ color: trendPositive ? C.green : C.red }}>{trendPositive ? '↗' : '↘'} {Math.abs(trend).toFixed(1)}%</span> vs. mes anterior</>
         )}
       </div>
-    </div>
+    </Component>
   )
 }
 
@@ -123,8 +129,13 @@ export default function OverviewDashboard({ products, onNavigate }) {
     const previousRevenue = previousSales.reduce((sum, order) => sum + Number(order.total_amount || 0), 0)
     const averageTicket = monthSales.length ? revenue / monthSales.length : 0
     const previousAverage = previousSales.length ? previousRevenue / previousSales.length : 0
-    const pendingDelivery = orders.filter((order) => ACTIVE_STATUSES.includes(order.status))
-    const reservations = orders.filter((order) => order.status === 'reserved')
+    const ordersToShip = orders.filter((order) =>
+      order.delivery_type === 'delivery' && ACTIVE_STATUSES.includes(order.status)
+    )
+    const pickupsToManage = orders.filter((order) =>
+      order.delivery_type === 'pickup'
+      && ['reserved', ...ACTIVE_STATUSES].includes(order.status)
+    )
     const lowStock = products.filter((product) => product.inStock && product.stock != null && product.stock <= 5)
     const outOfStock = products.filter((product) => !product.inStock)
     const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()
@@ -150,7 +161,7 @@ export default function OverviewDashboard({ products, onNavigate }) {
     ]
 
     return {
-      now, monthSales, monthOrders, revenue, averageTicket, pendingDelivery, reservations,
+      now, monthSales, monthOrders, revenue, averageTicket, ordersToShip, pickupsToManage,
       lowStock, outOfStock, dailyRevenue, statusGroups,
       revenueTrend: percentageChange(revenue, previousRevenue),
       ordersTrend: percentageChange(monthSales.length, previousSales.length),
@@ -197,7 +208,14 @@ export default function OverviewDashboard({ products, onNavigate }) {
         <MetricCard label="Facturación del mes" value={fmt(data.revenue)} trend={data.revenueTrend} detail="Sin comparación anterior" type="revenue" tone={C.red} />
         <MetricCard label="Pedidos pagados" value={data.monthSales.length} trend={data.ordersTrend} detail="Pedidos confirmados este mes" type="orders" tone={C.green} />
         <MetricCard label="Ticket promedio" value={fmt(data.averageTicket)} trend={data.ticketTrend} detail="Promedio por pedido pagado" type="ticket" tone={C.amber} />
-        <MetricCard label="Requieren gestión" value={data.pendingDelivery.length + data.reservations.length} detail={`${data.reservations.length} reservas y ${data.pendingDelivery.length} por entregar`} type="pending" tone={C.blue} />
+        <MetricCard
+          label="Requieren gestión"
+          value={data.ordersToShip.length + data.pickupsToManage.length}
+          detail={`${data.ordersToShip.length} para enviar y ${data.pickupsToManage.length} retiros`}
+          type="pending"
+          tone={C.blue}
+          onClick={() => onNavigate('orders')}
+        />
       </div>
 
       <div className="adm-overview-grid adm-overview-grid--wide">
@@ -265,8 +283,8 @@ export default function OverviewDashboard({ products, onNavigate }) {
 
         <Panel title="Atención requerida" subtitle="Pendientes operativos e inventario">
           <div className="adm-attention-list">
-            <AttentionItem label="Pedidos por entregar" value={data.pendingDelivery.length} tone={C.blue} onClick={() => onNavigate('orders')} />
-            <AttentionItem label="Reservas para retirar" value={data.reservations.length} tone={C.amber} onClick={() => onNavigate('orders')} />
+            <AttentionItem label="Pedidos a enviar" value={data.ordersToShip.length} tone={C.blue} onClick={() => onNavigate('orders')} />
+            <AttentionItem label="Retiros en el local" value={data.pickupsToManage.length} tone={C.amber} onClick={() => onNavigate('orders')} />
             <AttentionItem label="Productos con stock bajo" value={data.lowStock.length} tone={C.amberDark} onClick={() => onNavigate('products')} />
             <AttentionItem label="Productos sin stock" value={data.outOfStock.length} tone={C.red} onClick={() => onNavigate('products')} />
           </div>
@@ -274,20 +292,23 @@ export default function OverviewDashboard({ products, onNavigate }) {
       </div>
 
       <style>{`
-        .adm-overview { color:${C.ink}; font-family:Arial,Helvetica,sans-serif; font-weight:400; }
+        .adm-overview { color:${C.ink}; font-family:var(--font-sans); font-weight:400; }
         .adm-overview button,.adm-overview input,.adm-overview select { font-family:inherit; }
         .adm-overview-intro { display:flex; justify-content:space-between; align-items:flex-end; gap:16px; margin:-8px 0 18px; }
         .adm-overview-intro p { margin:0 0 3px; color:${C.text3}; font-size:11px; text-transform:uppercase; letter-spacing:.09em; font-weight:600; }
-        .adm-overview-intro h2 { margin:0; font:500 21px/1.15 Arial,Helvetica,sans-serif; }
+        .adm-overview-intro h2 { margin:0; font:500 21px/1.15 var(--font-sans); }
         .adm-overview-intro > span { color:${C.muted}; font-size:11px; }
         .adm-metric-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin-bottom:14px; }
         .adm-metric-card,.adm-overview-panel { background:${C.white}; border:1px solid ${C.border}; border-radius:10px; box-shadow:0 3px 14px rgba(15,23,42,.04); }
-        .adm-metric-card { min-height:124px; padding:16px; position:relative; overflow:hidden; }
+        .adm-metric-card { min-height:124px; padding:16px; position:relative; overflow:hidden; display:block; width:100%; color:inherit; text-align:left; font-family:inherit; appearance:none; }
+        .adm-metric-card--clickable { cursor:pointer; transition:transform .15s ease,box-shadow .15s ease,border-color .15s ease; }
+        .adm-metric-card--clickable:hover { transform:translateY(-2px); box-shadow:0 8px 22px rgba(15,23,42,.09); border-color:color-mix(in srgb,var(--metric-tone) 38%, ${C.border}); }
+        .adm-metric-card--clickable:focus-visible { outline:2px solid var(--metric-tone); outline-offset:3px; }
         .adm-metric-card:after { content:''; position:absolute; left:0; right:0; bottom:0; height:3px; background:var(--metric-tone); }
         .adm-metric-top { display:flex; justify-content:space-between; align-items:center; color:${C.text3}; font-size:11px; }
         .adm-metric-icon { width:34px; height:34px; border-radius:9px; display:grid; place-items:center; color:var(--metric-tone); background:color-mix(in srgb,var(--metric-tone) 10%, white); }
         .adm-metric-icon svg { width:17px; height:17px; fill:none; stroke:currentColor; stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round; }
-        .adm-metric-card > strong { display:block; margin:10px 0 7px; font:600 clamp(21px,2vw,27px)/1 Arial,Helvetica,sans-serif; letter-spacing:-.025em; }
+        .adm-metric-card > strong { display:block; margin:10px 0 7px; font:600 clamp(21px,2vw,27px)/1 var(--font-sans); letter-spacing:-.025em; }
         .adm-metric-detail { color:${C.muted}; font-size:10.5px; }
         .adm-metric-detail span { font-weight:600; margin-right:4px; }
         .adm-metric-card:first-child { background:${C.red}; border-color:${C.red}; color:#fff; }
@@ -299,7 +320,7 @@ export default function OverviewDashboard({ products, onNavigate }) {
         .adm-overview-grid--wide { grid-template-columns:minmax(0,2fr) minmax(290px,1fr); }
         .adm-overview-panel { padding:18px; min-width:0; }
         .adm-panel-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin-bottom:16px; }
-        .adm-panel-head h2 { margin:0; font:600 14px/1.2 Arial,Helvetica,sans-serif; }
+        .adm-panel-head h2 { margin:0; font:600 14px/1.2 var(--font-sans); }
         .adm-panel-head p { margin:5px 0 0; color:${C.muted}; font-size:11px; }
         .adm-panel-summary { color:${C.text3}; font-size:11px; padding:5px 9px; background:${C.paper}; border-radius:20px; white-space:nowrap; }
         .adm-link-btn { border:0; background:none; color:${C.red}; font-size:11px; font-weight:600; white-space:nowrap; }
@@ -313,7 +334,7 @@ export default function OverviewDashboard({ products, onNavigate }) {
         .adm-donut { width:128px; height:128px; border-radius:50%; display:grid; place-items:center; position:relative; }
         .adm-donut:after { content:''; position:absolute; inset:23px; background:${C.white}; border-radius:50%; }
         .adm-donut div { position:relative; z-index:1; display:flex; flex-direction:column; align-items:center; }
-        .adm-donut strong { font:600 21px/1 Arial,Helvetica,sans-serif; }
+        .adm-donut strong { font:600 21px/1 var(--font-sans); }
         .adm-donut span { color:${C.muted}; font-size:10px; margin-top:5px; }
         .adm-status-list { width:100%; display:grid; gap:7px; }
         .adm-status-list > div { display:grid; grid-template-columns:10px 1fr auto; align-items:center; gap:8px; color:${C.text3}; font-size:11px; }
@@ -327,10 +348,10 @@ export default function OverviewDashboard({ products, onNavigate }) {
         .adm-product-row div { min-width:0; display:flex; flex-direction:column; }
         .adm-product-row div strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12.5px; }
         .adm-product-row small { color:${C.muted}; font-size:10.5px; margin-top:2px; }
-        .adm-product-row b { font:600 11.5px Arial,Helvetica,sans-serif; }
+        .adm-product-row b { font:600 11.5px var(--font-sans); }
         .adm-category-bars { display:flex; flex-direction:column; gap:14px; padding-top:3px; }
         .adm-category-bars > div > div { display:flex; justify-content:space-between; gap:10px; margin-bottom:7px; font-size:11px; }
-        .adm-category-bars strong { font:600 10.5px Arial,Helvetica,sans-serif; }
+        .adm-category-bars strong { font:600 10.5px var(--font-sans); }
         .adm-category-bars i { display:block; height:9px; background:${C.hairline}; border-radius:10px; overflow:hidden; }
         .adm-category-bars i b { display:block; height:100%; background:linear-gradient(90deg,${C.red},#E15B46); border-radius:10px; }
         .adm-order-head,.adm-order-row { display:grid; grid-template-columns:minmax(170px,1fr) 110px 130px 70px; gap:12px; align-items:center; }
@@ -340,13 +361,13 @@ export default function OverviewDashboard({ products, onNavigate }) {
         .adm-order-row > div { min-width:0; display:flex; flex-direction:column; }
         .adm-order-row > div strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; }
         .adm-order-row small,.adm-order-row > span:last-child { color:${C.muted}; font-size:10.5px; }
-        .adm-order-row > b { font:600 11px Arial,Helvetica,sans-serif; }
+        .adm-order-row > b { font:600 11px var(--font-sans); }
         .adm-status { justify-self:start; padding:4px 8px; border-radius:20px; font-size:9.5px; font-weight:600; white-space:nowrap; }
         .adm-attention-list { display:flex; flex-direction:column; gap:8px; }
         .adm-attention-item { width:100%; display:grid; grid-template-columns:10px 1fr auto 12px; align-items:center; gap:9px; padding:11px 10px; border:1px solid ${C.hairline}; border-radius:8px; background:${C.paper}; color:${C.text2}; text-align:left; }
         .adm-attention-item i { width:8px; height:8px; border-radius:50%; }
         .adm-attention-item span { font-size:11.5px; }
-        .adm-attention-item strong { font:600 14px Arial,Helvetica,sans-serif; }
+        .adm-attention-item strong { font:600 14px var(--font-sans); }
         .adm-attention-item b { color:${C.muted}; font-size:14px; }
         .adm-empty { min-height:110px; display:grid; place-items:center; color:${C.muted}; font-size:11px; text-align:center; }
         @media (max-width:1200px) { .adm-metric-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } .adm-overview-grid--wide { grid-template-columns:1fr; } }

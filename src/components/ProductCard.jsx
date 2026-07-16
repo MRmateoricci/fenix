@@ -175,7 +175,7 @@ export default function ProductCard({ product }) {
               fontSize: 12, fontWeight: 500,
               letterSpacing: '.15em', textTransform: 'uppercase',
               padding: '12px 24px', borderRadius: 2,
-              fontFamily: "'Hanken Grotesk', system-ui, sans-serif",
+              fontFamily: "var(--font-sans)",
               transform: cardHovered ? 'translateY(0)' : 'translateY(10px)',
               transition: 'transform .35s ease',
             }}>

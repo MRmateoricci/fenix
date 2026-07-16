@@ -13,13 +13,18 @@ export function AuthProvider({ children }) {
   const [user, setUser]               = useState(null)
   const [authLoading, setAuthLoading] = useState(true)
 
+  const refreshUser = useCallback(async () => {
+    const res = await fetch(`${API_BASE}/api/auth/me`, { credentials: 'include' })
+    const data = res.ok ? await res.json() : null
+    setUser(data?.user ?? null)
+    return data?.user ?? null
+  }, [])
+
   useEffect(() => {
-    fetch(`${API_BASE}/api/auth/me`, { credentials: 'include' })
-      .then(res => (res.ok ? res.json() : null))
-      .then(data => setUser(data?.user ?? null))
+    refreshUser()
       .catch(() => setUser(null))
       .finally(() => setAuthLoading(false))
-  }, [])
+  }, [refreshUser])
 
   const register = useCallback(async ({ email, password, firstName, lastName, phone }) => {
     const res = await fetch(`${API_BASE}/api/auth/register`, {
@@ -68,10 +73,31 @@ export function AuthProvider({ children }) {
     return user
   }, [])
 
+  const verifyEmail = useCallback(async (token) => {
+    const res = await fetch(`${API_BASE}/api/auth/verify-email`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token }),
+    })
+    if (!res.ok) throw new Error(await parseError(res))
+    await refreshUser()
+  }, [refreshUser])
+
+  const resendVerificationEmail = useCallback(async () => {
+    const res = await fetch(`${API_BASE}/api/auth/resend-verification`, {
+      method: 'POST',
+      credentials: 'include',
+    })
+    if (!res.ok) throw new Error(await parseError(res))
+    return res.json()
+  }, [])
+
   return (
     <AuthContext.Provider value={{
       user, authLoading, isAuthenticated: !!user,
-      register, login, logout, updateProfile,
+      register, login, logout, updateProfile, refreshUser,
+      verifyEmail, resendVerificationEmail,
     }}>
       {children}
     </AuthContext.Provider>

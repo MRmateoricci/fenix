@@ -26,11 +26,11 @@ export default function Guias() {
 
           {/* Header */}
           <div style={{ marginBottom: 64 }}>
-            <span style={{ fontFamily: "'Spline Sans Mono', monospace", fontSize: 11, letterSpacing: '.14em', textTransform: 'uppercase', color: T.muted2, display: 'block', marginBottom: 14 }}>
+            <span style={{ fontFamily: "var(--font-sans)", fontSize: 11, letterSpacing: '.14em', textTransform: 'uppercase', color: T.muted2, display: 'block', marginBottom: 14 }}>
               Guías de iluminación
             </span>
             <h1 style={{
-              fontFamily: "'Cormorant Garamond', serif",
+              fontFamily: 'var(--font-sans)',
               fontSize: 'clamp(38px, 5vw, 64px)', fontWeight: 400,
               lineHeight: 1.0, letterSpacing: '-.01em',
               color: T.ink, margin: 0,
@@ -84,7 +84,7 @@ export default function Guias() {
             marginTop: 64, padding: '40px',
             background: '#14100A', borderRadius: 3, textAlign: 'center',
           }}>
-            <p style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 26, fontWeight: 400, color: '#F2EBDC', margin: '0 0 10px' }}>
+            <p style={{ fontFamily: 'var(--font-sans)', fontSize: 26, fontWeight: 400, color: '#F2EBDC', margin: '0 0 10px' }}>
               ¿Todavía tenés dudas?
             </p>
             <p style={{ fontFamily: "'Inter', system-ui, sans-serif", fontSize: 14, color: '#A99E8B', margin: '0 0 24px' }}>
@@ -118,7 +118,7 @@ function GuiaSection({ number, title, intro, children }) {
     <section style={{ marginBottom: 0 }}>
       <div style={{ display: 'flex', gap: 32, alignItems: 'flex-start' }}>
         <span style={{
-          fontFamily: "'Spline Sans Mono', monospace",
+          fontFamily: "var(--font-sans)",
           fontSize: 11, color: T.red, letterSpacing: '.1em',
           paddingTop: 8, flexShrink: 0,
         }}>
@@ -126,7 +126,7 @@ function GuiaSection({ number, title, intro, children }) {
         </span>
         <div style={{ flex: 1 }}>
           <h2 style={{
-            fontFamily: "'Cormorant Garamond', serif",
+            fontFamily: 'var(--font-sans)',
             fontSize: 'clamp(26px, 3vw, 36px)', fontWeight: 600,
             color: T.ink, margin: '0 0 16px',
           }}>
@@ -194,7 +194,7 @@ function TablaBase({ headers, rows }) {
             {headers.map(h => (
               <th key={h} style={{
                 padding: '10px 16px', textAlign: 'left',
-                fontFamily: "'Spline Sans Mono', monospace",
+                fontFamily: "var(--font-sans)",
                 fontSize: 10.5, letterSpacing: '.12em', textTransform: 'uppercase',
                 color: T.muted2, fontWeight: 400,
                 borderBottom: `2px solid ${T.hairline}`,

@@ -61,7 +61,7 @@ export default function Orders() {
                       <p className="text-[11px] uppercase tracking-widest font-semibold" style={{ color: 'var(--color-text-muted)' }}>
                         Pedido
                       </p>
-                      <p className="text-lg font-bold mt-0.5" style={{ color: 'var(--color-text)', fontFamily: 'monospace' }}>
+                      <p className="text-lg font-bold mt-0.5" style={{ color: 'var(--color-text)', fontFamily: 'var(--font-sans)' }}>
                         #{order.order_number}
                       </p>
                     </div>

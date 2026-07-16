@@ -162,7 +162,7 @@ export default function OrderTracking() {
               backgroundColor: 'var(--color-surface)',
               border: '1.5px solid var(--color-border)',
               color: 'var(--color-text)',
-              fontFamily: 'monospace',
+              fontFamily: 'var(--font-sans)',
               letterSpacing: '0.08em',
             }}
           />

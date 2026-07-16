@@ -40,7 +40,7 @@ export default function Cart() {
         <EmptyCartIllustration />
         <div>
           <h2 style={{
-            fontFamily: "'Cormorant Garamond', serif",
+            fontFamily: 'var(--font-sans)',
             fontWeight: 400, fontSize: 28, color: T.ink,
             margin: '0 0 8px',
           }}>
@@ -80,7 +80,7 @@ export default function Cart() {
         {/* ── Page header ──────────────────────────────────────────────── */}
         <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 48 }}>
           <h1 style={{
-            fontFamily: "'Cormorant Garamond', serif",
+            fontFamily: 'var(--font-sans)',
             fontWeight: 400, fontSize: 'clamp(36px, 4vw, 58px)',
             lineHeight: 1, letterSpacing: '-.01em',
             color: T.ink, margin: 0,
@@ -196,14 +196,13 @@ export default function Cart() {
                 background: T.red, color: '#fff',
                 border: 'none', borderRadius: 2, cursor: 'pointer',
                 fontFamily: "'Inter', system-ui, sans-serif",
-                fontSize: 13, fontWeight: 600, letterSpacing: '.08em',
-                textTransform: 'uppercase',
+                fontSize: 14, fontWeight: 600, letterSpacing: 0,
                 transition: 'background .2s',
               }}
               onMouseEnter={(e) => (e.currentTarget.style.background = T.redHover)}
               onMouseLeave={(e) => (e.currentTarget.style.background = T.red)}
             >
-              Proceder al pago
+              Continuar
             </button>
           </div>
         </div>
