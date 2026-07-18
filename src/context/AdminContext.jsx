@@ -55,14 +55,10 @@ export function AdminProvider({ children }) {
   const [ordersLoading, setOrdersLoading] = useState(false)
   const [ordersError, setOrdersError]   = useState(null)
 
-  // ── Avisos de stock ───────────────────────────────────────────────────────
-  const [stockAlerts, setStockAlerts]         = useState([])
-  const [stockAlertsLoading, setStockAlertsLoading] = useState(false)
-  const [stockAlertsError, setStockAlertsError]     = useState(null)
-
   // ── Inventario interno (catálogo de proveedores, DB) ─────────────────────
   const [inventory, setInventory]               = useState([])
   const [inventoryTotal, setInventoryTotal]      = useState(0)
+  const [inventorySuppliers, setInventorySuppliers] = useState([])
   const [inventoryLoading, setInventoryLoading]  = useState(false)
   const [inventoryError, setInventoryError]      = useState(null)
   const [importResult, setImportResult]          = useState(null)
@@ -142,27 +138,6 @@ export function AdminProvider({ children }) {
     }
   }, [])
 
-  // ── fetchStockAlerts — lista avisos de "notificame stock" desde la API ────
-  const fetchStockAlerts = useCallback(async (filters = {}) => {
-    setStockAlertsLoading(true)
-    setStockAlertsError(null)
-    try {
-      const params = new URLSearchParams(filters).toString()
-      const res = await fetch(`${API_BASE}/api/stock-alerts${params ? `?${params}` : ''}`, {
-        headers: { 'x-admin-token': ADMIN_PASSWORD },
-      })
-      if (!res.ok) throw new Error('Error al cargar los avisos de stock')
-      const data = await res.json()
-      setStockAlerts(data)
-      return data
-    } catch (err) {
-      setStockAlertsError(err.message)
-      return []
-    } finally {
-      setStockAlertsLoading(false)
-    }
-  }, [])
-
   // ── fetchInventory — lista el inventario interno (paginado) ──────────────
   const fetchInventory = useCallback(async (filters = {}) => {
     setInventoryLoading(true)
@@ -176,6 +151,7 @@ export function AdminProvider({ children }) {
       const data = await res.json()
       setInventory(data.products || [])
       setInventoryTotal(data.total || 0)
+      setInventorySuppliers(data.suppliers || [])
       return data
     } catch (err) {
       setInventoryError(err.message)
@@ -345,6 +321,56 @@ export function AdminProvider({ children }) {
     }
   }, [])
 
+  // Catálogo visual CLEOS: primero devuelve productos e imágenes para revisar,
+  // y recién después crea/actualiza los seleccionados.
+  const parseCleosCatalogPdf = useCallback(async (file) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    const res = await fetch(`${API_BASE}/api/products/import/cleos/parse`, {
+      method: 'POST',
+      headers: { 'x-admin-token': ADMIN_PASSWORD },
+      body: formData,
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error || 'No se pudo leer el catálogo CLEOS')
+    return data
+  }, [])
+
+  const uploadCleosPreviewImage = useCallback(async (importId, file) => {
+    const formData = new FormData()
+    formData.append('importId', importId)
+    formData.append('file', file)
+    const res = await fetch(`${API_BASE}/api/products/import/cleos/image`, {
+      method: 'POST',
+      headers: { 'x-admin-token': ADMIN_PASSWORD },
+      body: formData,
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error || 'No se pudo subir la imagen')
+    return data
+  }, [])
+
+  const applyCleosCatalogProducts = useCallback(async (importId, actions) => {
+    setImportLoading(true)
+    setImportError(null)
+    try {
+      const res = await fetch(`${API_BASE}/api/products/import/cleos/apply`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-admin-token': ADMIN_PASSWORD },
+        body: JSON.stringify({ importId, actions }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'No se pudo importar el catálogo CLEOS')
+      setImportResult(data)
+      return data
+    } catch (err) {
+      setImportError(err.message)
+      throw err
+    } finally {
+      setImportLoading(false)
+    }
+  }, [])
+
   return (
     <AdminContext.Provider value={{
       isAdmin, products, productsLoading, productsError, fetchCatalog,
@@ -352,13 +378,12 @@ export function AdminProvider({ children }) {
       updateProduct, addProduct, deleteProduct,
       orders, ordersTotal, ordersLoading, ordersError,
       fetchOrders, updateOrderStatus,
-      stockAlerts, stockAlertsLoading, stockAlertsError,
-      fetchStockAlerts,
-      inventory, inventoryTotal, inventoryLoading, inventoryError,
+      inventory, inventoryTotal, inventorySuppliers, inventoryLoading, inventoryError,
       importResult, importLoading, importError,
       fetchInventory, createInventoryItem, updateInventoryItem, deleteInventoryItem,
       adjustInventoryStocks, uploadInventoryFile, uploadProductImage,
       searchProducts, parseInvoicePdf, applyInvoiceLines,
+      parseCleosCatalogPdf, uploadCleosPreviewImage, applyCleosCatalogProducts,
     }}>
       {children}
     </AdminContext.Provider>

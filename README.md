@@ -447,8 +447,16 @@ El panel acepta estos flujos:
 | Compra KIAN | `/api/products/import/purchase` | Incrementa stock y registra precio USD. |
 | Factura/remito PDF | `/api/products/import/invoice/parse` | Extrae líneas y propone coincidencias sin modificar la DB. |
 | Confirmación de PDF | `/api/products/import/invoice/apply` | Aplica las líneas revisadas por el administrador. |
+| Catálogo CLEOS PDF | `/api/products/import/cleos/parse` | Extrae productos, precios e imágenes y muestra una vista previa editable. |
+| Imagen de revisión CLEOS | `/api/products/import/cleos/image` | Sube una imagen alternativa antes de confirmar la importación. |
+| Confirmación CLEOS | `/api/products/import/cleos/apply` | Crea o actualiza solamente los productos aceptados y guarda sus imágenes. |
 
 Las planillas se procesan en memoria con un límite de 15 MB. Las imágenes aceptadas son JPEG, PNG, WebP o GIF, con un límite de 8 MB.
+
+La revisión CLEOS permite corregir código, nombre, precio USD y potencia; elegir,
+subir, omitir o eliminar la imagen; y asignar categoría/subcategoría individual o
+masivamente. Los productos nuevos quedan sin publicar hasta completar precio de
+venta y stock.
 
 ## Envíos
 

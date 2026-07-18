@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import multer from 'multer'
 import path from 'path'
+import { unlink } from 'fs/promises'
 import { pool } from '../db/pool.js'
 import { requireAdmin } from '../middleware/requireAdmin.js'
 import { uploadsDir } from '../config/uploads.js'
@@ -13,6 +14,12 @@ import {
   parseKianPurchaseOrder,
 } from '../services/excelImport.js'
 import { parseInvoicePdf } from '../services/pdfInvoiceImport.js'
+import {
+  applyCleosCatalogProducts,
+  discardCleosPreview,
+  parseCleosCatalogPdf,
+  saveCleosPreviewImage,
+} from '../services/cleosCatalogImport.js'
 import {
   upsertCatalogRows,
   upsertPriceRows,
@@ -43,9 +50,14 @@ const uploadPdf = multer({
 // ─────────────────────────────────────────────────────────────────────────────
 router.get('/', async (req, res) => {
   try {
-    const { search, supplier, lowStock, published, page = 1, limit = 50 } = req.query
+    const {
+      search, supplier, lowStock, stockStatus, published,
+      stockMin, stockMax, costMin, costMax, saleMin, saleMax,
+      sortBy = 'updated', sortDir = 'desc', page = 1, limit = 50,
+    } = req.query
     const cappedLimit = Math.min(Number(limit) || 50, 200)
-    const offset = (Number(page) - 1) * cappedLimit
+    const currentPage = Math.max(1, Number(page) || 1)
+    const offset = (currentPage - 1) * cappedLimit
 
     const conditions = []
     const params = []
@@ -63,27 +75,64 @@ router.get('/', async (req, res) => {
     if (lowStock === 'true') {
       conditions.push(`stock <= 5`)
     }
+    if (stockStatus === 'out') conditions.push(`stock <= 0`)
+    if (stockStatus === 'low') conditions.push(`stock BETWEEN 1 AND 5`)
+    if (stockStatus === 'available') conditions.push(`stock > 0`)
     if (published != null) {
       conditions.push(`published = $${idx++}`)
       params.push(published === 'true')
     }
 
+    const addNumericFilter = (value, expression, operator) => {
+      if (value === '' || value == null) return
+      const numericValue = Number(value)
+      if (!Number.isFinite(numericValue)) return
+      conditions.push(`${expression} ${operator} $${idx++}`)
+      params.push(numericValue)
+    }
+
+    addNumericFilter(stockMin, 'stock', '>=')
+    addNumericFilter(stockMax, 'stock', '<=')
+    addNumericFilter(costMin, 'COALESCE(precio_costo, precio_costo_usd)', '>=')
+    addNumericFilter(costMax, 'COALESCE(precio_costo, precio_costo_usd)', '<=')
+    addNumericFilter(saleMin, 'precio_venta', '>=')
+    addNumericFilter(saleMax, 'precio_venta', '<=')
+
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''
 
-    const [data, countResult] = await Promise.all([
+    const sortColumns = {
+      product: `COALESCE(NULLIF(name, ''), NULLIF(descripcion, ''), codigo)`,
+      supplier: 'supplier',
+      cost: 'COALESCE(precio_costo, precio_costo_usd)',
+      sale: 'precio_venta',
+      stock: 'stock',
+      published: 'published',
+      updated: 'updated_at',
+    }
+    const orderColumn = sortColumns[sortBy] || sortColumns.updated
+    const orderDirection = String(sortDir).toLowerCase() === 'asc' ? 'ASC' : 'DESC'
+
+    const [data, countResult, suppliersResult] = await Promise.all([
       pool.query(
         `SELECT * FROM products ${where}
-         ORDER BY updated_at DESC
+         ORDER BY ${orderColumn} ${orderDirection} NULLS LAST, updated_at DESC
          LIMIT $${idx} OFFSET $${idx + 1}`,
         [...params, cappedLimit, offset]
       ),
       pool.query(`SELECT COUNT(*) FROM products ${where}`, params),
+      pool.query(
+        `SELECT DISTINCT supplier
+         FROM products
+         WHERE supplier IS NOT NULL AND TRIM(supplier) <> ''
+         ORDER BY supplier`
+      ),
     ])
 
     res.json({
       products: data.rows,
       total: Number(countResult.rows[0].count),
-      page: Number(page),
+      suppliers: suppliersResult.rows.map(row => row.supplier),
+      page: currentPage,
       limit: cappedLimit,
     })
   } catch (err) {
@@ -258,6 +307,12 @@ router.post('/stock/batch', async (req, res) => {
     console.error('[POST /api/products/stock/batch]', err)
     res.status(500).json({ error: 'Error interno' })
   }
+})
+
+const uploadCleosImage = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 8 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => cb(null, /^image\/(jpeg|png|webp|gif)$/.test(file.mimetype)),
 })
 
 // POST /api/products/:id/adjust-stock — ajuste manual +/- individual
@@ -464,6 +519,76 @@ router.post('/import/invoice/apply', async (req, res) => {
     if (err.code === '23505') return res.status(409).json({ error: 'Código de producto duplicado en la factura' })
     console.error('[POST /api/products/import/invoice/apply]', err)
     res.status(500).json({ error: 'No se pudo aplicar la factura' })
+  } finally {
+    client.release()
+  }
+})
+
+// Importación del catálogo visual de CLEOS. El primer paso extrae texto e
+// imágenes a una carpeta temporal y devuelve una vista previa; el segundo
+// crea/actualiza únicamente los productos aceptados por el administrador.
+router.post('/import/cleos/parse', uploadPdf.single('file'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'Falta el PDF de CLEOS' })
+  try {
+    const parsed = await parseCleosCatalogPdf(req.file.buffer)
+    const codes = parsed.products.map((product) => product.code)
+    const { rows } = await pool.query(
+      `SELECT id, codigo, name, descripcion, image_url, published, category, subcategory
+       FROM products
+       WHERE codigo = ANY($1::varchar[])`,
+      [codes]
+    )
+    const matches = new Map(rows.map((product) => [product.codigo, product]))
+    res.json({
+      ...parsed,
+      products: parsed.products.map((product) => ({
+        ...product,
+        match: matches.get(product.code) || null,
+      })),
+    })
+  } catch (err) {
+    console.error('[POST /api/products/import/cleos/parse]', err)
+    res.status(422).json({ error: err.message || 'No se pudo leer el catálogo CLEOS' })
+  }
+})
+
+router.post('/import/cleos/image', uploadCleosImage.single('file'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'Falta la imagen del producto' })
+  try {
+    const image = await saveCleosPreviewImage(req.body.importId, req.file)
+    res.json(image)
+  } catch (err) {
+    console.error('[POST /api/products/import/cleos/image]', err)
+    res.status(400).json({ error: err.message || 'No se pudo subir la imagen' })
+  }
+})
+
+router.post('/import/cleos/apply', async (req, res) => {
+  const { importId, actions } = req.body
+  const client = await pool.connect()
+  let applied = null
+  try {
+    await client.query('BEGIN')
+    applied = await applyCleosCatalogProducts(client, importId, actions)
+    await client.query('COMMIT')
+    await discardCleosPreview(applied.previewDir).catch((cleanupError) => {
+      console.warn('[CLEOS preview cleanup]', cleanupError.message)
+    })
+    res.json({
+      fileType: 'cleos',
+      created: applied.created,
+      updated: applied.updated,
+      imagesSaved: applied.imagesSaved,
+      imagesRemoved: applied.imagesRemoved,
+    })
+  } catch (err) {
+    await client.query('ROLLBACK')
+    if (applied?.writtenFiles?.length) {
+      await Promise.all(applied.writtenFiles.map((file) => unlink(file).catch(() => {})))
+    }
+    console.error('[POST /api/products/import/cleos/apply]', err)
+    const status = err.code === '23505' ? 409 : 400
+    res.status(status).json({ error: err.message || 'No se pudo importar el catálogo CLEOS' })
   } finally {
     client.release()
   }

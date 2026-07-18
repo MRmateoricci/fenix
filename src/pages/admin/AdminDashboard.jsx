@@ -1941,75 +1941,6 @@ function OrdersTab() {
   )
 }
 
-function StockAlertsTab({ products }) {
-  const { stockAlerts, stockAlertsLoading, stockAlertsError, fetchStockAlerts } = useAdmin()
-
-  useEffect(() => {
-    fetchStockAlerts()
-  }, [fetchStockAlerts])
-
-  function productName(productId) {
-    return products.find((p) => p.id === productId)?.name || `Producto #${productId}`
-  }
-
-  return (
-    <div>
-      <p style={{ fontSize: 12, color: C.muted, marginBottom: 12 }}>
-        {stockAlertsLoading ? 'Cargando...' : `${stockAlerts.length} aviso${stockAlerts.length !== 1 ? 's' : ''}`}
-      </p>
-
-      {stockAlertsError && (
-        <div style={{ background: C.redLight, border: `1px solid ${C.red}`, borderRadius: 8, padding: '12px 16px', marginBottom: 16, color: C.red, fontSize: 13 }}>
-          {stockAlertsError} — asegurate de que el backend esté corriendo.
-        </div>
-      )}
-
-      {!stockAlertsLoading && !stockAlertsError && (
-        <div style={{ background: C.white, borderRadius: 10, border: `1px solid ${C.border}`, overflow: 'hidden' }}>
-          {stockAlerts.length === 0 ? (
-            <div style={{ padding: '40px 20px', textAlign: 'center', color: C.muted, fontSize: 14 }}>
-              Todavía no hay pedidos de aviso de stock.
-            </div>
-          ) : (
-            <>
-              <div style={{
-                display: 'grid', gridTemplateColumns: '1fr 1fr 150px',
-                gap: 8, padding: '8px 14px',
-                borderBottom: `1px solid ${C.hairline}`, background: C.paper,
-              }}>
-                {['Producto', 'Email', 'Fecha'].map((h) => (
-                  <span key={h} style={{ ...lbl }}>{h}</span>
-                ))}
-              </div>
-
-              {stockAlerts.map((alert, i) => (
-                <div
-                  key={alert.id}
-                  style={{
-                    display: 'grid', gridTemplateColumns: '1fr 1fr 150px',
-                    gap: 8, padding: '10px 14px', alignItems: 'center',
-                    borderBottom: i < stockAlerts.length - 1 ? `1px solid ${C.hairline}` : 'none',
-                  }}
-                >
-                  <span style={{ fontSize: 13, color: C.ink, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {productName(alert.product_id)}
-                  </span>
-                  <span style={{ fontSize: 12, color: C.text3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {alert.email}
-                  </span>
-                  <span style={{ fontSize: 11, color: C.text3 }}>
-                    {fmtDate(alert.created_at)}
-                  </span>
-                </div>
-              ))}
-            </>
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
-
 // ── Iconos adicionales ────────────────────────────────────────────────────────
 const ClipboardIcon = () => (
   <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" strokeWidth="1.4" style={{ flexShrink: 0 }}>
@@ -2018,13 +1949,6 @@ const ClipboardIcon = () => (
     <line x1="5" y1="6" x2="10" y2="6" strokeLinecap="round"/>
     <line x1="5" y1="9" x2="10" y2="9" strokeLinecap="round"/>
     <line x1="5" y1="12" x2="8" y2="12" strokeLinecap="round"/>
-  </svg>
-)
-
-const BellIcon = () => (
-  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" style={{ flexShrink: 0 }}>
-    <path d="M18 8a6 6 0 10-12 0c0 7-3 9-3 9h18s-3-2-3-9" strokeLinecap="round" strokeLinejoin="round"/>
-    <path d="M13.73 21a2 2 0 01-3.46 0" strokeLinecap="round"/>
   </svg>
 )
 
@@ -2412,22 +2336,441 @@ function InvoiceReviewModal({ parsed, onConfirm, onClose }) {
 }
 
 // ── Productos unificados ─────────────────────────────────────────────────────
-const SUPPLIER_FILTERS = ['Todos', 'ALCIDES', 'KIAN', 'OTRO']
+function CleosProductEditor({ product, onChange, importId, onUploadImage }) {
+  const set = (changes) => onChange({ ...product, ...changes })
+  const selectedImage = product.removeImage
+    ? null
+    : product.imageOptions.find(option => option.key === product.selectedImageKey)
+  const imageInputRef = useRef(null)
+  const [imageUploading, setImageUploading] = useState(false)
+  const [imageError, setImageError] = useState('')
+  const subcategoryOptions = getSubcategoryOptions(product.category).map(node => node.label)
+
+  const handleImageUpload = async (file) => {
+    if (!file) return
+    setImageError('')
+    if (!file.type.startsWith('image/')) {
+      setImageError('Seleccioná una imagen válida.')
+      return
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      setImageError('La imagen no puede pesar más de 8 MB.')
+      return
+    }
+    setImageUploading(true)
+    try {
+      const option = await onUploadImage(importId, file)
+      set({
+        imageOptions: [...product.imageOptions.filter(item => item.key !== option.key), option],
+        selectedImageKey: option.key,
+        removeImage: false,
+      })
+    } catch (err) {
+      setImageError(err.message || 'No se pudo subir la imagen.')
+    } finally {
+      setImageUploading(false)
+      if (imageInputRef.current) imageInputRef.current.value = ''
+    }
+  }
+
+  return (
+    <div style={{
+      border: `1px solid ${product.accepted ? C.border : C.hairline}`,
+      borderRadius: 10,
+      padding: 14,
+      background: product.accepted ? C.paper : '#F8F8F8',
+      opacity: product.accepted ? 1 : 0.62,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 12 }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 12.5, fontWeight: 600, color: C.ink }}>
+          <input
+            type="checkbox"
+            checked={product.accepted}
+            onChange={event => set({ accepted: event.target.checked })}
+          />
+          {product.accepted ? 'Importar producto' : 'Producto descartado'}
+        </label>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+          <span style={pill('#F3F4F6', C.text3)}>Página {product.page}</span>
+          {product.match && <span style={pill(C.amberLight, C.amberDark)}>Ya existe</span>}
+          {!product.priceUsd && <span style={pill(C.redLight, C.red)}>Revisar precio</span>}
+        </div>
+      </div>
+
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: 'minmax(110px, 140px) minmax(0, 1fr)',
+        gap: 14,
+        alignItems: 'start',
+      }}>
+        <div>
+          <div style={{
+            width: '100%', aspectRatio: '1 / 1', border: `1px solid ${C.border}`, borderRadius: 8,
+            background: '#F4F4F4', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
+          }}>
+            {selectedImage ? (
+              <img src={selectedImage.url} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+            ) : (
+              <span style={{ fontSize: 11, color: C.muted, textAlign: 'center', padding: 10 }}>Sin imagen seleccionada</span>
+            )}
+          </div>
+
+          {product.imageOptions.length > 1 && (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 5, marginTop: 7 }}>
+              {product.imageOptions.map(option => (
+                <button
+                  key={option.key}
+                  type="button"
+                  onClick={() => set({ selectedImageKey: option.key, removeImage: false })}
+                  style={{
+                    border: `2px solid ${option.key === product.selectedImageKey ? C.red : C.hairline}`,
+                    padding: 2, borderRadius: 6, background: '#fff', cursor: 'pointer', aspectRatio: '1 / 1',
+                  }}
+                >
+                  <img src={option.url} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+                </button>
+              ))}
+            </div>
+          )}
+          <input
+            ref={imageInputRef}
+            type="file"
+            accept="image/jpeg,image/png,image/webp,image/gif"
+            style={{ display: 'none' }}
+            onChange={event => handleImageUpload(event.target.files?.[0])}
+          />
+          <button
+            type="button"
+            disabled={imageUploading}
+            onClick={() => imageInputRef.current?.click()}
+            style={{ ...outlineBtn, width: '100%', marginTop: 7, padding: '5px 7px', fontSize: 10.5 }}
+          >
+            {imageUploading ? 'Subiendo...' : 'Subir otra imagen'}
+          </button>
+          {product.selectedImageKey && !product.removeImage && (
+            <button
+              type="button"
+              onClick={() => set({ selectedImageKey: null, removeImage: false })}
+              style={{ ...outlineBtn, width: '100%', marginTop: 7, padding: '5px 7px', fontSize: 10.5 }}
+            >
+              No usar esta imagen
+            </button>
+          )}
+          {product.match?.image_url && (
+            <button
+              type="button"
+              onClick={() => set({ selectedImageKey: null, removeImage: true })}
+              style={{ ...outlineBtn, width: '100%', marginTop: 7, padding: '5px 7px', fontSize: 10.5, color: C.red, borderColor: C.red }}
+            >
+              Eliminar imagen actual
+            </button>
+          )}
+          {product.removeImage && (
+            <p style={{ margin: '6px 0 0', color: C.red, fontSize: 10.5, textAlign: 'center' }}>La imagen guardada se eliminará</p>
+          )}
+          {imageError && <p style={{ margin: '6px 0 0', color: C.red, fontSize: 10.5 }}>{imageError}</p>}
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(120px, 0.7fr) minmax(180px, 1.3fr)', gap: 10 }}>
+          <label style={{ fontSize: 11.5, color: C.text3 }}>
+            Código
+            <input
+              value={product.code}
+              onChange={event => set({ code: event.target.value.toUpperCase() })}
+              style={{ ...inp, marginTop: 4, padding: '7px 8px', fontSize: 12 }}
+            />
+          </label>
+          <label style={{ fontSize: 11.5, color: C.text3 }}>
+            Nombre
+            <input
+              value={product.name}
+              onChange={event => set({ name: event.target.value })}
+              style={{ ...inp, marginTop: 4, padding: '7px 8px', fontSize: 12 }}
+            />
+          </label>
+          <label style={{ fontSize: 11.5, color: C.text3 }}>
+            Precio costo USD
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={product.priceUsd ?? ''}
+              onChange={event => set({ priceUsd: event.target.value })}
+              style={{ ...inp, marginTop: 4, padding: '7px 8px', fontSize: 12 }}
+            />
+          </label>
+          <label style={{ fontSize: 11.5, color: C.text3 }}>
+            Potencia (W)
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={product.watts ?? ''}
+              onChange={event => set({ watts: event.target.value })}
+              style={{ ...inp, marginTop: 4, padding: '7px 8px', fontSize: 12 }}
+            />
+          </label>
+          <label style={{ fontSize: 11.5, color: C.text3 }}>
+            Categoría
+            <select
+              value={product.category || ''}
+              onChange={event => set({ category: event.target.value, subcategory: '' })}
+              style={{ ...inp, marginTop: 4, padding: '7px 8px', fontSize: 12 }}
+            >
+              <option value="">Sin categoría</option>
+              {CATS.map(category => <option key={category} value={category}>{category}</option>)}
+            </select>
+          </label>
+          <label style={{ fontSize: 11.5, color: C.text3 }}>
+            Subcategoría
+            <select
+              value={product.subcategory || ''}
+              onChange={event => set({ subcategory: event.target.value })}
+              disabled={!product.category}
+              style={{ ...inp, marginTop: 4, padding: '7px 8px', fontSize: 12 }}
+            >
+              <option value="">Sin subcategoría</option>
+              {subcategoryOptions.map(subcategory => <option key={subcategory} value={subcategory}>{subcategory}</option>)}
+              {product.subcategory && !subcategoryOptions.includes(product.subcategory) && (
+                <option value={product.subcategory}>{product.subcategory} (actual)</option>
+              )}
+            </select>
+          </label>
+          <label style={{ fontSize: 11.5, color: C.text3, gridColumn: '1 / -1' }}>
+            Descripción
+            <input
+              value={product.description || ''}
+              onChange={event => set({ description: event.target.value })}
+              style={{ ...inp, marginTop: 4, padding: '7px 8px', fontSize: 12 }}
+            />
+          </label>
+          {product.match && (
+            <p style={{ gridColumn: '1 / -1', margin: 0, fontSize: 11, color: C.muted }}>
+              Actualiza {product.match.codigo} y conserva sus campos públicos editados. La imagen seleccionada sí reemplaza la actual.
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function CleosReviewModal({ parsed, onConfirm, onClose, onUploadImage }) {
+  const [products, setProducts] = useState(() => parsed.products.map((product, index) => ({
+    ...product,
+    key: `${product.code}-${index}`,
+    accepted: true,
+    category: product.match?.category || '',
+    subcategory: product.match?.subcategory || '',
+    removeImage: false,
+  })))
+  const [query, setQuery] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState('')
+  const [bulkCategory, setBulkCategory] = useState('')
+  const [bulkSubcategory, setBulkSubcategory] = useState('')
+
+  const acceptedCount = products.filter(product => product.accepted).length
+  const visibleProducts = products.filter((product) => {
+    const needle = query.trim().toLowerCase()
+    if (!needle) return true
+    return `${product.code} ${product.name} ${product.description || ''}`.toLowerCase().includes(needle)
+  })
+
+  const updateProduct = (key, next) => {
+    setProducts(current => current.map(product => product.key === key ? next : product))
+  }
+
+  const setAll = (accepted) => {
+    setProducts(current => current.map(product => ({ ...product, accepted })))
+  }
+
+  const bulkSubcategoryOptions = getSubcategoryOptions(bulkCategory).map(node => node.label)
+  const applyBulkCategory = () => {
+    if (!bulkCategory) return
+    setProducts(current => current.map(product => product.accepted
+      ? { ...product, category: bulkCategory, subcategory: bulkSubcategory }
+      : product
+    ))
+  }
+
+  const handleConfirm = async () => {
+    setError('')
+    const accepted = products.filter(product => product.accepted)
+    if (!accepted.length) {
+      setError('Seleccioná al menos un producto para importar.')
+      return
+    }
+    const invalid = accepted.find(product => !product.code.trim() || !product.name.trim())
+    if (invalid) {
+      setError('Todos los productos aceptados necesitan código y nombre.')
+      return
+    }
+
+    setSubmitting(true)
+    try {
+      await onConfirm(parsed.importId, accepted.map(product => ({
+        code: product.code.trim(),
+        name: product.name.trim(),
+        description: product.description,
+        longDescription: product.longDescription,
+        groupTitle: product.groupTitle,
+        priceUsd: product.priceUsd,
+        watts: product.watts,
+        ipRating: product.ipRating,
+        selectedImageKey: product.selectedImageKey,
+        removeImage: product.removeImage,
+        category: product.category,
+        subcategory: product.subcategory,
+      })))
+      onClose()
+    } catch (err) {
+      setError(err.message || 'No se pudo importar el catálogo CLEOS')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      zIndex: 1000, padding: 16,
+    }}>
+      <div style={{
+        background: C.paper, borderRadius: 12, width: '100%', maxWidth: 1050,
+        height: '92vh', display: 'flex', flexDirection: 'column',
+        boxShadow: '0 24px 80px rgba(0,0,0,0.3)', overflow: 'hidden',
+      }}>
+        <div style={{ padding: '24px 28px 18px', borderBottom: `1px solid ${C.border}` }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', gap: 16 }}>
+            <div>
+              <h2 style={{ fontFamily: ADMIN_FONT, fontSize: 22, color: C.ink, margin: 0, fontWeight: 500 }}>
+                Revisar catálogo CLEOS
+              </h2>
+              <p style={{ fontSize: 12, color: C.muted, margin: '6px 0 0' }}>
+                Se detectaron {products.length} productos en {parsed.pageCount} páginas. Nada se guarda hasta confirmar.
+                Los productos quedan sin publicar para completar precio de venta, categoría y stock.
+              </p>
+            </div>
+            <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.text3, fontSize: 18 }}>✕</button>
+          </div>
+
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 16, flexWrap: 'wrap' }}>
+            <input
+              value={query}
+              onChange={event => setQuery(event.target.value)}
+              placeholder="Buscar por código o nombre..."
+              style={{ ...inp, padding: '8px 10px', fontSize: 12, flex: '1 1 260px', maxWidth: 420 }}
+            />
+            <button onClick={() => setAll(true)} style={{ ...outlineBtn, padding: '7px 10px', fontSize: 11.5 }}>Aceptar todos</button>
+            <button onClick={() => setAll(false)} style={{ ...outlineBtn, padding: '7px 10px', fontSize: 11.5 }}>Descartar todos</button>
+            <span style={pill(C.greenLight, C.green)}>{acceptedCount} aceptados</span>
+            {!!parsed.duplicateCodes && <span style={pill(C.amberLight, C.amberDark)}>{parsed.duplicateCodes} código repetido unificado</span>}
+          </div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 10, flexWrap: 'wrap' }}>
+            <select
+              value={bulkCategory}
+              onChange={event => { setBulkCategory(event.target.value); setBulkSubcategory('') }}
+              style={{ ...inp, width: 190, padding: '7px 8px', fontSize: 11.5 }}
+            >
+              <option value="">Categoría para aceptados...</option>
+              {CATS.map(category => <option key={category} value={category}>{category}</option>)}
+            </select>
+            <select
+              value={bulkSubcategory}
+              onChange={event => setBulkSubcategory(event.target.value)}
+              disabled={!bulkCategory}
+              style={{ ...inp, width: 220, padding: '7px 8px', fontSize: 11.5 }}
+            >
+              <option value="">Sin subcategoría</option>
+              {bulkSubcategoryOptions.map(subcategory => <option key={subcategory} value={subcategory}>{subcategory}</option>)}
+            </select>
+            <button
+              onClick={applyBulkCategory}
+              disabled={!bulkCategory}
+              style={{ ...outlineBtn, padding: '7px 10px', fontSize: 11.5, opacity: bulkCategory ? 1 : 0.55 }}
+            >
+              Aplicar categoría a aceptados
+            </button>
+          </div>
+        </div>
+
+        <div style={{ flex: 1, overflowY: 'auto', padding: '18px 28px', display: 'grid', gap: 12 }}>
+          {visibleProducts.map(product => (
+            <CleosProductEditor
+              key={product.key}
+              product={product}
+              onChange={next => updateProduct(product.key, next)}
+              importId={parsed.importId}
+              onUploadImage={onUploadImage}
+            />
+          ))}
+          {!visibleProducts.length && (
+            <p style={{ textAlign: 'center', color: C.muted, padding: 40 }}>No hay productos que coincidan con la búsqueda.</p>
+          )}
+        </div>
+
+        <div style={{
+          padding: '16px 28px', borderTop: `1px solid ${C.border}`,
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12,
+        }}>
+          <div>
+            {error && <p style={{ margin: 0, color: C.red, fontSize: 12 }}>{error}</p>}
+            {!error && <span style={{ color: C.muted, fontSize: 12 }}>{acceptedCount} productos se crearán o actualizarán con su imagen.</span>}
+          </div>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button onClick={onClose} disabled={submitting} style={outlineBtn}>Cancelar</button>
+            <button
+              onClick={handleConfirm}
+              disabled={submitting || !acceptedCount}
+              style={{
+                ...solidBtn,
+                background: acceptedCount ? C.red : '#ddd',
+                color: acceptedCount ? '#fff' : '#aaa',
+                cursor: acceptedCount && !submitting ? 'pointer' : 'not-allowed',
+              }}
+            >
+              {submitting ? 'Importando...' : `Importar seleccionados (${acceptedCount})`}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+const SUPPLIER_FILTERS = ['Todos', 'ALCIDES', 'KIAN', 'CLEOS', 'OTRO']
 const INV_PAGE_SIZE = 50
+const headerFilterControl = {
+  width: '100%', minWidth: 0, height: 31, padding: '5px 7px',
+  border: `1px solid ${C.border}`, borderRadius: 6, background: C.white,
+  color: C.ink, font: `400 11px ${ADMIN_FONT}`, outline: 'none', boxSizing: 'border-box',
+}
+const headerRangeRow = { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }
 
 function UnifiedProductsTab() {
   const {
-    inventory, inventoryTotal, inventoryLoading, inventoryError,
+    inventory, inventoryTotal, inventorySuppliers, inventoryLoading, inventoryError,
     importResult, importLoading, importError,
     fetchInventory, createInventoryItem, updateInventoryItem, deleteInventoryItem, fetchCatalog,
     adjustInventoryStocks, uploadInventoryFile,
     parseInvoicePdf, applyInvoiceLines,
+    parseCleosCatalogPdf, uploadCleosPreviewImage, applyCleosCatalogProducts,
   } = useAdmin()
 
   const [search, setSearch]           = useState('')
   const [supplierFilter, setSupplier] = useState('Todos')
   const [publicationFilter, setPublicationFilter] = useState('Todos')
-  const [lowStockOnly, setLowStockOnly] = useState(false)
+  const [stockStatus, setStockStatus] = useState('Todos')
+  const [stockMin, setStockMin]       = useState('')
+  const [stockMax, setStockMax]       = useState('')
+  const [costMin, setCostMin]         = useState('')
+  const [costMax, setCostMax]         = useState('')
+  const [saleMin, setSaleMin]         = useState('')
+  const [saleMax, setSaleMax]         = useState('')
+  const [sortBy, setSortBy]           = useState('updated')
+  const [sortDir, setSortDir]         = useState('desc')
   const [page, setPage]               = useState(1)
   const [editItem, setEditItem]       = useState(null)
   const [addOpen, setAddOpen]         = useState(false)
@@ -2436,19 +2779,34 @@ function UnifiedProductsTab() {
   const [invoiceParsing, setInvoiceParsing] = useState(false)
   const [invoiceError, setInvoiceError]     = useState(null)
   const [invoiceParsed, setInvoiceParsed]   = useState(null)
+  const [cleosParsing, setCleosParsing]     = useState(false)
+  const [cleosError, setCleosError]         = useState(null)
+  const [cleosParsed, setCleosParsed]       = useState(null)
   const [stockDrafts, setStockDrafts]       = useState({})
   const [stockSaving, setStockSaving]       = useState(false)
   const [stockSaveError, setStockSaveError] = useState('')
   const [hoveredProductId, setHoveredProductId] = useState(null)
 
+  const inventoryFilters = useMemo(() => ({
+    page,
+    limit: INV_PAGE_SIZE,
+    sortBy,
+    sortDir,
+    ...(search.trim() ? { search: search.trim() } : {}),
+    ...(supplierFilter !== 'Todos' ? { supplier: supplierFilter } : {}),
+    ...(publicationFilter !== 'Todos' ? { published: publicationFilter === 'Publicados' ? 'true' : 'false' } : {}),
+    ...(stockStatus !== 'Todos' ? { stockStatus } : {}),
+    ...(stockMin !== '' ? { stockMin } : {}),
+    ...(stockMax !== '' ? { stockMax } : {}),
+    ...(costMin !== '' ? { costMin } : {}),
+    ...(costMax !== '' ? { costMax } : {}),
+    ...(saleMin !== '' ? { saleMin } : {}),
+    ...(saleMax !== '' ? { saleMax } : {}),
+  }), [page, search, supplierFilter, publicationFilter, stockStatus, stockMin, stockMax, costMin, costMax, saleMin, saleMax, sortBy, sortDir])
+
   useEffect(() => {
-    const filters = { page, limit: INV_PAGE_SIZE }
-    if (search.trim()) filters.search = search.trim()
-    if (supplierFilter !== 'Todos') filters.supplier = supplierFilter
-    if (publicationFilter !== 'Todos') filters.published = publicationFilter === 'Publicados' ? 'true' : 'false'
-    if (lowStockOnly) filters.lowStock = 'true'
-    fetchInventory(filters)
-  }, [page, search, supplierFilter, publicationFilter, lowStockOnly, fetchInventory])
+    fetchInventory(inventoryFilters)
+  }, [inventoryFilters, fetchInventory])
 
   useEffect(() => {
     if (importResult) setShowResult(true)
@@ -2462,12 +2820,7 @@ function UnifiedProductsTab() {
       await uploadInventoryFile(type, file)
       await fetchCatalog()
       setPage(1)
-      const filters = { page: 1, limit: INV_PAGE_SIZE }
-      if (search.trim()) filters.search = search.trim()
-      if (supplierFilter !== 'Todos') filters.supplier = supplierFilter
-      if (publicationFilter !== 'Todos') filters.published = publicationFilter === 'Publicados' ? 'true' : 'false'
-      if (lowStockOnly) filters.lowStock = 'true'
-      fetchInventory(filters)
+      fetchInventory({ ...inventoryFilters, page: 1 })
     } catch {
       // el error ya queda reflejado en importError
     }
@@ -2494,7 +2847,27 @@ function UnifiedProductsTab() {
     await applyInvoiceLines(actions)
     await fetchCatalog()
     setPage(1)
-    fetchInventory({ page: 1, limit: INV_PAGE_SIZE })
+    fetchInventory({ ...inventoryFilters, page: 1 })
+  }
+
+  async function handleCleosUpload(file) {
+    setCleosError(null)
+    setCleosParsing(true)
+    try {
+      const data = await parseCleosCatalogPdf(file)
+      setCleosParsed(data)
+    } catch (err) {
+      setCleosError(err.message)
+    } finally {
+      setCleosParsing(false)
+    }
+  }
+
+  async function handleCleosConfirm(importId, actions) {
+    await applyCleosCatalogProducts(importId, actions)
+    await fetchCatalog()
+    setPage(1)
+    fetchInventory({ ...inventoryFilters, page: 1 })
   }
 
   function queueStockChange(product, delta) {
@@ -2547,13 +2920,7 @@ function UnifiedProductsTab() {
       })
     }
     await fetchCatalog()
-    fetchInventory({
-      page, limit: INV_PAGE_SIZE,
-      ...(search.trim() ? { search: search.trim() } : {}),
-      ...(supplierFilter !== 'Todos' ? { supplier: supplierFilter } : {}),
-      ...(publicationFilter !== 'Todos' ? { published: publicationFilter === 'Publicados' ? 'true' : 'false' } : {}),
-      ...(lowStockOnly ? { lowStock: 'true' } : {}),
-    })
+    fetchInventory(inventoryFilters)
   }
 
   async function handleDelete(id) {
@@ -2565,13 +2932,57 @@ function UnifiedProductsTab() {
       return next
     })
     setConfirmId(null)
-    fetchInventory({
-      page, limit: INV_PAGE_SIZE,
-      ...(search.trim() ? { search: search.trim() } : {}),
-      ...(supplierFilter !== 'Todos' ? { supplier: supplierFilter } : {}),
-      ...(publicationFilter !== 'Todos' ? { published: publicationFilter === 'Publicados' ? 'true' : 'false' } : {}),
-      ...(lowStockOnly ? { lowStock: 'true' } : {}),
-    })
+    fetchInventory(inventoryFilters)
+  }
+
+  function changeSort(column) {
+    setPage(1)
+    if (sortBy === column) setSortDir(current => current === 'asc' ? 'desc' : 'asc')
+    else {
+      setSortBy(column)
+      setSortDir(['product', 'supplier', 'published'].includes(column) ? 'asc' : 'desc')
+    }
+  }
+
+  function resetFilters() {
+    setSearch('')
+    setSupplier('Todos')
+    setPublicationFilter('Todos')
+    setStockStatus('Todos')
+    setStockMin('')
+    setStockMax('')
+    setCostMin('')
+    setCostMax('')
+    setSaleMin('')
+    setSaleMax('')
+    setSortBy('updated')
+    setSortDir('desc')
+    setPage(1)
+  }
+
+  const hasFilters = Boolean(
+    search || supplierFilter !== 'Todos' || publicationFilter !== 'Todos' ||
+    stockStatus !== 'Todos' || stockMin || stockMax || costMin || costMax || saleMin || saleMax ||
+    sortBy !== 'updated' || sortDir !== 'desc'
+  )
+
+  function sortHeader(column, label) {
+    const active = sortBy === column
+    return (
+      <button
+        type="button"
+        onClick={() => changeSort(column)}
+        title={`Ordenar por ${label.toLowerCase()}`}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 5, padding: 0, margin: 0,
+          border: 'none', background: 'transparent', cursor: 'pointer',
+          color: active ? C.red : C.text3, font: `600 10px ${ADMIN_FONT}`,
+          letterSpacing: '0.08em', textTransform: 'uppercase',
+        }}
+      >
+        {label}<span aria-hidden="true" style={{ fontSize: 11 }}>{active ? (sortDir === 'asc' ? '↑' : '↓') : '↕'}</span>
+      </button>
+    )
   }
 
   return (
@@ -2608,6 +3019,14 @@ function UnifiedProductsTab() {
           busyLabel={invoiceParsing ? 'Leyendo PDF...' : 'Importando...'}
           onFile={file => /\.pdf$/i.test(file.name) ? handleInvoiceUpload(file) : handleUpload('purchase', file)}
         />
+        <ImportUploadCard
+          label="Catálogo CLEOS con imágenes"
+          hint="Lee la lista de precios PDF, extrae las fotos y permite aceptar, editar o descartar cada producto antes de guardarlo."
+          accept=".pdf"
+          disabled={importLoading || cleosParsing}
+          busyLabel={cleosParsing ? 'Extrayendo productos...' : 'Importando...'}
+          onFile={handleCleosUpload}
+        />
       </div>
 
       {invoiceError && (
@@ -2621,6 +3040,21 @@ function UnifiedProductsTab() {
           parsed={invoiceParsed}
           onConfirm={handleInvoiceConfirm}
           onClose={() => setInvoiceParsed(null)}
+        />
+      )}
+
+      {cleosError && (
+        <div style={{ background: C.redLight, border: `1px solid ${C.red}`, borderRadius: 8, padding: '12px 16px', marginBottom: 20, color: C.red, fontSize: 13 }}>
+          {cleosError}
+        </div>
+      )}
+
+      {cleosParsed && (
+        <CleosReviewModal
+          parsed={cleosParsed}
+          onConfirm={handleCleosConfirm}
+          onUploadImage={uploadCleosPreviewImage}
+          onClose={() => setCleosParsed(null)}
         />
       )}
 
@@ -2640,6 +3074,8 @@ function UnifiedProductsTab() {
             {importResult.totalRows !== undefined && <span style={pill('#F3F4F6', C.text3)}>{importResult.totalRows} filas leídas</span>}
             {importResult.created !== undefined && <span style={pill(C.greenLight, C.green)}>{importResult.created} creados</span>}
             {importResult.updated !== undefined && <span style={pill(C.amberLight, C.amberDark)}>{importResult.updated} actualizados</span>}
+            {importResult.imagesSaved !== undefined && <span style={pill('#EEF2FF', '#4338CA')}>{importResult.imagesSaved} imágenes guardadas</span>}
+            {!!importResult.imagesRemoved && <span style={pill(C.redLight, C.red)}>{importResult.imagesRemoved} imágenes eliminadas</span>}
             {!!importResult.skipped && <span style={pill('#F3F4F6', C.text3)}>{importResult.skipped} omitidos</span>}
           </div>
           {!!importResult.unmatched?.length && (
@@ -2692,52 +3128,6 @@ function UnifiedProductsTab() {
         </div>
       </div>
 
-      <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
-        <input
-          type="text"
-          placeholder="Buscar por código, nombre o descripción..."
-          value={search}
-          onChange={e => { setSearch(e.target.value); setPage(1) }}
-          style={{ ...inp, flex: 1, minWidth: 200 }}
-        />
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          {SUPPLIER_FILTERS.map(s => (
-            <button
-              key={s}
-              onClick={() => { setSupplier(s); setPage(1) }}
-              style={{
-                padding: '6px 14px', borderRadius: 20, border: 'none', cursor: 'pointer',
-                fontSize: 11, fontFamily: 'inherit', fontWeight: 600, letterSpacing: '0.04em',
-                background: supplierFilter === s ? C.red : C.hairline,
-                color: supplierFilter === s ? '#fff' : C.text2,
-              }}
-            >
-              {s}
-            </button>
-          ))}
-        </div>
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          {['Todos', 'Publicados', 'Sin publicar'].map(status => (
-            <button
-              key={status}
-              onClick={() => { setPublicationFilter(status); setPage(1) }}
-              style={{
-                padding: '6px 14px', borderRadius: 20, border: 'none', cursor: 'pointer',
-                fontSize: 11, fontFamily: 'inherit', fontWeight: 600,
-                background: publicationFilter === status ? C.dark : C.hairline,
-                color: publicationFilter === status ? '#fff' : C.text2,
-              }}
-            >
-              {status}
-            </button>
-          ))}
-        </div>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: C.text2, cursor: 'pointer' }}>
-          <input type="checkbox" checked={lowStockOnly} onChange={e => { setLowStockOnly(e.target.checked); setPage(1) }} />
-          Solo stock bajo
-        </label>
-      </div>
-
       {stockSaveError && (
         <div style={{ background: C.redLight, border: `1px solid ${C.red}`, borderRadius: 8, padding: '10px 14px', marginBottom: 16, color: C.red, fontSize: 12.5 }}>
           {stockSaveError}
@@ -2752,22 +3142,88 @@ function UnifiedProductsTab() {
 
       {!inventoryError && (
         <div style={{ background: C.white, borderRadius: 10, border: `1px solid ${C.border}`, overflowX: 'auto' }}>
+          <div style={{
+                display: 'grid', gridTemplateColumns: '56px minmax(250px, 1fr) 150px 160px 160px 180px 130px 120px', minWidth: 1270,
+                gap: 8, padding: '10px 14px', borderBottom: `1px solid ${C.hairline}`, background: C.paper,
+                alignItems: 'start',
+              }}>
+                <span style={{ ...lbl, paddingTop: 2 }}>Foto</span>
+                <div style={{ display: 'grid', gap: 7 }}>
+                  {sortHeader('product', 'Producto')}
+                  <input
+                    type="search"
+                    placeholder="Código, nombre o descripción"
+                    value={search}
+                    onChange={event => { setSearch(event.target.value); setPage(1) }}
+                    style={headerFilterControl}
+                  />
+                </div>
+                <div style={{ display: 'grid', gap: 7 }}>
+                  {sortHeader('supplier', 'Proveedor')}
+                  <select
+                    value={supplierFilter}
+                    onChange={event => { setSupplier(event.target.value); setPage(1) }}
+                    style={headerFilterControl}
+                  >
+                    <option value="Todos">Todos</option>
+                    {inventorySuppliers.map(supplier => <option key={supplier} value={supplier}>{supplier}</option>)}
+                  </select>
+                </div>
+                <div style={{ display: 'grid', gap: 7 }}>
+                  {sortHeader('cost', 'P. costo')}
+                  <div style={headerRangeRow}>
+                    <input type="number" min="0" placeholder="Mín." value={costMin} onChange={event => { setCostMin(event.target.value); setPage(1) }} style={headerFilterControl} />
+                    <input type="number" min="0" placeholder="Máx." value={costMax} onChange={event => { setCostMax(event.target.value); setPage(1) }} style={headerFilterControl} />
+                  </div>
+                </div>
+                <div style={{ display: 'grid', gap: 7 }}>
+                  {sortHeader('sale', 'P. venta')}
+                  <div style={headerRangeRow}>
+                    <input type="number" min="0" placeholder="Mín." value={saleMin} onChange={event => { setSaleMin(event.target.value); setPage(1) }} style={headerFilterControl} />
+                    <input type="number" min="0" placeholder="Máx." value={saleMax} onChange={event => { setSaleMax(event.target.value); setPage(1) }} style={headerFilterControl} />
+                  </div>
+                </div>
+                <div style={{ display: 'grid', gap: 7 }}>
+                  {sortHeader('stock', 'Stock')}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 0.8fr 0.8fr', gap: 4 }}>
+                    <select value={stockStatus} onChange={event => { setStockStatus(event.target.value); setPage(1) }} style={headerFilterControl}>
+                      <option value="Todos">Todos</option>
+                      <option value="out">Sin stock</option>
+                      <option value="low">Bajo (1-5)</option>
+                      <option value="available">Con stock</option>
+                    </select>
+                    <input type="number" min="0" placeholder="Mín." value={stockMin} onChange={event => { setStockMin(event.target.value); setPage(1) }} style={headerFilterControl} />
+                    <input type="number" min="0" placeholder="Máx." value={stockMax} onChange={event => { setStockMax(event.target.value); setPage(1) }} style={headerFilterControl} />
+                  </div>
+                </div>
+                <div style={{ display: 'grid', gap: 7 }}>
+                  {sortHeader('published', 'Tienda')}
+                  <select value={publicationFilter} onChange={event => { setPublicationFilter(event.target.value); setPage(1) }} style={headerFilterControl}>
+                    <option value="Todos">Todos</option>
+                    <option value="Publicados">Publicados</option>
+                    <option value="Sin publicar">Sin publicar</option>
+                  </select>
+                </div>
+                <div style={{ display: 'grid', gap: 7 }}>
+                  <span style={{ ...lbl, paddingTop: 2 }}>Acciones</span>
+                  <button
+                    type="button"
+                    onClick={resetFilters}
+                    disabled={!hasFilters}
+                    style={{ ...outlineBtn, minHeight: 31, padding: '5px 8px', opacity: hasFilters ? 1 : 0.45 }}
+                  >
+                    Limpiar
+                  </button>
+                </div>
+          </div>
           {inventoryLoading ? (
             <div style={{ padding: '40px 20px', textAlign: 'center', color: C.muted, fontSize: 14 }}>Cargando...</div>
           ) : inventory.length === 0 ? (
             <div style={{ padding: '40px 20px', textAlign: 'center', color: C.muted, fontSize: 14 }}>
-              No se encontraron productos.
+              No se encontraron productos. Podés cambiar los filtros o usar “Limpiar”.
             </div>
           ) : (
             <>
-              <div style={{
-                display: 'grid', gridTemplateColumns: '56px minmax(220px, 1fr) 100px 105px 105px 70px 92px 120px', minWidth: 980,
-                gap: 8, padding: '8px 14px', borderBottom: `1px solid ${C.hairline}`, background: C.paper,
-              }}>
-                {['Foto', 'Producto', 'Proveedor', 'P. costo', 'P. venta', 'Stock', 'Tienda', 'Acciones'].map(h => (
-                  <span key={h} style={lbl}>{h}</span>
-                ))}
-              </div>
               {inventory.map((p, i) => {
                 const stockDraft = stockDrafts[p.id]
                 const displayedStock = stockDraft?.value ?? p.stock
@@ -2778,7 +3234,7 @@ function UnifiedProductsTab() {
                   onMouseEnter={() => setHoveredProductId(p.id)}
                   onMouseLeave={() => setHoveredProductId(null)}
                   style={{
-                    display: 'grid', gridTemplateColumns: '56px minmax(220px, 1fr) 100px 105px 105px 70px 92px 120px', minWidth: 980,
+                    display: 'grid', gridTemplateColumns: '56px minmax(250px, 1fr) 150px 160px 160px 180px 130px 120px', minWidth: 1270,
                     gap: 8, padding: '10px 14px', alignItems: 'center',
                     borderBottom: i < inventory.length - 1 ? `1px solid ${C.hairline}` : 'none',
                     background: hoveredProductId === p.id ? '#F9FAFB' : C.white,
@@ -2802,7 +3258,11 @@ function UnifiedProductsTab() {
                     {p.supplier || 'OTRO'}
                   </span>
                   <span style={{ fontSize: 12.5, color: C.text2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {p.precio_costo != null ? fmt(p.precio_costo) : '—'}
+                    {p.precio_costo != null
+                      ? fmt(p.precio_costo)
+                      : p.precio_costo_usd != null
+                        ? `US$ ${Number(p.precio_costo_usd).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                        : '—'}
                   </span>
                   <span style={{ fontSize: 13, fontWeight: 600, color: C.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {p.precio_venta != null ? fmt(p.precio_venta) : '—'}
@@ -2887,7 +3347,6 @@ const NAV_ITEMS = [
   { id: 'products',     label: 'Productos',      Icon: GridIcon },
   { id: 'offers',       label: 'Ofertas',        Icon: TagIcon },
   { id: 'orders',       label: 'Pedidos',        Icon: ClipboardIcon },
-  { id: 'stockAlerts',  label: 'Avisos de stock', Icon: BellIcon },
 ]
 
 export default function AdminDashboard() {
@@ -3021,9 +3480,6 @@ export default function AdminDashboard() {
         )}
         {tab === 'orders' && (
           <OrdersTab />
-        )}
-        {tab === 'stockAlerts' && (
-          <StockAlertsTab products={products} />
         )}
       </main>
     </div>

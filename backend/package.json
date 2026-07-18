@@ -4,13 +4,14 @@
   "type": "module",
   "main": "index.js",
   "scripts": {
-    "dev": "node --watch index.js",
+    "dev": "node --watch-path=index.js --watch-path=routes --watch-path=services --watch-path=config --watch-path=db --watch-path=jobs --watch-path=middleware --watch-path=utils index.js",
     "start": "node index.js",
     "db:migrate": "node -e \"import('./db/pool.js').then(m => m.runSchema())\"",
     "db:seed": "node db/seedStorefront.js",
     "db:seed:demo": "node db/seedDemoProducts.js"
   },
   "dependencies": {
+    "@napi-rs/canvas": "^1.0.2",
     "bcryptjs": "^3.0.3",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
@@ -21,6 +22,7 @@
     "multer": "^2.2.0",
     "nodemailer": "^9.0.3",
     "pdf-parse": "^1.1.1",
+    "pdfjs-dist": "^6.1.200",
     "pg": "^8.12.0",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   }
