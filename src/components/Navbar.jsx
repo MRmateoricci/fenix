@@ -191,15 +191,11 @@ export default function Navbar() {
       }}>
         <div style={{
           padding: '0 24px', height: '100%',
-          display: 'flex', alignItems: 'center',
-          justifyContent: 'space-between',
+          display: 'grid', gridTemplateColumns: '1fr auto 1fr',
+          alignItems: 'center',
         }}>
-          {/* ── Left: Logo + nav links ────────────────────────────────────── */}
+          {/* ── Left: nav links ──────────────────────────────────────────── */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 44 }}>
-            <Link to="/" style={{ textDecoration: 'none', flexShrink: 0 }}>
-              <FenixLogo />
-            </Link>
-
             <nav className="fnx-desktop-nav" aria-label="Categorías" style={{
               display: 'flex', alignItems: 'center', gap: 28,
             }} ref={categoryRef} onMouseLeave={scheduleCategoryClose}>
@@ -257,8 +253,13 @@ export default function Navbar() {
             </nav>
           </div>
 
+          {/* ── Center: Logo ─────────────────────────────────────────────── */}
+          <Link to="/" style={{ textDecoration: 'none', flexShrink: 0, justifySelf: 'center' }}>
+            <FenixLogo />
+          </Link>
+
           {/* ── Right: Search + icons ─────────────────────────────────────── */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 20, justifySelf: 'end' }}>
             {/* Underline search */}
             <form
               className="fnx-desktop-nav"

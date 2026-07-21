@@ -4,10 +4,10 @@ import { useAdmin } from '../context/AdminContext'
 import { useCart } from '../context/CartContext'
 import localImg from '../assets/Fenix local.jpg'
 import heroImg from '../assets/fondo fenix.jpg'
-import interiorImg from '../assets/IF01__fondo_bco_sin_logo-removebg-preview.png'
-import electricidadImg from '../assets/D_Q_NP_2X_721001-MLA99449833512_112025-T-removebg-preview.png'
-import herramientasImg from '../assets/pinza-universal-removebg-preview.png'
-import automatizacionImg from '../assets/302489-800-800-removebg-preview.png'
+import interiorImg from '../assets/sin fondo iluminacion.png'
+import electricidadImg from '../assets/sin fondo electricidad.png'
+import herramientasImg from '../assets/sin fondo herramientas.png'
+import automatizacionImg from '../assets/sin fondo automatizacion.png'
 import PageSEO from '../components/SEO'
 import { SEO as seoCfg } from '../config/seo'
 
@@ -366,7 +366,7 @@ function CategoryCard({ cat, onClick }) {
           transition: 'box-shadow .35s ease, border-color .25s ease',
         }}
       >
-        <div style={{ position: 'relative', aspectRatio: '4/4.3' }}>
+        <div style={{ position: 'relative', aspectRatio: cat.productShot ? '2.4/1' : '4/4.3' }}>
           {cat.image
             ? <img
                 src={cat.image} alt={cat.name}
@@ -374,7 +374,7 @@ function CategoryCard({ cat, onClick }) {
                   width: '100%', height: '100%', display: 'block',
                   objectFit: cat.productShot ? 'contain' : 'cover',
                   objectPosition: 'center',
-                  padding: cat.productShot ? '9%' : 0,
+                  padding: cat.productShot ? '3%' : 0,
                   boxSizing: 'border-box',
                   transform: hovered ? 'scale(1.06)' : 'scale(1)',
                   transition: 'transform .6s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
