@@ -127,7 +127,7 @@ const LOCAL_BUSINESS_SCHEMA = {
       '@id': `${seoCfg.siteUrl}/#organization`,
       name: seoCfg.business.name,
       url: seoCfg.siteUrl,
-      logo: `${seoCfg.siteUrl}/favicon-192.png`,
+      logo: `${seoCfg.siteUrl}/favicon.svg`,
       sameAs: [seoCfg.business.instagram],
     },
   ],
