@@ -2754,6 +2754,7 @@ function UnifiedProductsTab() {
     inventory, inventoryTotal, inventorySuppliers, inventoryLoading, inventoryError,
     importResult, importLoading, importError,
     fetchInventory, createInventoryItem, updateInventoryItem, deleteInventoryItem, fetchCatalog,
+    fetchInventorySelectionIds, applyInventoryBatch,
     adjustInventoryStocks, uploadInventoryFile,
     parseInvoicePdf, applyInvoiceLines,
     parseCleosCatalogPdf, uploadCleosPreviewImage, applyCleosCatalogProducts,
@@ -2786,6 +2787,13 @@ function UnifiedProductsTab() {
   const [stockSaving, setStockSaving]       = useState(false)
   const [stockSaveError, setStockSaveError] = useState('')
   const [hoveredProductId, setHoveredProductId] = useState(null)
+  const [selectedIds, setSelectedIds]       = useState(() => new Set())
+  const [bulkAction, setBulkAction]         = useState('precio_venta')
+  const [bulkPrice, setBulkPrice]           = useState('')
+  const [bulkSaving, setBulkSaving]         = useState(false)
+  const [bulkError, setBulkError]           = useState('')
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false)
+  const selectPageRef = useRef(null)
 
   const inventoryFilters = useMemo(() => ({
     page,
@@ -2812,8 +2820,22 @@ function UnifiedProductsTab() {
     if (importResult) setShowResult(true)
   }, [importResult])
 
+  useEffect(() => {
+    setSelectedIds(new Set())
+    setBulkError('')
+  }, [search, supplierFilter, publicationFilter, stockStatus, stockMin, stockMax, costMin, costMax, saleMin, saleMax])
+
   const totalPages = Math.max(1, Math.ceil(inventoryTotal / INV_PAGE_SIZE))
   const pendingStockCount = Object.keys(stockDrafts).length
+  const selectedCount = selectedIds.size
+  const pageIds = inventory.map(product => product.id)
+  const allResultsSelected = inventoryTotal > 0 && selectedCount === inventoryTotal
+
+  useEffect(() => {
+    if (selectPageRef.current) {
+      selectPageRef.current.indeterminate = selectedCount > 0 && !allResultsSelected
+    }
+  }, [selectedCount, allResultsSelected])
 
   async function handleUpload(type, file) {
     try {
@@ -2933,6 +2955,93 @@ function UnifiedProductsTab() {
     })
     setConfirmId(null)
     fetchInventory(inventoryFilters)
+  }
+
+  function toggleProductSelection(id) {
+    setSelectedIds(current => {
+      const next = new Set(current)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+    setBulkError('')
+  }
+
+  async function selectAllFiltered() {
+    setBulkSaving(true)
+    setBulkError('')
+    try {
+      const ids = await fetchInventorySelectionIds(inventoryFilters)
+      setSelectedIds(new Set(ids))
+    } catch (err) {
+      setBulkError(err.message || 'No se pudieron seleccionar todos los productos')
+    } finally {
+      setBulkSaving(false)
+    }
+  }
+
+  function toggleAllSelection() {
+    if (allResultsSelected) {
+      setSelectedIds(new Set())
+      setBulkError('')
+      return
+    }
+    selectAllFiltered()
+  }
+
+  async function refreshAfterBulkAction(removedIds = []) {
+    setSelectedIds(new Set())
+    if (removedIds.length) {
+      const removed = new Set(removedIds)
+      setStockDrafts(current => Object.fromEntries(
+        Object.entries(current).filter(([id]) => !removed.has(id))
+      ))
+    }
+    await fetchCatalog()
+    await fetchInventory(inventoryFilters)
+  }
+
+  async function handleApplyBulkAction() {
+    if (!selectedCount || bulkSaving) return
+    const changes = bulkAction === 'published'
+      ? { published: true }
+      : bulkAction === 'unpublished'
+        ? { published: false }
+        : { [bulkAction]: Number(bulkPrice) }
+
+    if ((bulkAction === 'precio_venta' || bulkAction === 'precio_costo') && (bulkPrice === '' || !Number.isFinite(Number(bulkPrice)) || Number(bulkPrice) < 0)) {
+      setBulkError('Ingresá un precio válido mayor o igual a cero.')
+      return
+    }
+
+    setBulkSaving(true)
+    setBulkError('')
+    try {
+      await applyInventoryBatch([...selectedIds], 'update', changes)
+      setBulkPrice('')
+      await refreshAfterBulkAction()
+    } catch (err) {
+      setBulkError(err.message || 'No se pudo aplicar el cambio')
+    } finally {
+      setBulkSaving(false)
+    }
+  }
+
+  async function handleBulkDelete() {
+    if (!selectedCount || bulkSaving) return
+    const idsToDelete = [...selectedIds]
+    setBulkSaving(true)
+    setBulkError('')
+    try {
+      await applyInventoryBatch(idsToDelete, 'delete')
+      setBulkDeleteOpen(false)
+      await refreshAfterBulkAction(idsToDelete)
+    } catch (err) {
+      setBulkDeleteOpen(false)
+      setBulkError(err.message || 'No se pudieron eliminar los productos')
+    } finally {
+      setBulkSaving(false)
+    }
   }
 
   function changeSort(column) {
@@ -3140,13 +3249,67 @@ function UnifiedProductsTab() {
         </div>
       )}
 
+      {selectedCount > 0 && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+          padding: '11px 14px', marginBottom: 12, borderRadius: 9,
+          border: `1px solid ${C.border}`, background: '#F8FAFC',
+        }}>
+          <strong style={{ fontSize: 12.5, color: C.ink }}>{selectedCount} seleccionado{selectedCount === 1 ? '' : 's'}</strong>
+          {selectedCount < inventoryTotal && (
+            <button type="button" onClick={selectAllFiltered} disabled={bulkSaving} style={{ ...outlineBtn, padding: '6px 10px' }}>
+              Seleccionar los {inventoryTotal} resultados
+            </button>
+          )}
+          <button type="button" onClick={() => setSelectedIds(new Set())} disabled={bulkSaving} style={{ ...outlineBtn, padding: '6px 10px' }}>
+            Deseleccionar
+          </button>
+          <span style={{ width: 1, alignSelf: 'stretch', minHeight: 30, background: C.border }} />
+          <select value={bulkAction} onChange={event => { setBulkAction(event.target.value); setBulkError('') }} disabled={bulkSaving} style={{ ...headerFilterControl, width: 170 }}>
+            <option value="precio_venta">Precio de venta</option>
+            <option value="precio_costo">Precio de costo</option>
+            <option value="published">Publicar en tienda</option>
+            <option value="unpublished">Quitar de tienda</option>
+          </select>
+          {(bulkAction === 'precio_venta' || bulkAction === 'precio_costo') && (
+            <input
+              type="number" min="0" step="0.01" placeholder="Precio común"
+              value={bulkPrice} onChange={event => setBulkPrice(event.target.value)} disabled={bulkSaving}
+              style={{ ...headerFilterControl, width: 140 }}
+            />
+          )}
+          <button type="button" onClick={handleApplyBulkAction} disabled={bulkSaving} style={{ ...solidBtn, background: C.green, color: '#fff', opacity: bulkSaving ? 0.65 : 1 }}>
+            {bulkSaving ? 'Aplicando...' : 'Aplicar'}
+          </button>
+          <button type="button" onClick={() => setBulkDeleteOpen(true)} disabled={bulkSaving} style={{ ...outlineBtn, marginLeft: 'auto', borderColor: C.red, color: C.red }}>
+            Eliminar seleccionados
+          </button>
+        </div>
+      )}
+
+      {bulkError && (
+        <div style={{ background: C.redLight, border: `1px solid ${C.red}`, borderRadius: 8, padding: '10px 14px', marginBottom: 12, color: C.red, fontSize: 12.5 }}>
+          {bulkError}
+        </div>
+      )}
+
       {!inventoryError && (
         <div style={{ background: C.white, borderRadius: 10, border: `1px solid ${C.border}`, overflowX: 'auto' }}>
           <div style={{
-                display: 'grid', gridTemplateColumns: '56px minmax(250px, 1fr) 150px 160px 160px 180px 130px 120px', minWidth: 1270,
+                display: 'grid', gridTemplateColumns: '30px 56px minmax(250px, 1fr) 150px 160px 160px 180px 130px 120px', minWidth: 1310,
                 gap: 8, padding: '10px 14px', borderBottom: `1px solid ${C.hairline}`, background: C.paper,
                 alignItems: 'start',
               }}>
+                <input
+                  ref={selectPageRef}
+                  type="checkbox"
+                  checked={allResultsSelected}
+                  onChange={toggleAllSelection}
+                  disabled={!pageIds.length || bulkSaving}
+                  aria-label={allResultsSelected ? 'Deseleccionar todos los resultados' : 'Seleccionar todos los resultados'}
+                  title={allResultsSelected ? 'Deseleccionar todos los resultados' : `Seleccionar los ${inventoryTotal} resultados`}
+                  style={{ width: 16, height: 16, marginTop: 2, accentColor: C.red, cursor: 'pointer' }}
+                />
                 <span style={{ ...lbl, paddingTop: 2 }}>Foto</span>
                 <div style={{ display: 'grid', gap: 7 }}>
                   {sortHeader('product', 'Producto')}
@@ -3234,13 +3397,23 @@ function UnifiedProductsTab() {
                   onMouseEnter={() => setHoveredProductId(p.id)}
                   onMouseLeave={() => setHoveredProductId(null)}
                   style={{
-                    display: 'grid', gridTemplateColumns: '56px minmax(250px, 1fr) 150px 160px 160px 180px 130px 120px', minWidth: 1270,
+                    display: 'grid', gridTemplateColumns: '30px 56px minmax(250px, 1fr) 150px 160px 160px 180px 130px 120px', minWidth: 1310,
                     gap: 8, padding: '10px 14px', alignItems: 'center',
                     borderBottom: i < inventory.length - 1 ? `1px solid ${C.hairline}` : 'none',
-                    background: hoveredProductId === p.id ? '#F9FAFB' : C.white,
+                    background: selectedIds.has(p.id) ? '#FFF5F5' : hoveredProductId === p.id ? '#F9FAFB' : C.white,
                     cursor: 'pointer', transition: 'background 0.15s', outline: 'none',
                   }}
                 >
+                  <div onClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.has(p.id)}
+                      onChange={() => toggleProductSelection(p.id)}
+                      disabled={bulkSaving}
+                      aria-label={`Seleccionar ${p.name || p.descripcion || p.codigo}`}
+                      style={{ width: 16, height: 16, accentColor: C.red, cursor: 'pointer' }}
+                    />
+                  </div>
                   {p.image_url ? (
                     <img src={p.image_url} alt="" style={{ width: 44, height: 44, objectFit: 'cover', borderRadius: 6, border: `1px solid ${C.hairline}` }} />
                   ) : (
@@ -3335,6 +3508,14 @@ function UnifiedProductsTab() {
           message="¿Eliminar definitivamente este producto? También dejará de mostrarse en la tienda. Esta acción no se puede deshacer."
           onConfirm={() => handleDelete(confirmId)}
           onCancel={() => setConfirmId(null)}
+        />
+      )}
+
+      {bulkDeleteOpen && (
+        <ConfirmModal
+          message={`¿Eliminar definitivamente ${selectedCount} producto${selectedCount === 1 ? '' : 's'}? También dejarán de mostrarse en la tienda. Esta acción no se puede deshacer.`}
+          onConfirm={handleBulkDelete}
+          onCancel={() => setBulkDeleteOpen(false)}
         />
       )}
     </div>

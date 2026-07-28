@@ -44,6 +44,57 @@ const uploadPdf = multer({
   fileFilter: (req, file, cb) => cb(null, /\.pdf$/i.test(file.originalname)),
 })
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
+function buildProductFilters(query) {
+  const {
+    search, supplier, lowStock, stockStatus, published,
+    stockMin, stockMax, costMin, costMax, saleMin, saleMax,
+  } = query
+  const conditions = []
+  const params = []
+  let idx = 1
+
+  if (search) {
+    conditions.push(`(codigo ILIKE $${idx} OR descripcion ILIKE $${idx} OR name ILIKE $${idx})`)
+    params.push(`%${search}%`)
+    idx++
+  }
+  if (supplier) {
+    conditions.push(`supplier = $${idx++}`)
+    params.push(supplier)
+  }
+  if (lowStock === 'true') conditions.push('stock <= 5')
+  if (stockStatus === 'out') conditions.push('stock <= 0')
+  if (stockStatus === 'low') conditions.push('stock BETWEEN 1 AND 5')
+  if (stockStatus === 'available') conditions.push('stock > 0')
+  if (published != null) {
+    conditions.push(`published = $${idx++}`)
+    params.push(published === 'true')
+  }
+
+  const addNumericFilter = (value, expression, operator) => {
+    if (value === '' || value == null) return
+    const numericValue = Number(value)
+    if (!Number.isFinite(numericValue)) return
+    conditions.push(`${expression} ${operator} $${idx++}`)
+    params.push(numericValue)
+  }
+
+  addNumericFilter(stockMin, 'stock', '>=')
+  addNumericFilter(stockMax, 'stock', '<=')
+  addNumericFilter(costMin, 'COALESCE(precio_costo, precio_costo_usd)', '>=')
+  addNumericFilter(costMax, 'COALESCE(precio_costo, precio_costo_usd)', '<=')
+  addNumericFilter(saleMin, 'precio_venta', '>=')
+  addNumericFilter(saleMax, 'precio_venta', '<=')
+
+  return {
+    where: conditions.length ? `WHERE ${conditions.join(' AND ')}` : '',
+    params,
+    nextIndex: idx,
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/products
 // Query params: ?search=&supplier=ALCIDES&lowStock=true&published=true&page=1&limit=50
@@ -59,46 +110,10 @@ router.get('/', async (req, res) => {
     const currentPage = Math.max(1, Number(page) || 1)
     const offset = (currentPage - 1) * cappedLimit
 
-    const conditions = []
-    const params = []
-    let idx = 1
-
-    if (search) {
-      conditions.push(`(codigo ILIKE $${idx} OR descripcion ILIKE $${idx} OR name ILIKE $${idx})`)
-      params.push(`%${search}%`)
-      idx++
-    }
-    if (supplier) {
-      conditions.push(`supplier = $${idx++}`)
-      params.push(supplier)
-    }
-    if (lowStock === 'true') {
-      conditions.push(`stock <= 5`)
-    }
-    if (stockStatus === 'out') conditions.push(`stock <= 0`)
-    if (stockStatus === 'low') conditions.push(`stock BETWEEN 1 AND 5`)
-    if (stockStatus === 'available') conditions.push(`stock > 0`)
-    if (published != null) {
-      conditions.push(`published = $${idx++}`)
-      params.push(published === 'true')
-    }
-
-    const addNumericFilter = (value, expression, operator) => {
-      if (value === '' || value == null) return
-      const numericValue = Number(value)
-      if (!Number.isFinite(numericValue)) return
-      conditions.push(`${expression} ${operator} $${idx++}`)
-      params.push(numericValue)
-    }
-
-    addNumericFilter(stockMin, 'stock', '>=')
-    addNumericFilter(stockMax, 'stock', '<=')
-    addNumericFilter(costMin, 'COALESCE(precio_costo, precio_costo_usd)', '>=')
-    addNumericFilter(costMax, 'COALESCE(precio_costo, precio_costo_usd)', '<=')
-    addNumericFilter(saleMin, 'precio_venta', '>=')
-    addNumericFilter(saleMax, 'precio_venta', '<=')
-
-    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''
+    const { where, params, nextIndex: idx } = buildProductFilters({
+      search, supplier, lowStock, stockStatus, published,
+      stockMin, stockMax, costMin, costMax, saleMin, saleMax,
+    })
 
     const sortColumns = {
       product: `COALESCE(NULLIF(name, ''), NULLIF(descripcion, ''), codigo)`,
@@ -138,6 +153,22 @@ router.get('/', async (req, res) => {
   } catch (err) {
     console.error('[GET /api/products]', err)
     res.status(500).json({ error: 'Error interno' })
+  }
+})
+
+// GET /api/products/selection/ids — IDs de todos los resultados filtrados.
+// Permite seleccionar más de una página sin descargar productos completos.
+router.get('/selection/ids', async (req, res) => {
+  try {
+    const { where, params } = buildProductFilters(req.query)
+    const { rows } = await pool.query(
+      `SELECT id FROM products ${where} ORDER BY updated_at DESC`,
+      params
+    )
+    res.json({ ids: rows.map(row => row.id) })
+  } catch (err) {
+    console.error('[GET /api/products/selection/ids]', err)
+    res.status(500).json({ error: 'No se pudieron seleccionar los productos' })
   }
 })
 
@@ -188,6 +219,68 @@ const FIELD_TRANSFORMS = {
   published:         (v) => Boolean(v),
 }
 const EDITABLE_FIELDS = Object.keys(FIELD_TRANSFORMS)
+
+// POST /api/products/batch — actualiza o elimina una selección en una única
+// transacción. Los campos admitidos son intencionalmente acotados a las
+// acciones disponibles en la tabla del administrador.
+router.post('/batch', async (req, res) => {
+  const ids = [...new Set(Array.isArray(req.body.ids) ? req.body.ids.map(String) : [])]
+  if (!ids.length || ids.length > 5000 || ids.some(id => !UUID_PATTERN.test(id))) {
+    return res.status(400).json({ error: 'La selección de productos no es válida' })
+  }
+
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+    const existing = await client.query(
+      'SELECT id FROM products WHERE id = ANY($1::uuid[]) FOR UPDATE',
+      [ids]
+    )
+    if (existing.rows.length !== ids.length) {
+      await client.query('ROLLBACK')
+      return res.status(404).json({ error: 'Uno o más productos ya no existen' })
+    }
+
+    if (req.body.action === 'delete') {
+      await client.query('DELETE FROM products WHERE id = ANY($1::uuid[])', [ids])
+      await client.query('COMMIT')
+      return res.json({ deleted: ids.length })
+    }
+
+    if (req.body.action !== 'update') {
+      await client.query('ROLLBACK')
+      return res.status(400).json({ error: 'Acción masiva no válida' })
+    }
+
+    const allowedFields = ['precio_venta', 'precio_costo', 'published']
+    const changes = req.body.changes && typeof req.body.changes === 'object' ? req.body.changes : {}
+    const fields = allowedFields.filter(field => field in changes)
+    if (fields.length !== 1) {
+      await client.query('ROLLBACK')
+      return res.status(400).json({ error: 'Elegí un único cambio para aplicar' })
+    }
+
+    const field = fields[0]
+    const value = FIELD_TRANSFORMS[field](changes[field])
+    if ((field === 'precio_venta' || field === 'precio_costo') && (!Number.isFinite(value) || value < 0)) {
+      await client.query('ROLLBACK')
+      return res.status(400).json({ error: 'El precio debe ser un número mayor o igual a cero' })
+    }
+
+    const { rows } = await client.query(
+      `UPDATE products SET ${field} = $1 WHERE id = ANY($2::uuid[]) RETURNING *`,
+      [value, ids]
+    )
+    await client.query('COMMIT')
+    res.json({ products: rows, updated: rows.length })
+  } catch (err) {
+    await client.query('ROLLBACK')
+    console.error('[POST /api/products/batch]', err)
+    res.status(500).json({ error: 'No se pudo completar la acción masiva' })
+  } finally {
+    client.release()
+  }
+})
 
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /api/products — creación manual. Si no viene `codigo` (caso típico de

@@ -195,6 +195,27 @@ export function AdminProvider({ children }) {
     }
   }, [])
 
+  const fetchInventorySelectionIds = useCallback(async (filters = {}) => {
+    const params = new URLSearchParams(filters).toString()
+    const res = await fetch(`${API_BASE}/api/products/selection/ids${params ? `?${params}` : ''}`, {
+      headers: { 'x-admin-token': ADMIN_PASSWORD },
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error || 'No se pudieron seleccionar los productos')
+    return data.ids || []
+  }, [])
+
+  const applyInventoryBatch = useCallback(async (ids, action, changes = undefined) => {
+    const res = await fetch(`${API_BASE}/api/products/batch`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-admin-token': ADMIN_PASSWORD },
+      body: JSON.stringify({ ids, action, ...(changes ? { changes } : {}) }),
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error || 'No se pudo completar la acción masiva')
+    return data
+  }, [])
+
   // ── updateProduct / addProduct / deleteProduct — panel "Productos": editan
   // el mismo registro de Inventario, mapeando la forma del catálogo público
   // (name/price/image/...) a la del backend (name/precio_venta/image_url/...)
@@ -381,6 +402,7 @@ export function AdminProvider({ children }) {
       inventory, inventoryTotal, inventorySuppliers, inventoryLoading, inventoryError,
       importResult, importLoading, importError,
       fetchInventory, createInventoryItem, updateInventoryItem, deleteInventoryItem,
+      fetchInventorySelectionIds, applyInventoryBatch,
       adjustInventoryStocks, uploadInventoryFile, uploadProductImage,
       searchProducts, parseInvoicePdf, applyInvoiceLines,
       parseCleosCatalogPdf, uploadCleosPreviewImage, applyCleosCatalogProducts,
