@@ -442,7 +442,9 @@ El panel acepta estos flujos:
 | Tipo | Endpoint | Efecto |
 | --- | --- | --- |
 | Catálogo Huergui | `/api/products/import/catalog` | Crea/actualiza descripción, grupo, subgrupo y medida. |
-| Precios Alcides | `/api/products/import/prices` | Actualiza costos y precios. |
+| Vista previa de precios proveedor | `/api/products/import/prices/parse` | Extrae precios y propone coincidencias sin modificar la DB. |
+| Reasociación de códigos de precios | `/api/products/import/prices/rematch` | Recalcula coincidencias después de un reemplazo masivo de códigos. |
+| Confirmación de precios proveedor | `/api/products/import/prices/apply` | Aplica las filas revisadas, asociadas o marcadas como producto nuevo. |
 | Venta POS | `/api/products/import/sale` | Descuenta unidades vendidas. |
 | Compra KIAN | `/api/products/import/purchase` | Incrementa stock y registra precio USD. |
 | Factura/remito PDF | `/api/products/import/invoice/parse` | Extrae líneas y propone coincidencias sin modificar la DB. |
@@ -452,6 +454,49 @@ El panel acepta estos flujos:
 | Confirmación CLEOS | `/api/products/import/cleos/apply` | Crea o actualiza solamente los productos aceptados y guarda sus imágenes. |
 
 Las planillas se procesan en memoria con un límite de 15 MB. Las imágenes aceptadas son JPEG, PNG, WebP o GIF, con un límite de 8 MB.
+
+La revisión de precios permite editar costo, venta y precio con IVA; elegir ARS
+o USD para toda la planilla o por fila; desmarcar filas; y asociar manualmente
+un código desconocido a cualquier producto existente. Para cada código sin
+coincidencia muestra primero los tres productos más similares con su miniatura,
+permite desplegar más candidatos o buscar, y también crear un borrador nuevo sin
+imagen. Las asociaciones pueden quitarse para volver a los candidatos; además,
+la revisión ofrece seleccionar todo, deseleccionar todo y aceptar en bloque las
+recomendaciones sin repetir el mismo producto. Cuando varias filas representan
+colores distintos, pueden asignarse al mismo producto marcándolas como variantes:
+cada color conserva nombre, código de proveedor y precio propio dentro de
+`color_options`. Si dos o más códigos comparten la misma base y solamente cambia
+un sufijo de color conocido (`-WW`, `-CW`, `-N`, `-W`, `-B`, entre otros), la vista
+previa los agrupa, recomienda el producto base y completa automáticamente el
+nombre y tono del color (`-N` significa Neutral white). Los grupos que requieren
+asignación o correcciones aparecen primero; el resto se ordena por posible
+producto o familia, y los códigos de cada bloque se muestran alfabéticamente. La revisión ocupa la
+pantalla completa y separa los precios en secciones: primero los que requieren
+atención, luego las familias de colores contraíbles y finalmente los demás
+productos listos. Cada sección permite expandir o contraer todos sus grupos.
+Los conflictos se muestran tanto en el encabezado del grupo como en cada fila.
+Las filas desmarcadas pasan a una sección visible `Deseleccionados`, desde donde
+pueden volver a incluirse sin buscarlas dentro de otra familia.
+Cuando una fila permite inferir el color, cada producto recomendado incluye un
+atajo `Como <color>` que lo asigna directamente como variante, incluso si ese
+producto ya está usado por otra fila, sin activar manualmente la opción de
+repetir producto. Las otras filas del mismo producto cuyo color pueda inferirse
+también se convierten automáticamente en variantes.
+La cabecera permite aplicar reemplazos literales masivos de código —por ejemplo,
+`CCL-` por `CL-` solamente al inicio—, informa cuántas filas serán afectadas y
+vuelve a ejecutar las asociaciones contra todo el catálogo; el reemplazo puede
+quedar vacío para eliminar un prefijo. Antes de elegir el archivo se indica su
+proveedor. Cada confirmación guarda en `supplier_product_mappings` la relación
+entre proveedor, código original del XLS, producto y color, y las cargas futuras
+reutilizan esa relación antes de calcular similitudes. La comparación exacta de
+códigos ignora espacios. La selección ARS/USD se presenta como un control
+segmentado compacto tanto a nivel de planilla como por fila.
+La tienda muestra el precio del color elegido y el backend lo
+vuelve a validar al crear el pedido. La cotización USD/ARS se
+guarda en `store_settings` (valor inicial: 1510) mediante
+`GET/PATCH /api/products/currency-settings`. Los precios públicos y los cobros
+siguen expresados en ARS, mientras el administrador ve también su equivalente
+en USD.
 
 La revisión CLEOS permite corregir código, nombre, precio USD y potencia; elegir,
 subir, omitir o eliminar la imagen; y asignar categoría/subcategoría individual o

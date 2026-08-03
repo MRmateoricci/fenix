@@ -661,7 +661,15 @@ function FeaturedCard({ product, onAdd }) {
   function handleAdd(e) {
     e.preventDefault()
     if (!product.inStock) return
-    onAdd({ id: product.id, name: product.name, price: product.price, image: product.image, category: product.category })
+    const defaultColor = product.colors?.[0]
+    onAdd({
+      id: product.id,
+      name: product.name,
+      price: defaultColor?.price != null ? Number(defaultColor.price) : product.price,
+      image: defaultColor?.image || product.image,
+      category: product.category,
+      color: defaultColor?.name,
+    })
   }
 
   return (

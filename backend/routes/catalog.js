@@ -35,7 +35,14 @@ function mapRow(r) {
     material: r.material,
     cableType: r.cable_type,
     productType: r.product_type || r.cable_type,
-    colors: r.color_options || [],
+    colors: (r.color_options || []).map(color => ({
+      ...color,
+      price: color.price == null ? null : Number(color.price),
+      priceCost: color.priceCost == null ? null : Number(color.priceCost),
+      priceWithTax: color.priceWithTax == null ? null : Number(color.priceWithTax),
+      priceUsd: color.priceUsd == null ? null : Number(color.priceUsd),
+      priceCostUsd: color.priceCostUsd == null ? null : Number(color.priceCostUsd),
+    })),
     sizes: r.size_options || [],
     published: true,
   }

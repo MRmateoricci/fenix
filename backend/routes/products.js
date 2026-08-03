@@ -22,7 +22,8 @@ import {
 } from '../services/cleosCatalogImport.js'
 import {
   upsertCatalogRows,
-  upsertPriceRows,
+  matchPriceRows,
+  applyPriceUpdates,
   applySaleDecrement,
   applyPurchaseIncrement,
   matchInvoiceLines,
@@ -45,6 +46,11 @@ const uploadPdf = multer({
 })
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
+function normalizePriceSupplier(value) {
+  const supplier = String(value || '').trim().toUpperCase()
+  return supplier && supplier.length <= 80 ? supplier : null
+}
 
 function buildProductFilters(query) {
   const {
@@ -83,8 +89,9 @@ function buildProductFilters(query) {
 
   addNumericFilter(stockMin, 'stock', '>=')
   addNumericFilter(stockMax, 'stock', '<=')
-  addNumericFilter(costMin, 'COALESCE(precio_costo, precio_costo_usd)', '>=')
-  addNumericFilter(costMax, 'COALESCE(precio_costo, precio_costo_usd)', '<=')
+  const costInArs = `COALESCE(precio_costo, precio_costo_usd * COALESCE((SELECT usd_ars_rate FROM store_settings WHERE id = 1), 1510))`
+  addNumericFilter(costMin, costInArs, '>=')
+  addNumericFilter(costMax, costInArs, '<=')
   addNumericFilter(saleMin, 'precio_venta', '>=')
   addNumericFilter(saleMax, 'precio_venta', '<=')
 
@@ -118,7 +125,7 @@ router.get('/', async (req, res) => {
     const sortColumns = {
       product: `COALESCE(NULLIF(name, ''), NULLIF(descripcion, ''), codigo)`,
       supplier: 'supplier',
-      cost: 'COALESCE(precio_costo, precio_costo_usd)',
+      cost: `COALESCE(precio_costo, precio_costo_usd * COALESCE((SELECT usd_ars_rate FROM store_settings WHERE id = 1), 1510))`,
       sale: 'precio_venta',
       stock: 'stock',
       published: 'published',
@@ -175,6 +182,41 @@ router.get('/selection/ids', async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/products/:id
 // ─────────────────────────────────────────────────────────────────────────────
+// Cotizacion usada por el administrador para comparar e importar precios en
+// ambas monedas. El catalogo y los cobros continuan expresados en ARS.
+router.get('/currency-settings', async (_req, res) => {
+  try {
+    const { rows } = await pool.query('SELECT usd_ars_rate, updated_at FROM store_settings WHERE id = 1')
+    res.json({
+      usdArsRate: Number(rows[0]?.usd_ars_rate || 1510),
+      updatedAt: rows[0]?.updated_at || null,
+    })
+  } catch (err) {
+    console.error('[GET /api/products/currency-settings]', err)
+    res.status(500).json({ error: 'No se pudo cargar la cotizacion' })
+  }
+})
+
+router.patch('/currency-settings', async (req, res) => {
+  const usdArsRate = Number(req.body.usdArsRate)
+  if (!Number.isFinite(usdArsRate) || usdArsRate <= 0) {
+    return res.status(400).json({ error: 'La cotizacion debe ser mayor a cero' })
+  }
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO store_settings (id, usd_ars_rate, updated_at)
+       VALUES (1, $1, NOW())
+       ON CONFLICT (id) DO UPDATE SET usd_ars_rate = EXCLUDED.usd_ars_rate, updated_at = NOW()
+       RETURNING usd_ars_rate, updated_at`,
+      [usdArsRate]
+    )
+    res.json({ usdArsRate: Number(rows[0].usd_ars_rate), updatedAt: rows[0].updated_at })
+  } catch (err) {
+    console.error('[PATCH /api/products/currency-settings]', err)
+    res.status(500).json({ error: 'No se pudo guardar la cotizacion' })
+  }
+})
+
 router.get('/:id', async (req, res) => {
   try {
     const { rows } = await pool.query('SELECT * FROM products WHERE id = $1', [req.params.id])
@@ -506,14 +548,198 @@ router.post('/import/catalog', upload.single('file'), async (req, res) => {
   )
 })
 
-router.post('/import/prices', upload.single('file'), async (req, res) => {
+function serializePriceProduct(product) {
+  if (!product) return null
+  return {
+    id: product.id,
+    codigo: product.codigo,
+    nombre: product.nombre,
+    descripcion: product.descripcion,
+    imageUrl: product.image_url,
+    precioCosto: product.precio_costo == null ? null : Number(product.precio_costo),
+    precioVenta: product.precio_venta == null ? null : Number(product.precio_venta),
+    precioIva: product.precio_iva == null ? null : Number(product.precio_iva),
+    precioCostoUsd: product.precio_costo_usd == null ? null : Number(product.precio_costo_usd),
+    similarity: product.similarity,
+  }
+}
+
+function serializePriceMatchLine(line) {
+  return {
+    codigo: line.codigo,
+    descripcion: line.descripcion,
+    precioCosto: line.precio_costo,
+    precioVenta: line.precio_venta,
+    precioIva: line.precio_iva,
+    match: serializePriceProduct(line.match),
+    matchType: line.matchType,
+    suggestions: (line.suggestions || []).map(serializePriceProduct),
+    colorRecommendation: line.colorRecommendation ? {
+      familyCode: line.colorRecommendation.familyCode,
+      suffix: line.colorRecommendation.suffix,
+      name: line.colorRecommendation.name,
+      hex: line.colorRecommendation.hex,
+      product: serializePriceProduct(line.colorRecommendation.product),
+    } : null,
+  }
+}
+
+router.post('/import/prices/parse', upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Falta el archivo' })
-  await runImport(
-    res, 'prices',
-    () => parseAlcidesPrices(req.file.buffer),
-    (client, parsed) => upsertPriceRows(client, parsed.rows),
-    (parsed, result) => ({ totalRows: parsed.totalRows, skipped: parsed.skipped, ...result })
-  )
+  const supplier = normalizePriceSupplier(req.body.supplier)
+  if (!supplier) return res.status(400).json({ error: 'Indicá el proveedor de la lista de precios' })
+  const client = await pool.connect()
+  try {
+    const parsed = parseAlcidesPrices(req.file.buffer)
+    const [lines, settings] = await Promise.all([
+      matchPriceRows(client, parsed.rows, supplier),
+      client.query('SELECT usd_ars_rate FROM store_settings WHERE id = 1'),
+    ])
+    res.json({
+      lines: lines.map(serializePriceMatchLine),
+      totalRows: parsed.totalRows,
+      skipped: parsed.skipped,
+      supplier,
+      usdArsRate: Number(settings.rows[0]?.usd_ars_rate || 1510),
+    })
+  } catch (err) {
+    console.error('[POST /api/products/import/prices/parse]', err)
+    res.status(500).json({ error: 'No se pudo leer la lista de precios' })
+  } finally {
+    client.release()
+  }
+})
+
+router.post('/import/prices/rematch', async (req, res) => {
+  const input = Array.isArray(req.body.lines) ? req.body.lines : []
+  const supplier = normalizePriceSupplier(req.body.supplier)
+  if (!supplier) return res.status(400).json({ error: 'Indicá el proveedor de la lista de precios' })
+  if (!input.length) return res.status(400).json({ error: 'No hay códigos para volver a asociar' })
+  if (input.length > 5000) return res.status(400).json({ error: 'La lista de precios es demasiado grande' })
+
+  const rows = []
+  for (const line of input) {
+    const codigo = normalizeCodigo(line.codigo)
+    if (!codigo || codigo.length > 200) return res.status(400).json({ error: 'Hay un código de producto inválido' })
+    rows.push({
+      codigo,
+      descripcion: line.descripcion ? String(line.descripcion).trim().slice(0, 5000) : null,
+      precio_costo: toNumber(line.precioCosto),
+      precio_venta: toNumber(line.precioVenta),
+      precio_iva: toNumber(line.precioIva),
+    })
+  }
+
+  const client = await pool.connect()
+  try {
+    const lines = await matchPriceRows(client, rows, supplier)
+    res.json({ supplier, lines: lines.map(serializePriceMatchLine) })
+  } catch (err) {
+    console.error('[POST /api/products/import/prices/rematch]', err)
+    res.status(500).json({ error: 'No se pudieron volver a asociar los códigos' })
+  } finally {
+    client.release()
+  }
+})
+
+router.post('/import/prices/apply', async (req, res) => {
+  const actions = Array.isArray(req.body.actions) ? req.body.actions : []
+  const supplier = normalizePriceSupplier(req.body.supplier)
+  if (!supplier) return res.status(400).json({ error: 'Indicá el proveedor de la lista de precios' })
+  if (!actions.length) return res.status(400).json({ error: 'No hay precios para actualizar' })
+  if (actions.length > 5000) return res.status(400).json({ error: 'La lista de precios es demasiado grande' })
+
+  const normalized = []
+  const productIds = new Set()
+  const newCodes = new Set()
+  for (const action of actions) {
+    const values = [action.precioCosto, action.precioVenta, action.precioIva].map(toNumber)
+    if (values.some((value) => value != null && value < 0) || values.every((value) => value == null)) {
+      return res.status(400).json({ error: 'Cada linea necesita al menos un precio valido' })
+    }
+    const common = {
+      currency: action.currency === 'USD' ? 'USD' : 'ARS',
+      precioCosto: values[0],
+      precioVenta: values[1],
+      precioIva: values[2],
+    }
+    if (action.type === 'create') {
+      const codigo = normalizeCodigo(action.codigo)
+      if (!codigo) return res.status(400).json({ error: 'Falta el codigo del producto nuevo' })
+      if (newCodes.has(codigo)) return res.status(400).json({ error: 'Hay dos productos nuevos con el mismo codigo' })
+      newCodes.add(codigo)
+      normalized.push({
+        ...common,
+        type: 'create',
+        codigo,
+        sourceCode: normalizeCodigo(action.sourceCode) || codigo,
+        descripcion: action.descripcion ? String(action.descripcion).trim() : null,
+        supplier,
+      })
+    } else {
+      if (!UUID_PATTERN.test(String(action.productId || ''))) {
+        return res.status(400).json({ error: 'Hay una linea sin producto asociado' })
+      }
+      productIds.add(action.productId)
+      let colorVariant = null
+      if (action.colorVariant) {
+        const name = String(action.colorVariant.name || '').trim()
+        if (!name) return res.status(400).json({ error: 'Cada variante necesita un nombre de color' })
+        const rawHex = String(action.colorVariant.hex || '').trim()
+        colorVariant = {
+          name,
+          hex: /^#[0-9a-f]{6}$/i.test(rawHex) ? rawHex.toUpperCase() : '#CCCCCC',
+        }
+      }
+      normalized.push({
+        ...common,
+        type: 'update',
+        productId: action.productId,
+        sourceCode: normalizeCodigo(action.sourceCode),
+        colorVariant,
+      })
+    }
+  }
+
+  const assignmentsByProduct = new Map()
+  for (const action of normalized.filter(item => item.type === 'update')) {
+    if (!assignmentsByProduct.has(action.productId)) assignmentsByProduct.set(action.productId, [])
+    assignmentsByProduct.get(action.productId).push(action)
+  }
+  for (const group of assignmentsByProduct.values()) {
+    if (group.length <= 1) continue
+    const colors = group.map(action => action.colorVariant?.name.toLocaleLowerCase('es-AR'))
+    if (group.some(action => !action.colorVariant) || new Set(colors).size !== group.length) {
+      return res.status(400).json({ error: 'Las filas asignadas al mismo producto deben tener colores diferentes' })
+    }
+  }
+
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+    if (productIds.size) {
+      const existing = await client.query(
+        'SELECT id FROM products WHERE id = ANY($1::uuid[]) FOR UPDATE',
+        [[...productIds]]
+      )
+      if (existing.rows.length !== productIds.size) {
+        await client.query('ROLLBACK')
+        return res.status(404).json({ error: 'Uno o mas productos asociados ya no existen' })
+      }
+    }
+    const settings = await client.query('SELECT usd_ars_rate FROM store_settings WHERE id = 1')
+    const usdArsRate = Number(settings.rows[0]?.usd_ars_rate || 1510)
+    const result = await applyPriceUpdates(client, normalized, usdArsRate, supplier)
+    await client.query('COMMIT')
+    res.json({ fileType: 'prices', supplier, totalRows: normalized.length, exchangeRate: usdArsRate, ...result })
+  } catch (err) {
+    await client.query('ROLLBACK')
+    if (err.code === '23505') return res.status(409).json({ error: 'Ya existe un producto con uno de los codigos nuevos' })
+    console.error('[POST /api/products/import/prices/apply]', err)
+    res.status(500).json({ error: 'No se pudieron actualizar los precios' })
+  } finally {
+    client.release()
+  }
 })
 
 router.post('/import/sale', upload.single('file'), async (req, res) => {

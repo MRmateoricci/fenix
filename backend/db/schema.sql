@@ -164,6 +164,9 @@ CREATE TABLE IF NOT EXISTS products (
   precio_venta      NUMERIC(14,2),
   precio_iva        NUMERIC(14,2),
   precio_costo_usd  NUMERIC(14,2),       -- de compras KIAN (col L, precio final USD)
+  price_currency    VARCHAR(3)     NOT NULL DEFAULT 'ARS'
+                    CHECK (price_currency IN ('ARS','USD')),
+  price_exchange_rate NUMERIC(14,4),
   stock             INTEGER       NOT NULL DEFAULT 0,
   source            VARCHAR(20)   NOT NULL DEFAULT 'manual'
                     CHECK (source IN ('catalog','price_list','sale','purchase','manual')),
@@ -205,6 +208,44 @@ ALTER TABLE products ADD COLUMN IF NOT EXISTS material          VARCHAR(100);
 ALTER TABLE products ADD COLUMN IF NOT EXISTS cable_type        VARCHAR(60);
 ALTER TABLE products ADD COLUMN IF NOT EXISTS product_type      VARCHAR(150);
 ALTER TABLE products ADD COLUMN IF NOT EXISTS published         BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS price_currency    VARCHAR(3) NOT NULL DEFAULT 'ARS';
+ALTER TABLE products ADD COLUMN IF NOT EXISTS price_exchange_rate NUMERIC(14,4);
+
+-- Asociaciones confirmadas entre el código que usa cada proveedor en su XLS y
+-- el producto real del catálogo. Se consultan antes de cualquier heurística de
+-- similitud, por lo que una relación solo necesita revisarse una vez.
+CREATE TABLE IF NOT EXISTS supplier_product_mappings (
+  id               UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+  supplier         VARCHAR(80)  NOT NULL,
+  source_code      VARCHAR(200) NOT NULL,
+  source_code_key  VARCHAR(200) NOT NULL,
+  product_id       UUID         NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  color_name       VARCHAR(100),
+  color_hex        VARCHAR(7),
+  created_at       TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+  updated_at       TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+  UNIQUE (supplier, source_code_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_supplier_product_mappings_product
+  ON supplier_product_mappings(product_id);
+
+DROP TRIGGER IF EXISTS supplier_product_mappings_updated_at ON supplier_product_mappings;
+CREATE TRIGGER supplier_product_mappings_updated_at
+  BEFORE UPDATE ON supplier_product_mappings
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+-- Configuracion administrativa compartida. La tienda sigue cobrando en ARS;
+-- esta cotizacion permite ingresar y visualizar precios de proveedor en USD.
+CREATE TABLE IF NOT EXISTS store_settings (
+  id               SMALLINT      PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+  usd_ars_rate     NUMERIC(14,4) NOT NULL DEFAULT 1510 CHECK (usd_ars_rate > 0),
+  updated_at       TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+);
+
+INSERT INTO store_settings (id, usd_ars_rate)
+VALUES (1, 1510)
+ON CONFLICT (id) DO NOTHING;
 
 -- `supplier` inicialmente se infería del código con una columna generada. Se
 -- conserva el valor ya calculado, pero pasa a ser editable desde el producto.

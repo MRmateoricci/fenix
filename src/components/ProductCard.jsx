@@ -41,10 +41,11 @@ export default function ProductCard({ product }) {
     if (!product.inStock || added) return
     const defaultColor = product.colors?.[0]
     const defaultSize = product.sizes?.[0]
+    const defaultPrice = defaultColor?.price != null ? Number(defaultColor.price) : product.price
     addItem({
       id: product.id,
       name: product.name,
-      price: product.price,
+      price: defaultPrice,
       image: defaultColor?.image || product.image,
       category: product.category,
       color: defaultColor?.name,

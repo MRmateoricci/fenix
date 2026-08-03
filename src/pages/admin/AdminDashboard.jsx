@@ -34,6 +34,9 @@ const CATS = Object.keys(CATEGORY_NAV_LABEL)
 const fmt = n =>
   new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(n)
 
+const fmtUsd = n =>
+  `US$ ${Number(n).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+
 const fmtPickupDate = (d) =>
   new Date(d).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: '2-digit' })
 
@@ -356,6 +359,7 @@ function toUnifiedProductPayload(data) {
 }
 
 function ProductModal({ product, onSave, onClose }) {
+  const { currencySettings } = useAdmin()
   const isNew = !product
   const [form, setForm] = useState(() => isNew ? EMPTY : {
     ...product,
@@ -372,6 +376,7 @@ function ProductModal({ product, onSave, onClose }) {
   const valid = form.codigo.trim() && (!form.published || (form.name.trim() && form.price && Number(form.price) > 0))
   const subOptions = getSubcategoryOptions(form.category).map(node => node.label)
   const typeOptions = getProductTypeOptions(form.category, form.subcategory).map(node => node.label)
+  const usdArsRate = Number(currencySettings.usdArsRate) || 1510
 
   const setColor = (idx, key, value) => setForm(f => ({
     ...f,
@@ -408,7 +413,7 @@ function ProductModal({ product, onSave, onClose }) {
     } else {
       delete out.stock
     }
-    out.colors = form.colors.filter(c => c.name.trim() && c.image.trim())
+    out.colors = form.colors.filter(c => c.name?.trim())
     out.sizes  = form.sizes.filter(s => s.label.trim())
     setSaving(true)
     try {
@@ -455,9 +460,12 @@ function ProductModal({ product, onSave, onClose }) {
           <FormField label="Subgrupo interno" value={form.subgrupoInterno} onChange={v => set('subgrupoInterno', v)} />
           <FormField label="Medida" value={form.medida} onChange={v => set('medida', v)} />
           <FormField label="Stock" value={form.stock} onChange={v => set('stock', v)} type="number" />
-          <FormField label="Precio costo" value={form.priceCost} onChange={v => set('priceCost', v)} type="number" />
-          <FormField label="Precio de venta" value={form.price} onChange={v => set('price', v)} type="number" />
-          <FormField label="Precio con IVA" value={form.priceWithTax} onChange={v => set('priceWithTax', v)} type="number" />
+          <FormField label="Precio costo (ARS)" value={form.priceCost} onChange={v => set('priceCost', v)} type="number" />
+          <FormField label="Precio de venta (ARS)" value={form.price} onChange={v => set('price', v)} type="number" />
+          <FormField label="Precio con IVA (ARS)" value={form.priceWithTax} onChange={v => set('priceWithTax', v)} type="number" />
+          <div style={{ gridColumn: 'span 2', color: C.muted, fontSize: 11.5, marginTop: -4 }}>
+            Equivalentes con US$ 1 = {fmt(usdArsRate)}: costo {form.priceCost !== '' ? fmtUsd(Number(form.priceCost) / usdArsRate) : '—'} · venta {form.price !== '' ? fmtUsd(Number(form.price) / usdArsRate) : '—'} · con IVA {form.priceWithTax !== '' ? fmtUsd(Number(form.priceWithTax) / usdArsRate) : '—'}
+          </div>
 
           <div style={{
             gridColumn: 'span 2', marginTop: 10, padding: 16,
@@ -540,7 +548,7 @@ function ProductModal({ product, onSave, onClose }) {
             </button>
           </div>
           <p style={{ fontSize: 11.5, color: C.muted, margin: '0 0 10px' }}>
-            Si cargás colores, el comprador va a poder elegir uno en la página del producto y la foto va a cambiar según el color seleccionado. Si no cargás ninguno, el producto se muestra con una sola foto fija.
+            Si cargás colores, el comprador va a poder elegir uno en la página del producto. La imagen por color es opcional; si falta, se usa la foto principal. Las variantes importadas también pueden conservar un precio propio.
           </p>
 
           {form.colors.length > 0 && (
@@ -2064,7 +2072,7 @@ function InventoryProductModal({ product, onSave, onClose }) {
 }
 
 // ── ImportUploadCard ─────────────────────────────────────────────────────────
-function ImportUploadCard({ label, hint, disabled, onFile, accept = '.xls,.xlsx', busyLabel = 'Importando...' }) {
+function ImportUploadCard({ label, hint, disabled, onFile, accept = '.xls,.xlsx', busyLabel = 'Importando...', children = null }) {
   const inputRef = useRef(null)
   return (
     <div style={{
@@ -2073,6 +2081,7 @@ function ImportUploadCard({ label, hint, disabled, onFile, accept = '.xls,.xlsx'
     }}>
       <div style={{ fontSize: 13, fontWeight: 600, color: C.ink }}>{label}</div>
       <p style={{ fontSize: 11.5, color: C.muted, margin: 0, minHeight: 28 }}>{hint}</p>
+      {children}
       <input
         ref={inputRef}
         type="file"
@@ -2336,6 +2345,886 @@ function InvoiceReviewModal({ parsed, onConfirm, onClose }) {
 }
 
 // ── Productos unificados ─────────────────────────────────────────────────────
+function ProductThumb({ product, size = 42 }) {
+  const src = product?.imageUrl || product?.image_url
+  if (!src) {
+    return <div style={{ width: size, height: size, flexShrink: 0, borderRadius: 7, background: '#EEF1F4', border: `1px solid ${C.hairline}`, display: 'grid', placeItems: 'center', color: C.muted, fontSize: 9, textAlign: 'center' }}>Sin foto</div>
+  }
+  return <img src={src} alt="" style={{ width: size, height: size, flexShrink: 0, borderRadius: 7, objectFit: 'cover', border: `1px solid ${C.hairline}` }} />
+}
+
+function priceMatchFromProduct(product) {
+  return {
+    id: product.id,
+    codigo: product.codigo,
+    nombre: product.nombre || product.name || product.descripcion || product.codigo,
+    imageUrl: product.imageUrl || product.image_url || null,
+    precioCosto: product.precioCosto ?? product.precio_costo,
+    precioVenta: product.precioVenta ?? product.precio_venta,
+    precioIva: product.precioIva ?? product.precio_iva,
+    precioCostoUsd: product.precioCostoUsd ?? product.precio_costo_usd,
+  }
+}
+
+function inferPriceColor(codigo, descripcion) {
+  const code = String(codigo || '').trim().toUpperCase()
+  const text = `${code} ${descripcion || ''}`.toUpperCase()
+  if (/(?:-|_|\s)W$/.test(code) && /LUZ FR[IÍ]A|COOL WHITE|6[05]00K/.test(text)) {
+    return { name: 'Cool white', hex: '#E0F2FE' }
+  }
+  if (/(?:-|_|\s)W$/.test(code) && /LUZ C[AÁ]LIDA|WARM WHITE|2[7-9]00K|3000K/.test(text)) {
+    return { name: 'Warm white', hex: '#F5D08A' }
+  }
+  const suffixes = [
+    [/(?:-|_|\s)WW$/, 'Warm white', '#F5D08A'],
+    [/(?:-|_|\s)CW$/, 'Cool white', '#E0F2FE'],
+    [/(?:-|_|\s)NW$/, 'Neutral white', '#F1F5F9'],
+    [/(?:-|_|\s)N$/, 'Neutral white', '#F1F5F9'],
+    [/(?:-|_|\s)BK$/, 'Black', '#111827'],
+    [/(?:-|_|\s)RGB$/, 'RGB', '#A855F7'],
+    [/(?:-|_|\s)Y$/, 'Yellow', '#FACC15'],
+    [/(?:-|_|\s)B$/, 'Blue', '#2563EB'],
+    [/(?:-|_|\s)W$/, 'White', '#F8FAFC'],
+    [/(?:-|_|\s)R$/, 'Red', '#DC2626'],
+    [/(?:-|_|\s)G$/, 'Green', '#16A34A'],
+  ]
+  for (const [pattern, name, hex] of suffixes) {
+    if (pattern.test(code)) return { name, hex }
+  }
+  const named = [
+    [/LUZ FR[IÍ]A|COOL WHITE|6[05]00K/, 'Cool white', '#E0F2FE'],
+    [/LUZ C[AÁ]LIDA|WARM WHITE|2[7-9]00K|3000K/, 'Warm white', '#F5D08A'],
+    [/LUZ NEUTRA|NEUTRAL WHITE|4000K|4500K/, 'Neutral white', '#F1F5F9'],
+    [/LUZ AMARILLA|YELLOW|AMARILL/, 'Yellow', '#FACC15'],
+    [/BLUE|AZUL/, 'Blue', '#2563EB'],
+    [/BLACK|NEGRO/, 'Black', '#111827'],
+    [/WHITE|BLANCO/, 'White', '#F8FAFC'],
+    [/RED|ROJO/, 'Red', '#DC2626'],
+    [/GREEN|VERDE/, 'Green', '#16A34A'],
+  ]
+  for (const [pattern, name, hex] of named) {
+    if (pattern.test(text)) return { name, hex }
+  }
+  return { name: '', hex: '#CCCCCC' }
+}
+
+function replaceCodeLiteral(codigo, search, replacement, prefixOnly) {
+  const source = String(codigo || '')
+  const needle = String(search || '')
+  if (!needle) return source
+  const sourceUpper = source.toUpperCase()
+  const needleUpper = needle.toUpperCase()
+  if (prefixOnly) {
+    return sourceUpper.startsWith(needleUpper) ? `${replacement}${source.slice(needle.length)}` : source
+  }
+
+  let cursor = 0
+  let result = ''
+  let index = sourceUpper.indexOf(needleUpper, cursor)
+  if (index < 0) return source
+  while (index >= 0) {
+    result += source.slice(cursor, index) + replacement
+    cursor = index + needle.length
+    index = sourceUpper.indexOf(needleUpper, cursor)
+  }
+  return result + source.slice(cursor)
+}
+
+function CurrencyToggle({ value, onChange, compact = false }) {
+  return (
+    <div role="group" aria-label="Seleccionar moneda" style={{ display: 'inline-grid', gridTemplateColumns: '1fr 1fr', minWidth: compact ? 112 : 142, padding: 2, border: `1px solid ${C.border}`, borderRadius: 7, background: '#EEF1F5', gap: 2 }}>
+      {[
+        { value: 'ARS', symbol: '$', label: 'ARS' },
+        { value: 'USD', symbol: 'US$', label: 'USD' },
+      ].map(option => {
+        const selected = value === option.value
+        return (
+          <button
+            key={option.value}
+            type="button"
+            aria-pressed={selected}
+            onClick={() => onChange(option.value)}
+            style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 3, minHeight: compact ? 27 : 29, padding: compact ? '3px 5px' : '4px 7px', border: selected ? '1px solid #C9D2DC' : '1px solid transparent', borderRadius: 5, background: selected ? C.white : 'transparent', boxShadow: selected ? '0 1px 2px rgba(17,24,39,.1)' : 'none', color: selected ? C.ink : C.muted, fontSize: compact ? 9 : 9.5, fontWeight: selected ? 700 : 500, cursor: 'pointer' }}
+          >
+            <span style={{ color: selected ? C.amberDark : C.muted, fontSize: 8.5, fontWeight: 800 }}>{option.symbol}</span>
+            {option.label}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+const PRICE_CODE_COLLATOR = new Intl.Collator('es-AR', { sensitivity: 'base', numeric: true })
+
+function priceLineHasValidPrice(line) {
+  return [line.precioCosto, line.precioVenta, line.precioIva]
+    .some(value => value !== '' && value != null && Number.isFinite(Number(value)) && Number(value) >= 0)
+}
+
+function priceLineIsReady(line) {
+  const destinationReady = line.mode === 'update'
+    ? line.productId && (!line.variantMode || line.colorName?.trim())
+    : line.mode === 'create' && line.newCodigo?.trim()
+  return Boolean(destinationReady && priceLineHasValidPrice(line))
+}
+
+function buildPriceReviewLineIssues(lines) {
+  const issues = new Map(lines.map(line => [line.key, []]))
+  const active = lines.filter(line => !line.excluded)
+  const addIssue = (line, message) => {
+    const current = issues.get(line.key) || []
+    if (!current.includes(message)) current.push(message)
+    issues.set(line.key, current)
+  }
+
+  for (const line of active) {
+    if (line.mode === 'unresolved') addIssue(line, 'Falta asignar o crear el producto')
+    if (line.mode === 'update' && !line.productId) addIssue(line, 'Falta asignar el producto')
+    if (line.mode === 'update' && line.variantMode && !line.colorName?.trim()) addIssue(line, 'Falta completar el color')
+    if (line.mode === 'create' && !line.newCodigo?.trim()) addIssue(line, 'Falta completar el código nuevo')
+    if (!priceLineHasValidPrice(line)) addIssue(line, 'No tiene un precio válido')
+  }
+
+  const byProduct = new Map()
+  for (const line of active.filter(line => line.mode === 'update' && line.productId)) {
+    if (!byProduct.has(line.productId)) byProduct.set(line.productId, [])
+    byProduct.get(line.productId).push(line)
+  }
+  for (const group of byProduct.values()) {
+    if (group.length <= 1) continue
+    const colors = group.map(line => line.colorName?.trim().toLocaleLowerCase('es-AR'))
+    const invalid = group.some(line => !line.variantMode || !line.colorName?.trim()) || new Set(colors).size !== group.length
+    if (invalid) group.forEach(line => addIssue(line, 'Producto repetido: todas las filas necesitan colores diferentes'))
+  }
+
+  const byNewCode = new Map()
+  for (const line of active.filter(line => line.mode === 'create' && line.newCodigo?.trim())) {
+    const code = line.newCodigo.trim().toUpperCase()
+    if (!byNewCode.has(code)) byNewCode.set(code, [])
+    byNewCode.get(code).push(line)
+  }
+  for (const group of byNewCode.values()) {
+    if (group.length > 1) group.forEach(line => addIssue(line, 'El código del producto nuevo está repetido'))
+  }
+
+  return issues
+}
+
+function groupPriceReviewLines(lines, lineIssues) {
+  const groups = new Map()
+
+  for (const line of lines) {
+    const firstSuggestion = line.mode === 'unresolved' && Number(line.suggestions?.[0]?.similarity) >= 55
+      ? line.suggestions[0]
+      : null
+    const candidate = line.mode === 'update' && line.productId
+      ? line.match
+      : line.mode === 'unresolved'
+        ? line.colorRecommendation?.product || firstSuggestion
+        : null
+    const familyCode = line.mode === 'unresolved' || line.mode === 'update'
+      ? line.familyCode || line.colorRecommendation?.familyCode || null
+      : null
+    const naturalKey = candidate?.id
+      ? `product:${candidate.id}`
+      : familyCode
+        ? `family:${familyCode}`
+        : `line:${line.key}`
+    const key = line.excluded ? `excluded:${line.key}` : naturalKey
+
+    if (!groups.has(key)) {
+      groups.set(key, { key, product: candidate || null, familyCodes: new Set(), lines: [] })
+    }
+    const group = groups.get(key)
+    if (!group.product && candidate) group.product = candidate
+    if (familyCode) group.familyCodes.add(familyCode)
+    group.lines.push(line)
+  }
+
+  return [...groups.values()]
+    .map(group => {
+      const assignedCount = group.lines.filter(line => line.mode === 'update' && line.productId).length
+      const needsAttentionCount = group.lines.filter(line => (lineIssues.get(line.key) || []).length).length
+      const issueLabels = [...new Set(group.lines.flatMap(line => lineIssues.get(line.key) || []))]
+      const familyLabel = [...group.familyCodes].sort(PRICE_CODE_COLLATOR.compare).join(', ')
+      const productLabel = group.product
+        ? `${group.product.codigo} — ${group.product.nombre || group.product.name || group.product.descripcion || 'Sin nombre'}`
+        : null
+      return {
+        ...group,
+        assignedCount,
+        needsAttentionCount,
+        issueLabels,
+        section: group.lines.every(line => line.excluded)
+          ? 'excluded'
+          : needsAttentionCount
+            ? 'attention'
+            : (familyLabel || group.lines.some(line => line.variantMode)) ? 'families' : 'ready',
+        sortLabel: productLabel || familyLabel || group.lines[0]?.codigo || 'ZZZ',
+        familyLabel,
+        productLabel,
+        lines: [...group.lines].sort((left, right) => PRICE_CODE_COLLATOR.compare(left.codigo, right.codigo)),
+      }
+    })
+    .sort((left, right) => PRICE_CODE_COLLATOR.compare(left.sortLabel, right.sortLabel))
+}
+
+const PRICE_REVIEW_SECTIONS = [
+  { id: 'attention', title: 'Requieren atención', description: 'Asociaciones, colores o precios que todavía deben revisarse.', color: C.red, background: C.redLight, border: '#F4B8B8' },
+  { id: 'excluded', title: 'Deseleccionados', description: 'Filas omitidas de esta actualización. Podés abrirlas y volver a seleccionarlas.', color: C.amberDark, background: C.amberLight, border: '#EFD8AD' },
+  { id: 'families', title: 'Familias con variantes de color', description: 'Productos agrupados por familia y contraídos para revisar más rápido.', color: '#6D28D9', background: '#F5F3FF', border: '#DDD6FE' },
+  { id: 'ready', title: 'Otros productos listos', description: 'Productos resueltos que no pertenecen a una familia de colores.', color: C.green, background: C.greenLight, border: '#BBE2C8' },
+]
+
+function ProductSuggestionButton({ product, onSelect, showSimilarity = false, colorShortcut = null, onSelectWithColor = null, regularDisabled = false }) {
+  const fullName = product.nombre || product.name || product.descripcion || 'Sin nombre'
+  return (
+    <div style={{ display: 'flex', alignItems: 'stretch', width: '100%', minWidth: 0, border: `1px solid ${C.border}`, borderRadius: 8, background: C.white, overflow: 'hidden' }}>
+      <button
+        type="button"
+        disabled={regularDisabled}
+        onClick={() => onSelect(product)}
+        title={regularDisabled ? `${product.codigo} — ya está asignado; usá el atajo de color` : `${product.codigo} — ${fullName}`}
+        style={{ display: 'flex', alignItems: 'center', gap: 9, minWidth: 0, flex: 1, border: 'none', background: C.white, textAlign: 'left', padding: 7, cursor: regularDisabled ? 'not-allowed' : 'pointer', opacity: regularDisabled ? 0.58 : 1 }}
+      >
+        <ProductThumb product={product} />
+        <span style={{ minWidth: 0, flex: 1 }}>
+          <span style={{ display: 'block', color: C.ink, fontSize: 11.5, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{product.codigo}</span>
+          <span style={{ display: 'block', color: C.muted, fontSize: 10.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{fullName}</span>
+        </span>
+        {showSimilarity && <span style={{ color: C.amberDark, fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap' }}>{product.similarity}%</span>}
+      </button>
+      {colorShortcut?.name && onSelectWithColor && (
+        <button
+          type="button"
+          onClick={() => onSelectWithColor(product)}
+          title={`Asignar ${product.codigo} como variante ${colorShortcut.name}`}
+          style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3, minWidth: 86, maxWidth: 105, padding: '5px 7px', border: 'none', borderLeft: '1px solid #DDD6FE', background: '#F5F3FF', color: '#6D28D9', fontSize: 9.5, fontWeight: 700, lineHeight: 1.15, cursor: 'pointer', textAlign: 'center' }}
+        >
+          <span style={{ width: 15, height: 15, borderRadius: 4, background: colorShortcut.hex, border: '1px solid rgba(17,24,39,.25)', flexShrink: 0 }} />
+          <span>Como {colorShortcut.name}</span>
+        </button>
+      )}
+    </div>
+  )
+}
+
+function PriceLineEditor({ line, issues = [], exchangeRate, assignedProductIds, onChange }) {
+  const { searchProducts } = useAdmin()
+  const [query, setQuery] = useState('')
+  const [results, setResults] = useState([])
+
+  useEffect(() => {
+    if (query.trim().length < 2) { setResults([]); return undefined }
+    const timer = setTimeout(async () => setResults(await searchProducts(query)), 300)
+    return () => clearTimeout(timer)
+  }, [query, searchProducts])
+
+  const set = (changes) => onChange({ ...line, ...changes })
+  const inferredColor = inferPriceColor(line.codigo, line.descripcion)
+  const colorShortcut = line.colorName?.trim()
+    ? { name: line.colorName.trim(), hex: line.colorHex || '#CCCCCC' }
+    : inferredColor
+  const hasColorShortcut = Boolean(colorShortcut.name)
+  const selectMatch = (product, asColorVariant = false) => {
+    if (!asColorVariant && !line.variantMode && assignedProductIds.has(product.id) && product.id !== line.productId) return
+    set({
+      mode: 'update',
+      productId: product.id,
+      match: priceMatchFromProduct(product),
+      searchOpen: false,
+      autoMatched: false,
+      savedMatched: false,
+      familyRecommended: false,
+      variantMode: asColorVariant || line.variantMode,
+      ...(asColorVariant ? { colorName: colorShortcut.name, colorHex: colorShortcut.hex } : {}),
+    })
+    setQuery('')
+    setResults([])
+  }
+  const createNew = () => set({
+    mode: 'create', productId: null, match: null, searchOpen: false,
+    newCodigo: line.newCodigo || line.codigo,
+    newDescripcion: line.newDescripcion || line.descripcion || '',
+  })
+  const converted = (value) => {
+    if (value === '' || value == null) return '—'
+    const number = Number(value)
+    if (!Number.isFinite(number)) return '—'
+    return line.currency === 'USD' ? fmt(number * exchangeRate) : fmtUsd(number / exchangeRate)
+  }
+  const productCanBeSelectedNormally = (product) => line.variantMode || !assignedProductIds.has(product.id) || product.id === line.productId
+  const availableSuggestions = (line.suggestions || []).filter(product => hasColorShortcut || productCanBeSelectedNormally(product))
+  const availableSearchResults = results.filter(product => hasColorShortcut || productCanBeSelectedNormally(product))
+
+  return (
+    <div style={{ padding: '14px 0', borderBottom: `1px solid ${C.hairline}`, opacity: line.excluded ? 0.52 : 1 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '28px minmax(180px, 1.2fr) minmax(220px, 1.5fr)', gap: 12, alignItems: 'start' }}>
+        <input type="checkbox" checked={!line.excluded} onChange={event => set({ excluded: !event.target.checked })} style={{ marginTop: 4 }} />
+        <div>
+          <div style={{ fontSize: 12.5, fontWeight: 600, color: C.ink }}>{line.codigo}</div>
+          <div style={{ fontSize: 11.5, color: C.muted, marginTop: 3 }}>{line.descripcion || 'Sin descripción en el archivo'}</div>
+          {issues.length > 0 && (
+            <div style={{ display: 'grid', gap: 4, marginTop: 8 }}>
+              {issues.map(issue => <span key={issue} style={{ color: C.red, fontSize: 10.5, fontWeight: 600 }}>⚠ {issue}</span>)}
+            </div>
+          )}
+        </div>
+        <div>
+          {line.mode === 'update' && line.productId && !line.searchOpen ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap' }}>
+              <ProductThumb product={line.match} size={46} />
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <span title={`${line.match?.codigo} — ${line.match?.nombre}`} style={pill(line.autoMatched ? C.greenLight : C.amberLight, line.autoMatched ? C.green : C.amberDark)}>
+                  {line.match?.codigo} — {line.match?.nombre}
+                </span>
+                <div style={{ color: C.muted, fontSize: 10.5, marginTop: 5 }}>
+                  Actual: costo {line.match?.precioCosto != null ? fmt(line.match.precioCosto) : '—'} · venta {line.match?.precioVenta != null ? fmt(line.match.precioVenta) : '—'} · con IVA {line.match?.precioIva != null ? fmt(line.match.precioIva) : '—'}
+                </div>
+                {line.savedMatched && <div style={{ marginTop: 5 }}><span style={pill(C.greenLight, C.green)}>Asociación guardada para {line.match?.codigo}</span></div>}
+              </div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button type="button" onClick={() => set({ searchOpen: true })} style={{ ...outlineBtn, fontSize: 11, padding: '4px 9px' }}>Cambiar</button>
+                <button type="button" onClick={() => set({ mode: 'unresolved', productId: null, match: null, autoMatched: false, savedMatched: false, searchOpen: false })} style={{ ...outlineBtn, borderColor: C.red, color: C.red, fontSize: 11, padding: '4px 9px' }}>Quitar</button>
+              </div>
+            </div>
+          ) : line.mode === 'create' && !line.searchOpen ? (
+            <div style={{ display: 'grid', gridTemplateColumns: '52px 150px minmax(180px, 1fr) auto', gap: 8, alignItems: 'center' }}>
+              <ProductThumb product={null} size={46} />
+              <input value={line.newCodigo} onChange={event => set({ newCodigo: event.target.value })} placeholder="Código nuevo *" style={{ ...inp, padding: '7px 8px', fontSize: 11.5 }} />
+              <input value={line.newDescripcion} onChange={event => set({ newDescripcion: event.target.value })} placeholder="Descripción" style={{ ...inp, padding: '7px 8px', fontSize: 11.5 }} />
+              <button type="button" onClick={() => set({ mode: 'unresolved', searchOpen: true })} style={{ ...outlineBtn, fontSize: 11, padding: '5px 9px' }}>Buscar existente</button>
+            </div>
+          ) : !line.searchOpen ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <span style={pill(C.redLight, C.red)}>Código no encontrado</span>
+              <button type="button" onClick={() => set({ searchOpen: true })} style={{ ...outlineBtn, fontSize: 11, padding: '4px 9px' }}>Buscar producto</button>
+              <button type="button" onClick={createNew} style={{ ...outlineBtn, borderColor: C.amber, color: C.amberDark, fontSize: 11, padding: '4px 9px' }}>+ Crear como nuevo</button>
+              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: C.text3, fontSize: 10.5, cursor: 'pointer' }}>
+                <input type="checkbox" checked={line.variantMode} onChange={event => set({ variantMode: event.target.checked })} />
+                Permitir repetir producto como otro color
+              </label>
+              {line.familyCode && <span style={pill('#F5F3FF', '#6D28D9')}>Familia detectada: {line.familyCode} · {line.colorName}</span>}
+            </div>
+          ) : null}
+
+          {line.mode === 'unresolved' && !line.searchOpen && availableSuggestions.length > 0 && (
+            <div style={{ marginTop: 9 }}>
+              <div style={{ color: C.text3, fontSize: 10.5, fontWeight: 600, marginBottom: 6 }}>Productos más parecidos</div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 7 }}>
+                {availableSuggestions.slice(0, line.suggestionLimit || 3).map(product => (
+                  <ProductSuggestionButton
+                    key={product.id}
+                    product={product}
+                    onSelect={selectMatch}
+                    showSimilarity
+                    colorShortcut={hasColorShortcut ? colorShortcut : null}
+                    onSelectWithColor={hasColorShortcut ? selected => selectMatch(selected, true) : null}
+                    regularDisabled={!productCanBeSelectedNormally(product)}
+                  />
+                ))}
+              </div>
+              <div style={{ display: 'flex', gap: 8, marginTop: 7 }}>
+                {(line.suggestionLimit || 3) < availableSuggestions.length && (
+                  <button type="button" onClick={() => set({ suggestionLimit: Math.min((line.suggestionLimit || 3) + 3, availableSuggestions.length) })} style={{ ...outlineBtn, fontSize: 10.5, padding: '4px 8px' }}>Ver más similares</button>
+                )}
+                <button type="button" onClick={() => set({ searchOpen: true })} style={{ ...outlineBtn, fontSize: 10.5, padding: '4px 8px' }}>Buscar otro</button>
+              </div>
+            </div>
+          )}
+
+          {line.searchOpen && (
+            <div style={{ background: '#F9FAFB', border: `1px solid ${C.border}`, borderRadius: 8, padding: 10 }}>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input autoFocus value={query} onChange={event => setQuery(event.target.value)} placeholder="Buscar por código o nombre..." style={{ ...inp, padding: '6px 8px', fontSize: 12, flex: 1 }} />
+                <button type="button" onClick={() => set({ searchOpen: false })} style={{ ...outlineBtn, fontSize: 11, padding: '4px 9px' }}>Cerrar</button>
+                <button type="button" onClick={createNew} style={{ ...outlineBtn, borderColor: C.amber, color: C.amberDark, fontSize: 11, padding: '4px 9px' }}>+ Crear nuevo</button>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 7, marginTop: availableSearchResults.length ? 8 : 0 }}>
+                {availableSearchResults.map(product => (
+                  <ProductSuggestionButton
+                    key={product.id}
+                    product={product}
+                    onSelect={selectMatch}
+                    colorShortcut={hasColorShortcut ? colorShortcut : null}
+                    onSelectWithColor={hasColorShortcut ? selected => selectMatch(selected, true) : null}
+                    regularDisabled={!productCanBeSelectedNormally(product)}
+                  />
+                ))}
+              </div>
+              {query.trim().length >= 2 && !availableSearchResults.length && <div style={{ color: C.muted, fontSize: 11.5, padding: '7px 6px 0' }}>Sin resultados disponibles</div>}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {line.mode === 'update' && line.productId && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', margin: '10px 0 0 40px', padding: line.variantMode ? '9px 10px' : 0, background: line.variantMode ? '#F5F3FF' : 'transparent', border: line.variantMode ? '1px solid #DDD6FE' : 'none', borderRadius: 8 }}>
+          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: line.variantMode ? '#6D28D9' : C.text3, fontSize: 11.5, fontWeight: 600, cursor: 'pointer' }}>
+            <input type="checkbox" checked={line.variantMode} onChange={event => set({ variantMode: event.target.checked })} />
+            Este precio corresponde a una variante de color
+          </label>
+          {line.variantMode && (
+            <>
+              <input type="color" value={line.colorHex || '#CCCCCC'} onChange={event => set({ colorHex: event.target.value })} title="Color de la variante" style={{ width: 34, height: 32, padding: 0, border: `1px solid ${C.border}`, borderRadius: 6, cursor: 'pointer' }} />
+              <input value={line.colorName} onChange={event => set({ colorName: event.target.value })} placeholder="Nombre del color *" style={{ ...inp, width: 170, padding: '7px 9px', fontSize: 11.5 }} />
+              <span style={{ color: C.muted, fontSize: 10.5 }}>Código proveedor: {line.codigo}</span>
+              {line.familyCode && (
+                <span style={pill('#EDE9FE', '#6D28D9')}>
+                  {line.familyRecommended ? 'Recomendado por familia' : 'Familia detectada'}: {line.familyCode}
+                </span>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
+      <div style={{ display: 'grid', gridTemplateColumns: '122px repeat(3, minmax(120px, 1fr))', gap: 10, margin: '12px 0 0 40px' }}>
+        <div>
+          <label style={lbl}>Moneda</label>
+          <div style={{ marginTop: 5 }}><CurrencyToggle compact value={line.currency} onChange={currency => set({ currency })} /></div>
+        </div>
+        {[
+          ['precioCosto', 'Costo'], ['precioVenta', 'Venta'], ['precioIva', 'Con IVA'],
+        ].map(([key, label]) => (
+          <div key={key}>
+            <label style={lbl}>{label}</label>
+            <input type="number" min="0" step="0.01" value={line[key] ?? ''} onChange={event => set({ [key]: event.target.value })} style={{ ...inp, marginTop: 5 }} />
+            <div style={{ color: C.muted, fontSize: 10.5, marginTop: 3 }}>Equivale a {converted(line[key])}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function PriceReviewModal({ parsed, onConfirm, onClose }) {
+  const { rematchPriceLines } = useAdmin()
+  const [lines, setLines] = useState(() => parsed.lines.map((line, index) => {
+    const color = line.colorRecommendation || inferPriceColor(line.codigo, line.descripcion)
+    const familyProduct = line.colorRecommendation?.product || null
+    const initialMatch = line.match || familyProduct
+    return {
+      ...line,
+      key: index,
+      originalCodigo: line.codigo,
+      mode: initialMatch ? 'update' : 'unresolved',
+      productId: initialMatch?.id || null,
+      match: initialMatch,
+      autoMatched: Boolean(line.match),
+      savedMatched: line.matchType === 'saved',
+      familyRecommended: Boolean(familyProduct && !line.match),
+      familyCode: line.colorRecommendation?.familyCode || null,
+      searchOpen: false,
+      excluded: false,
+      currency: 'ARS',
+      suggestionLimit: 3,
+      newCodigo: line.codigo || '',
+      newDescripcion: line.descripcion || '',
+      variantMode: Boolean(line.colorRecommendation),
+      colorName: color.name,
+      colorHex: color.hex,
+    }
+  }))
+  const [fileCurrency, setFileCurrency] = useState('ARS')
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState('')
+  const [codeSearch, setCodeSearch] = useState('')
+  const [codeReplacement, setCodeReplacement] = useState('')
+  const [prefixOnly, setPrefixOnly] = useState(true)
+  const [rematching, setRematching] = useState(false)
+  const [replacementNotice, setReplacementNotice] = useState('')
+  const [openSections, setOpenSections] = useState({ attention: true, excluded: true, families: true, ready: false })
+  const [openGroups, setOpenGroups] = useState({})
+  const exchangeRate = Number(parsed.usdArsRate) || 1510
+  const lineIssues = useMemo(() => buildPriceReviewLineIssues(lines), [lines])
+  const displayGroups = useMemo(() => groupPriceReviewLines(lines, lineIssues), [lines, lineIssues])
+  const displaySections = useMemo(() => PRICE_REVIEW_SECTIONS
+    .map(section => {
+      const groups = displayGroups.filter(group => group.section === section.id)
+      return {
+        ...section,
+        groups,
+        lineCount: groups.reduce((total, group) => total + group.lines.length, 0),
+      }
+    })
+    .filter(section => section.groups.length), [displayGroups])
+  const firstAttentionGroupKey = displaySections.find(section => section.id === 'attention')?.groups[0]?.key
+  const firstExcludedGroupKey = displaySections.find(section => section.id === 'excluded')?.groups[0]?.key
+  const replacementSearch = codeSearch.trim()
+  const replacementValue = codeReplacement.trim()
+  const replacementCount = useMemo(() => replacementSearch
+    ? lines.filter(line => replaceCodeLiteral(line.codigo, replacementSearch, replacementValue, prefixOnly) !== line.codigo).length
+    : 0, [lines, replacementSearch, replacementValue, prefixOnly])
+
+  const groupIsOpen = (group) => openGroups[group.key] ?? (
+    (group.section === 'attention' && group.key === firstAttentionGroupKey) ||
+    (group.section === 'excluded' && group.key === firstExcludedGroupKey)
+  )
+  const setSectionGroupsOpen = (groups, open) => {
+    setOpenGroups(current => ({
+      ...current,
+      ...Object.fromEntries(groups.map(group => [group.key, open])),
+    }))
+  }
+
+  const applyCodeReplacement = async () => {
+    if (!replacementSearch || !replacementCount || rematching) return
+    setRematching(true)
+    setError('')
+    setReplacementNotice('')
+    try {
+      const nextCodes = lines.map(line => replaceCodeLiteral(line.codigo, replacementSearch, replacementValue, prefixOnly))
+      const result = await rematchPriceLines(lines.map((line, index) => ({
+        codigo: nextCodes[index],
+        descripcion: line.descripcion,
+        precioCosto: line.precioCosto,
+        precioVenta: line.precioVenta,
+        precioIva: line.precioIva,
+      })), parsed.supplier)
+      if (!Array.isArray(result.lines) || result.lines.length !== lines.length) {
+        throw new Error('La respuesta de asociación está incompleta')
+      }
+
+      const exactMatches = result.lines.reduce((total, matched, index) => (
+        total + (nextCodes[index] !== lines[index].codigo && matched.match ? 1 : 0)
+      ), 0)
+      setLines(current => current.map((line, index) => {
+        const rematched = result.lines[index]
+        const codeChanged = nextCodes[index] !== lines[index].codigo
+        const color = rematched.colorRecommendation || inferPriceColor(rematched.codigo, rematched.descripcion)
+        const familyProduct = rematched.colorRecommendation?.product || null
+        const initialMatch = rematched.match || familyProduct
+
+        if (!codeChanged && line.mode !== 'unresolved') {
+          return {
+            ...line,
+            suggestions: rematched.suggestions,
+            colorRecommendation: rematched.colorRecommendation,
+            matchType: rematched.matchType,
+            familyCode: rematched.colorRecommendation?.familyCode || line.familyCode,
+            variantMode: line.variantMode || Boolean(rematched.colorRecommendation),
+            colorName: line.colorName?.trim() ? line.colorName : color.name,
+            colorHex: line.colorName?.trim() ? line.colorHex : color.hex,
+          }
+        }
+
+        return {
+          ...line,
+          codigo: rematched.codigo,
+          descripcion: rematched.descripcion,
+          match: initialMatch,
+          suggestions: rematched.suggestions,
+          colorRecommendation: rematched.colorRecommendation,
+          mode: initialMatch ? 'update' : 'unresolved',
+          productId: initialMatch?.id || null,
+          autoMatched: Boolean(rematched.match),
+          savedMatched: rematched.matchType === 'saved',
+          familyRecommended: Boolean(familyProduct && !rematched.match),
+          familyCode: rematched.colorRecommendation?.familyCode || null,
+          searchOpen: false,
+          suggestionLimit: 3,
+          newCodigo: line.newCodigo === line.codigo ? rematched.codigo : line.newCodigo,
+          variantMode: Boolean(rematched.colorRecommendation),
+          colorName: color.name,
+          colorHex: color.hex,
+        }
+      }))
+      setOpenGroups({})
+      setOpenSections({ attention: true, excluded: true, families: true, ready: false })
+      setReplacementNotice(`${replacementCount} códigos reemplazados · ${exactMatches} coincidencias exactas encontradas`)
+      setCodeSearch('')
+      setCodeReplacement('')
+    } catch (err) {
+      setError(err.message || 'No se pudo aplicar el reemplazo general')
+    } finally {
+      setRematching(false)
+    }
+  }
+
+  const setAllCurrencies = (currency) => {
+    setFileCurrency(currency)
+    setLines(current => current.map(line => ({ ...line, currency })))
+  }
+  const setAllSelected = (selected) => {
+    setLines(current => current.map(line => ({ ...line, excluded: !selected })))
+  }
+  const acceptAllRecommendations = () => {
+    setLines(current => {
+      const usedProductIds = new Set(
+        current
+          .filter(line => !line.excluded && line.mode === 'update' && line.productId)
+          .map(line => line.productId)
+      )
+      return current.map(line => {
+        if (line.excluded || line.mode !== 'unresolved') return line
+        const suggestion = (line.suggestions || []).find(product => line.variantMode || !usedProductIds.has(product.id))
+        if (!suggestion) return line
+        if (!line.variantMode) usedProductIds.add(suggestion.id)
+        return {
+          ...line,
+          mode: 'update',
+          productId: suggestion.id,
+          match: priceMatchFromProduct(suggestion),
+          autoMatched: false,
+          savedMatched: false,
+          familyRecommended: Boolean(line.familyCode && line.suggestions?.[0]?.id === suggestion.id),
+          searchOpen: false,
+        }
+      })
+    })
+  }
+  const updateLine = (key, next) => setLines(current => {
+    const updated = current.map(line => line.key === key ? next : line)
+    if (next.mode !== 'update' || !next.productId || !next.variantMode) return updated
+
+    return updated.map(line => {
+      if (line.key === key || line.mode !== 'update' || line.productId !== next.productId || line.variantMode) return line
+      const inferred = line.colorName?.trim()
+        ? { name: line.colorName.trim(), hex: line.colorHex || '#CCCCCC' }
+        : inferPriceColor(line.codigo, line.descripcion)
+      if (!inferred.name) return line
+      return {
+        ...line,
+        variantMode: true,
+        colorName: inferred.name,
+        colorHex: inferred.hex,
+      }
+    })
+  })
+  const included = lines.filter(line => !line.excluded)
+  const assignedProductIds = new Set(
+    included.filter(line => line.mode === 'update' && line.productId).map(line => line.productId)
+  )
+  const recommendableCount = included.filter(line => (
+    line.mode === 'unresolved' && line.suggestions?.some(product => line.variantMode || !assignedProductIds.has(product.id))
+  )).length
+  const ready = included.filter(priceLineIsReady)
+  const unresolved = included.length - ready.length
+  const assignmentGroups = included.reduce((groups, line) => {
+    if (line.mode === 'update' && line.productId) {
+      if (!groups.has(line.productId)) groups.set(line.productId, [])
+      groups.get(line.productId).push(line)
+    }
+    return groups
+  }, new Map())
+  const duplicateAssignments = [...assignmentGroups.values()].filter(group => {
+    if (group.length <= 1) return false
+    const colors = group.map(line => line.colorName?.trim().toLocaleLowerCase('es-AR'))
+    return group.some(line => !line.variantMode || !line.colorName?.trim()) || new Set(colors).size !== group.length
+  }).length
+  const newCodeCounts = included.reduce((counts, line) => {
+    if (line.mode === 'create' && line.newCodigo?.trim()) {
+      const code = line.newCodigo.trim().toUpperCase()
+      counts.set(code, (counts.get(code) || 0) + 1)
+    }
+    return counts
+  }, new Map())
+  const duplicateNewCodes = [...newCodeCounts.values()].filter(count => count > 1).length
+
+  const handleConfirm = async () => {
+    if (!ready.length || unresolved || duplicateAssignments || duplicateNewCodes) return
+    setSubmitting(true)
+    setError('')
+    try {
+      await onConfirm(ready.map(line => ({
+        type: line.mode === 'create' ? 'create' : 'update',
+        ...(line.mode === 'create'
+          ? { codigo: line.newCodigo.trim(), sourceCode: line.originalCodigo || line.codigo, descripcion: line.newDescripcion?.trim() || null }
+          : {
+              productId: line.productId,
+              sourceCode: line.originalCodigo || line.codigo,
+              ...(line.variantMode ? { colorVariant: { name: line.colorName.trim(), hex: line.colorHex || '#CCCCCC' } } : {}),
+            }),
+        currency: line.currency,
+        precioCosto: line.precioCosto,
+        precioVenta: line.precioVenta,
+        precioIva: line.precioIva,
+      })))
+      onClose()
+    } catch (err) {
+      setError(err.message || 'No se pudieron actualizar los precios')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 2000, background: C.paper, display: 'flex' }}>
+      <div style={{ width: '100%', height: '100vh', overflow: 'hidden', display: 'flex', flexDirection: 'column', background: C.paper }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'start', padding: '20px 28px 16px', borderBottom: `1px solid ${C.border}`, flexShrink: 0 }}>
+          <div>
+            <h2 style={{ fontFamily: ADMIN_FONT, fontSize: 22, color: C.ink, margin: 0, fontWeight: 500 }}>Vista previa de actualización de precios</h2>
+            <p style={{ fontSize: 12, color: C.muted, margin: '7px 0 0' }}>Proveedor: <strong style={{ color: C.ink }}>{parsed.supplier}</strong> · Revisá precios y asociaciones. Nada se modifica hasta confirmar.</p>
+          </div>
+          <button type="button" onClick={onClose} title="Cerrar vista previa" style={{ width: 36, height: 36, border: `1px solid ${C.border}`, borderRadius: 8, background: C.white, color: C.text3, cursor: 'pointer', fontSize: 20 }}>×</button>
+        </div>
+
+        <div style={{ overflowY: 'auto', overflowX: 'auto', padding: '0 28px', flex: 1, minHeight: 0 }}>
+        <div style={{ padding: 14, marginTop: 18, background: C.amberLight, border: '1px solid #F2D9A8', borderRadius: 10 }}>
+          <div style={{ display: 'flex', gap: 16, alignItems: 'end', flexWrap: 'wrap' }}>
+            <div>
+              <label style={lbl}>Moneda de toda la planilla</label>
+              <div style={{ marginTop: 6 }}><CurrencyToggle value={fileCurrency} onChange={setAllCurrencies} /></div>
+            </div>
+            <div style={{ fontSize: 12, color: C.text2, paddingBottom: 10 }}>Cotización aplicada: <strong>US$ 1 = {fmt(exchangeRate)}</strong></div>
+            <div style={{ fontSize: 11.5, color: C.muted, paddingBottom: 10 }}>{parsed.totalRows} filas leídas · {parsed.skipped || 0} omitidas</div>
+            <div style={{ display: 'flex', gap: 7, marginLeft: 'auto', flexWrap: 'wrap', paddingBottom: 5 }}>
+              <button type="button" onClick={() => setAllSelected(true)} disabled={included.length === lines.length} style={{ ...outlineBtn, background: C.white, fontSize: 10.5, padding: '6px 9px', opacity: included.length === lines.length ? 0.5 : 1 }}>Seleccionar todo</button>
+              <button type="button" onClick={() => setAllSelected(false)} disabled={!included.length} style={{ ...outlineBtn, background: C.white, fontSize: 10.5, padding: '6px 9px', opacity: !included.length ? 0.5 : 1 }}>Deseleccionar todo</button>
+              <button type="button" onClick={acceptAllRecommendations} disabled={!recommendableCount} style={{ ...outlineBtn, background: recommendableCount ? C.white : '#F3F4F6', borderColor: recommendableCount ? C.amber : C.border, color: recommendableCount ? C.amberDark : C.muted, fontSize: 10.5, padding: '6px 9px', opacity: recommendableCount ? 1 : 0.55 }}>Aceptar recomendaciones ({recommendableCount})</button>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'end', gap: 9, flexWrap: 'wrap', marginTop: 13, paddingTop: 13, borderTop: '1px solid #EFD8AD' }}>
+            <div style={{ minWidth: 155 }}>
+              <label style={lbl}>Reemplazo general de códigos</label>
+              <div style={{ color: C.muted, fontSize: 9.5, marginTop: 3 }}>Ejemplo: CCL- → CL-</div>
+            </div>
+            <div>
+              <label style={{ ...lbl, fontSize: 9 }}>Buscar</label>
+              <input value={codeSearch} onChange={event => { setCodeSearch(event.target.value.toUpperCase()); setReplacementNotice('') }} placeholder="CCL-" style={{ ...inp, width: 130, marginTop: 4, padding: '8px 9px', fontFamily: 'monospace', fontWeight: 700 }} />
+            </div>
+            <span style={{ color: C.amberDark, fontSize: 18, paddingBottom: 7 }}>→</span>
+            <div>
+              <label style={{ ...lbl, fontSize: 9 }}>Reemplazar por</label>
+              <input value={codeReplacement} onChange={event => { setCodeReplacement(event.target.value.toUpperCase()); setReplacementNotice('') }} placeholder="Vacío = eliminar" style={{ ...inp, width: 145, marginTop: 4, padding: '8px 9px', fontFamily: 'monospace', fontWeight: 700 }} />
+            </div>
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minHeight: 36, color: C.text3, fontSize: 10.5, cursor: 'pointer' }}>
+              <input type="checkbox" checked={prefixOnly} onChange={event => { setPrefixOnly(event.target.checked); setReplacementNotice('') }} />
+              Solo al inicio del código
+            </label>
+            <span style={pill(replacementCount ? C.amberLight : '#F3F4F6', replacementCount ? C.amberDark : C.muted)}>{replacementCount} {replacementCount === 1 ? 'fila afectada' : 'filas afectadas'}</span>
+            <button type="button" onClick={applyCodeReplacement} disabled={!replacementSearch || !replacementCount || rematching} style={{ ...solidBtn, padding: '8px 12px', background: replacementCount && !rematching ? C.amberDark : '#D1D5DB', color: replacementCount && !rematching ? C.white : '#6B7280', cursor: replacementCount && !rematching ? 'pointer' : 'not-allowed' }}>
+              {rematching ? 'Reasociando...' : 'Aplicar y volver a asociar'}
+            </button>
+            {replacementNotice && <span style={{ color: C.green, fontSize: 10.5, fontWeight: 600 }}>{replacementNotice}</span>}
+          </div>
+        </div>
+
+        <div style={{ paddingBottom: 12 }}>
+          {displaySections.map(section => {
+            const sectionIsOpen = openSections[section.id] !== false
+            return (
+              <section key={section.id} style={{ marginTop: 16, border: `1px solid ${section.border}`, borderRadius: 10, overflow: 'hidden', background: C.white }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', background: section.background }}>
+                  <button
+                    type="button"
+                    aria-expanded={sectionIsOpen}
+                    onClick={() => setOpenSections(current => ({ ...current, [section.id]: !sectionIsOpen }))}
+                    style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, flex: 1, padding: 0, border: 'none', background: 'transparent', textAlign: 'left', cursor: 'pointer' }}
+                  >
+                    <span style={{ color: section.color, fontSize: 16, width: 16 }}>{sectionIsOpen ? '▾' : '▸'}</span>
+                    <span style={{ minWidth: 0, flex: 1 }}>
+                      <span style={{ display: 'block', color: section.color, fontSize: 13, fontWeight: 700 }}>{section.title}</span>
+                      <span style={{ display: 'block', color: C.muted, fontSize: 10.5, marginTop: 2 }}>{section.description}</span>
+                    </span>
+                    <span style={{ color: C.text3, fontSize: 10.5, whiteSpace: 'nowrap' }}>{section.groups.length} {section.groups.length === 1 ? 'grupo' : 'grupos'} · {section.lineCount} {section.lineCount === 1 ? 'precio' : 'precios'}</span>
+                  </button>
+                  {sectionIsOpen && (
+                    <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                      <button type="button" onClick={() => setSectionGroupsOpen(section.groups, true)} style={{ ...outlineBtn, background: C.white, fontSize: 10, padding: '5px 8px' }}>Expandir todos</button>
+                      <button type="button" onClick={() => setSectionGroupsOpen(section.groups, false)} style={{ ...outlineBtn, background: C.white, fontSize: 10, padding: '5px 8px' }}>Contraer todos</button>
+                    </div>
+                  )}
+                </div>
+
+                {sectionIsOpen && (
+                  <div style={{ padding: '0 12px 12px' }}>
+                    {section.groups.map(group => {
+                      const isOpen = groupIsOpen(group)
+                      const title = group.productLabel || group.familyLabel || group.lines[0]?.codigo || 'Sin identificar'
+                      const status = section.id === 'attention'
+                        ? group.product ? 'Producto con pendientes' : group.familyLabel ? 'Familia pendiente' : 'Sin producto asignado'
+                        : section.id === 'excluded' ? 'Deseleccionado de la actualización'
+                          : section.id === 'families' ? 'Familia de colores' : 'Producto listo'
+                      return (
+                        <div key={group.key} style={{ marginTop: 10, border: `1px solid ${section.border}`, borderRadius: 8, overflow: 'hidden' }}>
+                          <button
+                            type="button"
+                            aria-expanded={isOpen}
+                            onClick={() => setOpenGroups(current => ({ ...current, [group.key]: !isOpen }))}
+                            style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '9px 10px', border: 'none', background: isOpen ? section.background : C.white, textAlign: 'left', cursor: 'pointer' }}
+                          >
+                            <span style={{ color: section.color, fontSize: 15, width: 14 }}>{isOpen ? '▾' : '▸'}</span>
+                            {group.product && <ProductThumb product={group.product} size={34} />}
+                            <span style={{ minWidth: 0, flex: 1 }}>
+                              <span style={{ display: 'block', color: section.color, fontSize: 9.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.05em' }}>{status}</span>
+                              <span title={title} style={{ display: 'block', color: C.ink, fontSize: 12, fontWeight: 600, marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</span>
+                              {group.issueLabels.length > 0 && <span style={{ display: 'block', color: C.red, fontSize: 9.5, fontWeight: 600, marginTop: 3 }}>{group.issueLabels.join(' · ')}</span>}
+                            </span>
+                            {group.needsAttentionCount > 0 && <span style={pill(C.redLight, C.red)}>{group.needsAttentionCount} pendientes</span>}
+                            <span style={{ color: C.muted, fontSize: 10.5, whiteSpace: 'nowrap' }}>{group.lines.length} {group.lines.length === 1 ? 'precio' : 'precios'}</span>
+                          </button>
+                          {isOpen && (
+                            <div style={{ borderTop: `1px solid ${section.border}`, padding: '0 10px' }}>
+                              {group.lines.map(line => <PriceLineEditor key={line.key} line={line} issues={lineIssues.get(line.key) || []} exchangeRate={exchangeRate} assignedProductIds={assignedProductIds} onChange={next => updateLine(line.key, next)} />)}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </section>
+            )
+          })}
+        </div>
+        {error && <div style={{ color: C.red, fontSize: 12.5, marginTop: 12 }}>{error}</div>}
+        </div>
+
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, padding: '16px 28px', borderTop: `1px solid ${C.border}`, background: C.white, boxShadow: '0 -8px 20px rgba(17,24,39,0.06)', flexShrink: 0 }}>
+          <div style={{ fontSize: 12, color: unresolved || duplicateAssignments || duplicateNewCodes ? C.red : C.muted }}>
+            {ready.length} listas{unresolved ? ` · ${unresolved} requieren asociar o crear un producto, completar el color, corregir precios o desmarcarse` : ''}{duplicateAssignments ? ` · ${duplicateAssignments} productos repetidos necesitan colores diferentes en todas sus filas` : ''}{duplicateNewCodes ? ` · ${duplicateNewCodes} códigos nuevos están repetidos` : ''}
+          </div>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button type="button" onClick={onClose} disabled={submitting} style={outlineBtn}>Cancelar</button>
+            <button type="button" onClick={handleConfirm} disabled={submitting || !ready.length || unresolved > 0 || duplicateAssignments > 0 || duplicateNewCodes > 0} style={{ ...solidBtn, background: ready.length && !unresolved && !duplicateAssignments && !duplicateNewCodes ? C.red : '#ddd', color: ready.length && !unresolved && !duplicateAssignments && !duplicateNewCodes ? '#fff' : '#999', cursor: ready.length && !unresolved && !duplicateAssignments && !duplicateNewCodes && !submitting ? 'pointer' : 'not-allowed' }}>
+              {submitting ? 'Actualizando...' : `Confirmar actualización (${ready.length})`}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function CurrencySettingsCard({ settings, onSave }) {
+  const [value, setValue] = useState(String(settings.usdArsRate || 1510))
+  const [saving, setSaving] = useState(false)
+  const [message, setMessage] = useState('')
+
+  useEffect(() => setValue(String(settings.usdArsRate || 1510)), [settings.usdArsRate])
+
+  const save = async () => {
+    const rate = Number(value)
+    if (!Number.isFinite(rate) || rate <= 0) { setMessage('Ingresá una cotización válida.'); return }
+    setSaving(true)
+    setMessage('')
+    try {
+      await onSave(rate)
+      setMessage('Cotización guardada.')
+    } catch (err) {
+      setMessage(err.message || 'No se pudo guardar.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div style={{ background: C.white, borderRadius: 10, border: `1px solid ${C.border}`, padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ fontSize: 13, fontWeight: 600, color: C.ink }}>Cotización USD / ARS</div>
+      <p style={{ fontSize: 11.5, color: C.muted, margin: 0 }}>Se usa para importar en USD y mostrar equivalencias.</p>
+      <div style={{ display: 'flex', gap: 7 }}>
+        <input type="number" min="0.01" step="0.01" value={value} onChange={event => { setValue(event.target.value); setMessage('') }} aria-label="Cotización de un dólar en pesos" style={{ ...inp, minWidth: 0 }} />
+        <button type="button" onClick={save} disabled={saving} style={{ ...outlineBtn, padding: '7px 10px', whiteSpace: 'nowrap' }}>{saving ? 'Guardando...' : 'Guardar'}</button>
+      </div>
+      <div style={{ minHeight: 14, fontSize: 10.5, color: message.includes('guardada') ? C.green : C.red }}>{message || `US$ 1 = ${fmt(Number(value) || 0)}`}</div>
+    </div>
+  )
+}
+
 function CleosProductEditor({ product, onChange, importId, onUploadImage }) {
   const set = (changes) => onChange({ ...product, ...changes })
   const selectedImage = product.removeImage
@@ -2753,9 +3642,11 @@ function UnifiedProductsTab() {
   const {
     inventory, inventoryTotal, inventorySuppliers, inventoryLoading, inventoryError,
     importResult, importLoading, importError,
+    currencySettings, updateCurrencySettings,
     fetchInventory, createInventoryItem, updateInventoryItem, deleteInventoryItem, fetchCatalog,
     fetchInventorySelectionIds, applyInventoryBatch,
     adjustInventoryStocks, uploadInventoryFile,
+    parsePriceFile, applyPriceUpdates,
     parseInvoicePdf, applyInvoiceLines,
     parseCleosCatalogPdf, uploadCleosPreviewImage, applyCleosCatalogProducts,
   } = useAdmin()
@@ -2780,6 +3671,10 @@ function UnifiedProductsTab() {
   const [invoiceParsing, setInvoiceParsing] = useState(false)
   const [invoiceError, setInvoiceError]     = useState(null)
   const [invoiceParsed, setInvoiceParsed]   = useState(null)
+  const [priceParsing, setPriceParsing]     = useState(false)
+  const [priceError, setPriceError]         = useState(null)
+  const [priceParsed, setPriceParsed]       = useState(null)
+  const [priceSupplier, setPriceSupplier]   = useState('')
   const [cleosParsing, setCleosParsing]     = useState(false)
   const [cleosError, setCleosError]         = useState(null)
   const [cleosParsed, setCleosParsed]       = useState(null)
@@ -2794,6 +3689,11 @@ function UnifiedProductsTab() {
   const [bulkError, setBulkError]           = useState('')
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false)
   const selectPageRef = useRef(null)
+
+  const priceSupplierOptions = useMemo(() => [...new Set([
+    'CLEOS', 'ALCIDES', 'KIAN', 'HUERGUI',
+    ...(inventorySuppliers || []).filter(supplier => supplier && supplier !== 'OTRO'),
+  ])].sort(PRICE_CODE_COLLATOR.compare), [inventorySuppliers])
 
   const inventoryFilters = useMemo(() => ({
     page,
@@ -2826,6 +3726,7 @@ function UnifiedProductsTab() {
   }, [search, supplierFilter, publicationFilter, stockStatus, stockMin, stockMax, costMin, costMax, saleMin, saleMax])
 
   const totalPages = Math.max(1, Math.ceil(inventoryTotal / INV_PAGE_SIZE))
+  const usdArsRate = Number(currencySettings.usdArsRate) || 1510
   const pendingStockCount = Object.keys(stockDrafts).length
   const selectedCount = selectedIds.size
   const pageIds = inventory.map(product => product.id)
@@ -2863,6 +3764,31 @@ function UnifiedProductsTab() {
     } finally {
       setInvoiceParsing(false)
     }
+  }
+
+  async function handlePriceUpload(file) {
+    setPriceError(null)
+    if (!priceSupplier.trim()) {
+      setPriceError('Elegí o escribí el proveedor antes de cargar la lista de precios.')
+      return
+    }
+    setPriceParsing(true)
+    try {
+      const data = await parsePriceFile(file, priceSupplier.trim())
+      if (!data.lines.length) setPriceError('No se encontraron precios válidos en la planilla.')
+      else setPriceParsed(data)
+    } catch (err) {
+      setPriceError(err.message)
+    } finally {
+      setPriceParsing(false)
+    }
+  }
+
+  async function handlePriceConfirm(actions) {
+    await applyPriceUpdates(actions, priceParsed?.supplier || priceSupplier.trim())
+    await fetchCatalog()
+    setPage(1)
+    await fetchInventory({ ...inventoryFilters, page: 1 })
   }
 
   async function handleInvoiceConfirm(actions) {
@@ -3110,10 +4036,25 @@ function UnifiedProductsTab() {
         />
         <ImportUploadCard
           label="Precios proveedor"
-          hint="Actualiza precio costo, venta y con IVA por código."
-          disabled={importLoading}
-          onFile={file => handleUpload('prices', file)}
-        />
+          hint="Elegí el proveedor: las asociaciones confirmadas se reutilizan en sus próximas listas."
+          disabled={importLoading || priceParsing || !priceSupplier.trim()}
+          busyLabel={priceParsing ? 'Leyendo precios...' : !priceSupplier.trim() ? 'Elegí un proveedor' : 'Importando...'}
+          onFile={handlePriceUpload}
+        >
+          <label style={{ display: 'grid', gap: 4 }}>
+            <span style={lbl}>Proveedor de esta lista *</span>
+            <input
+              list="price-supplier-options"
+              value={priceSupplier}
+              onChange={event => setPriceSupplier(event.target.value.toUpperCase())}
+              placeholder="Ej. CLEOS"
+              style={{ ...inp, padding: '7px 9px', fontSize: 11.5 }}
+            />
+            <datalist id="price-supplier-options">
+              {priceSupplierOptions.map(supplier => <option key={supplier} value={supplier} />)}
+            </datalist>
+          </label>
+        </ImportUploadCard>
         <ImportUploadCard
           label="Comprobante de venta en el local"
           hint="Descuenta stock por cada código vendido en el local."
@@ -3136,7 +4077,22 @@ function UnifiedProductsTab() {
           busyLabel={cleosParsing ? 'Extrayendo productos...' : 'Importando...'}
           onFile={handleCleosUpload}
         />
+        <CurrencySettingsCard settings={currencySettings} onSave={updateCurrencySettings} />
       </div>
+
+      {priceError && (
+        <div style={{ background: C.redLight, border: `1px solid ${C.red}`, borderRadius: 8, padding: '12px 16px', marginBottom: 20, color: C.red, fontSize: 13 }}>
+          {priceError}
+        </div>
+      )}
+
+      {priceParsed && (
+        <PriceReviewModal
+          parsed={priceParsed}
+          onConfirm={handlePriceConfirm}
+          onClose={() => setPriceParsed(null)}
+        />
+      )}
 
       {invoiceError && (
         <div style={{ background: C.redLight, border: `1px solid ${C.red}`, borderRadius: 8, padding: '12px 16px', marginBottom: 20, color: C.red, fontSize: 13 }}>
@@ -3390,6 +4346,10 @@ function UnifiedProductsTab() {
               {inventory.map((p, i) => {
                 const stockDraft = stockDrafts[p.id]
                 const displayedStock = stockDraft?.value ?? p.stock
+                const costArs = p.precio_costo != null ? Number(p.precio_costo) : p.precio_costo_usd != null ? Number(p.precio_costo_usd) * usdArsRate : null
+                const costUsd = p.precio_costo_usd != null ? Number(p.precio_costo_usd) : p.precio_costo != null ? Number(p.precio_costo) / usdArsRate : null
+                const saleArs = p.precio_venta != null ? Number(p.precio_venta) : null
+                const saleUsd = saleArs != null ? saleArs / usdArsRate : null
                 return (
                 <div
                   key={p.id}
@@ -3430,15 +4390,13 @@ function UnifiedProductsTab() {
                   <span style={{ fontSize: 11.5, color: C.text3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {p.supplier || 'OTRO'}
                   </span>
-                  <span style={{ fontSize: 12.5, color: C.text2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {p.precio_costo != null
-                      ? fmt(p.precio_costo)
-                      : p.precio_costo_usd != null
-                        ? `US$ ${Number(p.precio_costo_usd).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                        : '—'}
+                  <span style={{ display: 'flex', flexDirection: 'column', fontSize: 12.5, color: C.text2, overflow: 'hidden', whiteSpace: 'nowrap' }}>
+                    <span>{costArs != null ? fmt(costArs) : '—'}</span>
+                    {costUsd != null && <small style={{ color: C.muted, fontSize: 10.5 }}>{fmtUsd(costUsd)}</small>}
                   </span>
-                  <span style={{ fontSize: 13, fontWeight: 600, color: C.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {p.precio_venta != null ? fmt(p.precio_venta) : '—'}
+                  <span style={{ display: 'flex', flexDirection: 'column', fontSize: 13, fontWeight: 600, color: C.ink, overflow: 'hidden', whiteSpace: 'nowrap' }}>
+                    <span>{saleArs != null ? fmt(saleArs) : '—'}</span>
+                    {saleUsd != null && <small style={{ color: C.muted, fontSize: 10.5, fontWeight: 400 }}>{fmtUsd(saleUsd)}</small>}
                   </span>
                   <span style={{
                     display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,

@@ -68,6 +68,7 @@ export default function ProductDetail() {
   const [added, setAdded] = useState(false)
   const [selectedColor, setSelectedColor] = useState(product?.colors?.[0] ?? null)
   const [selectedSize, setSelectedSize] = useState(product?.sizes?.[0] ?? null)
+  const selectedPrice = selectedColor?.price != null ? Number(selectedColor.price) : product?.price
 
   useEffect(() => {
     setSelectedColor(product?.colors?.[0] ?? null)
@@ -115,7 +116,7 @@ export default function ProductDetail() {
       addItem({
         id:       product.id,
         name:     product.name,
-        price:    product.price,
+        price:    selectedPrice,
         image:    selectedColor?.image || product.image,
         category: product.category,
         color:    selectedColor?.name,
@@ -144,7 +145,7 @@ export default function ProductDetail() {
       '@type': 'Offer',
       url: `${seoCfg.siteUrl}/products/${product.id}`,
       priceCurrency: 'ARS',
-      price: product.price,
+      price: selectedPrice,
       availability: product.inStock
         ? 'https://schema.org/InStock'
         : 'https://schema.org/OutOfStock',
@@ -329,7 +330,7 @@ export default function ProductDetail() {
                 fontFamily: 'var(--font-sans)',
                 margin: 0,
               }}>
-                {fmt(product.price)}
+                {fmt(selectedPrice)}
               </p>
 
               {/* Selector de color */}
@@ -465,7 +466,7 @@ export default function ProductDetail() {
                     </button>
                   </div>
                   <span style={{ fontSize: 14, color: 'var(--color-text-muted)' }}>
-                    Subtotal: {fmt(product.price * qty)}
+                    Subtotal: {fmt(selectedPrice * qty)}
                   </span>
                 </div>
               )}

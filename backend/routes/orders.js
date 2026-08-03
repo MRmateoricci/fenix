@@ -32,6 +32,20 @@ function generateOrderNumber() {
   return `FX-${rand}`
 }
 
+export function resolveProductVariantPrice(product, selectedColor) {
+  const basePrice = Number(product?.precio_venta)
+  if (!Number.isFinite(basePrice)) return { error: 'missing_price', price: null }
+  if (!selectedColor) return { error: null, price: basePrice }
+
+  const colors = Array.isArray(product.color_options) ? product.color_options : []
+  const variant = colors.find(color =>
+    String(color?.name || '').localeCompare(String(selectedColor), 'es-AR', { sensitivity: 'base' }) === 0
+  )
+  if (colors.length && !variant) return { error: 'invalid_color', price: null }
+  const variantPrice = Number(variant?.price)
+  return { error: null, price: Number.isFinite(variantPrice) ? variantPrice : basePrice }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /api/orders
 // Body: { customer: {...formData incl. deliveryType/paymentMethod/pickupDate}, items }
@@ -85,7 +99,7 @@ router.post('/', attachUserIfPresent, async (req, res) => {
     // en lo que manda el cliente (podría mandar cualquier item.price).
     const productIds = items.map((i) => i.id)
     const { rows: dbProducts } = await pool.query(
-      `SELECT id, precio_venta FROM products WHERE id = ANY($1::uuid[])`,
+      `SELECT id, precio_venta, color_options FROM products WHERE id = ANY($1::uuid[])`,
       [productIds]
     )
     const productMap = new Map(dbProducts.map((p) => [p.id, p]))
@@ -96,7 +110,11 @@ router.post('/', attachUserIfPresent, async (req, res) => {
       if (!dbProduct || dbProduct.precio_venta == null) {
         return res.status(400).json({ error: `Producto no disponible: ${i.name || i.id}` })
       }
-      const price = Number(dbProduct.precio_venta)
+      const resolvedPrice = resolveProductVariantPrice(dbProduct, i.color)
+      if (resolvedPrice.error === 'invalid_color') {
+        return res.status(400).json({ error: `Color no disponible para ${i.name || i.id}` })
+      }
+      const price = resolvedPrice.price
       itemsSnapshot.push({
         id:       dbProduct.id,
         name:     i.name,

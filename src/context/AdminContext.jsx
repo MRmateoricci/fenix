@@ -64,6 +64,7 @@ export function AdminProvider({ children }) {
   const [importResult, setImportResult]          = useState(null)
   const [importLoading, setImportLoading]        = useState(false)
   const [importError, setImportError]            = useState(null)
+  const [currencySettings, setCurrencySettings]  = useState({ usdArsRate: 1510, updatedAt: null })
 
   // ── fetchCatalog — trae el catálogo público publicado (sin auth) ─────────
   const fetchCatalog = useCallback(async () => {
@@ -296,6 +297,79 @@ export function AdminProvider({ children }) {
   }, [])
 
   // ── searchProducts — búsqueda liviana para el matching de factura PDF ────
+  const fetchCurrencySettings = useCallback(async () => {
+    const res = await fetch(`${API_BASE}/api/products/currency-settings`, {
+      headers: { 'x-admin-token': ADMIN_PASSWORD },
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error || 'No se pudo cargar la cotizacion')
+    setCurrencySettings(data)
+    return data
+  }, [])
+
+  const updateCurrencySettings = useCallback(async (usdArsRate) => {
+    const res = await fetch(`${API_BASE}/api/products/currency-settings`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', 'x-admin-token': ADMIN_PASSWORD },
+      body: JSON.stringify({ usdArsRate }),
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error || 'No se pudo guardar la cotizacion')
+    setCurrencySettings(data)
+    return data
+  }, [])
+
+  useEffect(() => {
+    if (isAdmin) fetchCurrencySettings().catch(() => {})
+  }, [isAdmin, fetchCurrencySettings])
+
+  const parsePriceFile = useCallback(async (file, supplier) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('supplier', supplier)
+    const res = await fetch(`${API_BASE}/api/products/import/prices/parse`, {
+      method: 'POST',
+      headers: { 'x-admin-token': ADMIN_PASSWORD },
+      body: formData,
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error || 'No se pudo leer la lista de precios')
+    if (data.usdArsRate) setCurrencySettings(current => ({ ...current, usdArsRate: data.usdArsRate }))
+    return data
+  }, [])
+
+  const rematchPriceLines = useCallback(async (lines, supplier) => {
+    const res = await fetch(`${API_BASE}/api/products/import/prices/rematch`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-admin-token': ADMIN_PASSWORD },
+      body: JSON.stringify({ lines, supplier }),
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error || 'No se pudieron volver a asociar los códigos')
+    return data
+  }, [])
+
+  const applyPriceUpdates = useCallback(async (actions, supplier) => {
+    setImportLoading(true)
+    setImportError(null)
+    try {
+      const res = await fetch(`${API_BASE}/api/products/import/prices/apply`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-admin-token': ADMIN_PASSWORD },
+        body: JSON.stringify({ actions, supplier }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'No se pudieron actualizar los precios')
+      setImportResult(data)
+      return data
+    } catch (err) {
+      setImportError(err.message)
+      throw err
+    } finally {
+      setImportLoading(false)
+    }
+  }, [])
+
   const searchProducts = useCallback(async (query) => {
     if (!query || query.trim().length < 2) return []
     const params = new URLSearchParams({ search: query.trim(), limit: 8 }).toString()
@@ -401,9 +475,11 @@ export function AdminProvider({ children }) {
       fetchOrders, updateOrderStatus,
       inventory, inventoryTotal, inventorySuppliers, inventoryLoading, inventoryError,
       importResult, importLoading, importError,
+      currencySettings, fetchCurrencySettings, updateCurrencySettings,
       fetchInventory, createInventoryItem, updateInventoryItem, deleteInventoryItem,
       fetchInventorySelectionIds, applyInventoryBatch,
       adjustInventoryStocks, uploadInventoryFile, uploadProductImage,
+      parsePriceFile, rematchPriceLines, applyPriceUpdates,
       searchProducts, parseInvoicePdf, applyInvoiceLines,
       parseCleosCatalogPdf, uploadCleosPreviewImage, applyCleosCatalogProducts,
     }}>
