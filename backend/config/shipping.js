@@ -1,42 +1,69 @@
-// Copia backend-local de src/config/shipping.js — el backend se despliega por
-// separado del frontend (paquete propio, sin wiring de monorepo) y no puede
-// importar directamente desde src/. Si cambiás las zonas/precios acá, replicá
-// el cambio también en src/config/shipping.js (y viceversa).
-//
-// Se usa para recalcular el costo de envío server-side (nunca confiar en lo
-// que manda el cliente) y para el endpoint GET /api/shipping/estimate.
+// Tarifario temporal. El backend usa este módulo como fallback seguro mientras
+// no esté habilitado un proveedor externo de cotizaciones.
 
-export const SHIPPING_ZONES = [
-  {
-    id: 'gratis',
-    label: 'City Bell y alrededores',
-    description: 'City Bell, Gonnet, Villa Elisa, Ringuelet',
-    price: 0,
-    prefixes: ['1894', '1895', '1896', '1897', '1898', '1899'],
-  },
-  {
-    id: 'laplata',
-    label: 'La Plata y Gran La Plata',
-    description: 'La Plata, Tolosa, Los Hornos, Melchor Romero, Berisso, Ensenada',
-    price: 2500,
-    prefixes: ['1900', '1901', '1902', '1903', '1904', '1905', '1906', '1907', '1908', '1909', '1910', '1911', '1912', '1913', '1914', '1915', '1923', '1924', '1925'],
-  },
-  {
-    id: 'gba',
-    label: 'GBA Sur y Este',
-    description: 'Berazategui, Quilmes, Florencio Varela, Almirante Brown',
-    price: 4500,
-    prefixes: ['1870', '1875', '1876', '1877', '1878', '1879', '1880', '1881', '1882', '1883', '1884', '1885', '1886', '1887', '1888', '1850', '1851', '1852', '1853', '1854', '1855', '1856', '1858', '1860', '1861', '1862', '1864', '1865'],
-  },
-]
+export const SHIPPING_SERVICES = ['clasico', 'expreso']
 
-export function getShippingForCP(cp) {
-  if (!cp || String(cp).trim().length < 4) return null
-  const normalized = String(cp).trim().replace(/\s/g, '')
-  for (const zone of SHIPPING_ZONES) {
-    if (zone.prefixes.some((prefix) => normalized.startsWith(prefix))) {
-      return zone
-    }
+export const MANUAL_SHIPPING_RATES = {
+  local: {
+    postalCodes: ['1894'],
+    prices: { expreso: 13219, clasico: 12020 },
+  },
+  nacional_estandar: {
+    postalCodes: ['1000', '2000', '5000', '7600'],
+    prices: { expreso: 21941, clasico: 15957 },
+  },
+  nacional_grande: {
+    dimensions: { height: 60, width: 40, length: 30 },
+    prices: { expreso: 46546, clasico: 33069 },
+  },
+}
+
+const RATE_METADATA = {
+  local: { label: 'Envío local', description: 'Código postal 1894' },
+  nacional_estandar: {
+    label: 'Envío nacional estándar',
+    description: 'Tarifa nacional para paquete estándar',
+  },
+  nacional_grande: {
+    label: 'Envío nacional grande',
+    description: 'Paquete de hasta 60 × 40 × 30 cm',
+  },
+}
+
+export function normalizePostalCode(value) {
+  return String(value || '').trim().replace(/\s/g, '').toUpperCase()
+}
+
+export function getManualShippingQuote({ postalCode, service = 'clasico', packageType = 'standard' }) {
+  if (!SHIPPING_SERVICES.includes(service)) return null
+
+  const normalized = normalizePostalCode(postalCode)
+  if (normalized.length < 4) return null
+
+  let rateId
+  if (packageType === 'large') {
+    rateId = 'nacional_grande'
+  } else if (MANUAL_SHIPPING_RATES.local.postalCodes.includes(normalized)) {
+    rateId = 'local'
+  } else if (MANUAL_SHIPPING_RATES.nacional_estandar.postalCodes.includes(normalized)) {
+    rateId = 'nacional_estandar'
+  } else {
+    return null
   }
-  return null
+
+  const rate = MANUAL_SHIPPING_RATES[rateId]
+  return {
+    id: rateId,
+    ...RATE_METADATA[rateId],
+    postalCode: normalized,
+    service,
+    cost: rate.prices[service],
+    dimensions: rate.dimensions || null,
+    source: 'manual',
+  }
+}
+
+export function getShippingForCP(postalCode, service = 'clasico') {
+  const quote = getManualShippingQuote({ postalCode, service })
+  return quote ? { ...quote, price: quote.cost } : null
 }

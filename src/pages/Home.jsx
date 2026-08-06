@@ -32,9 +32,6 @@ const T = {
 const API_BASE = import.meta.env.VITE_API_URL || ''
 
 const HERO_PAPER_FADE_HEIGHT = 'clamp(140px, 20vw, 240px)'
-const INTRO_CURTAIN_DURATION_MS = 800
-const INTRO_HERO_FADE_DELAY_MS = 180
-const INTRO_DONE_DELAY_MS = 950
 
 const fmt = (n) =>
   new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(n)
@@ -134,21 +131,7 @@ const LOCAL_BUSINESS_SCHEMA = {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// The area below the hero starts covered by a dark veil (same tone as the header,
-// with a soft gradient trailing edge) instead of the bare paper color. The veil moves
-// upward inside a clipped track so its gradient keeps its softness without entering
-// the hero. Once it clears, the hero's paper fade continues the reveal upward.
 export default function Home() {
-  const rm = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
-  const [pageReady, setPageReady] = useState(rm)
-
-  useEffect(() => {
-    if (rm) return
-    const onIntroDone = () => setPageReady(true)
-    document.addEventListener('fnx-intro-done', onIntroDone)
-    return () => document.removeEventListener('fnx-intro-done', onIntroDone)
-  }, [rm])
-
   return (
     <>
     <PageSEO
@@ -167,23 +150,8 @@ export default function Home() {
           backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")`,
         }}
       />
-      <HeroSection pageReady={pageReady} />
+      <HeroSection />
       <div style={{ position: 'relative' }}>
-        <div
-          aria-hidden="true"
-          style={{
-            position: 'absolute', top: 0, left: 0, right: 0, zIndex: 50, pointerEvents: 'none',
-            height: 'clamp(500px, 100vh, 1000px)', overflow: 'hidden',
-          }}
-        >
-          <div style={{
-            position: 'absolute', inset: 0,
-            background: `linear-gradient(180deg, ${T.dark} 0%, ${T.dark} 52%, rgba(20,16,10,.92) 61%, rgba(20,16,10,.70) 72%, rgba(20,16,10,.42) 83%, rgba(20,16,10,.16) 93%, rgba(20,16,10,0) 100%)`,
-            transform: pageReady ? 'translateY(-100%)' : 'translateY(0)',
-            transition: rm ? 'none' : `transform ${INTRO_CURTAIN_DURATION_MS}ms cubic-bezier(0.16,1,0.3,1)`,
-            willChange: 'transform',
-          }} />
-        </div>
         <CategoriasSection />
         <DestacadosSection />
         <MostSearchedSection />
@@ -197,49 +165,9 @@ export default function Home() {
 }
 
 // ─── 1. Hero ───────────────────────────────────────────────────────────────────
-const ALL_REACHED  = { bg:true,  eyebrow:true,  h1:true,  sub:true,  cta:true  }
-const NONE_REACHED = { bg:false, eyebrow:false, h1:false, sub:false, cta:false }
-
-function HeroSection({ pageReady }) {
-  const rm = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
-
-  const [reached, setReached] = useState(rm ? ALL_REACHED : NONE_REACHED)
-
-  useEffect(() => {
-    if (rm) {
-      document.dispatchEvent(new CustomEvent('fnx-intro-done'))
-      return
-    }
-
-    const overlay = document.createElement('div')
-    overlay.style.cssText = 'position:fixed;inset:0;z-index:200;background:#14100A;pointer-events:none;transition:opacity 0.8s ease;'
-    document.body.appendChild(overlay)
-    overlay.getBoundingClientRect()
-
-    const set = (key) => setReached(prev => ({ ...prev, [key]: true }))
-    const ts = [
-      setTimeout(() => { overlay.style.opacity = '0' },   80),
-      setTimeout(() => set('bg'),                        200),
-      setTimeout(() => set('eyebrow'),                   520),
-      setTimeout(() => set('h1'),                        720),
-      setTimeout(() => set('sub'),                       920),
-      setTimeout(() => set('cta'),                      1120),
-      setTimeout(() => document.dispatchEvent(new CustomEvent('fnx-intro-done')), INTRO_DONE_DELAY_MS),
-      setTimeout(() => overlay.remove(),                1760),
-    ]
-    return () => { ts.forEach(clearTimeout); overlay.remove() }
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
-
-  const fade = (v, dur = '0.8s') =>
-    v ? { opacity: 1, transition: rm ? 'none' : `opacity ${dur} ease` }
-      : { opacity: 0, transition: 'none' }
-
-  const rise = (v, dur = '0.7s') =>
-    v ? { opacity: 1, transform: 'none',           transition: rm ? 'none' : `opacity ${dur} ease, transform ${dur} cubic-bezier(0.16,1,0.3,1)` }
-      : { opacity: 0, transform: 'translateY(16px)', transition: 'none' }
-
+function HeroSection() {
   return (
-    <header style={{
+    <header className="fnx-hero-light-on" style={{
       position: 'relative',
       minHeight: 'clamp(620px, 72vh, 840px)',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -253,7 +181,6 @@ function HeroSection({ pageReady }) {
         backgroundImage: `url(${heroImg})`,
         backgroundSize: 'cover',
         backgroundPosition: 'center 66%',
-        ...fade(reached.bg, '1.4s'),
       }} />
 
       {/* Darkening overlay for text legibility */}
@@ -265,16 +192,12 @@ function HeroSection({ pageReady }) {
         ].join(','),
       }} />
 
-      {/* Fade into the page background so the categories blend in, no hard cut.
-          Scales up from the bottom edge so the transition sweeps in cinematically. */}
+      {/* Fade into the page background so the categories blend in, no hard cut. */}
       <div aria-hidden="true" style={{
         position: 'absolute', left: 0, right: 0, bottom: 0, zIndex: 1,
         height: HERO_PAPER_FADE_HEIGHT,
         background: `linear-gradient(180deg, rgba(247,244,239,0) 0%, rgba(247,244,239,.05) 18%, rgba(247,244,239,.18) 38%, rgba(247,244,239,.42) 60%, rgba(247,244,239,.72) 80%, rgba(247,244,239,.92) 94%, ${T.paper} 100%)`,
         pointerEvents: 'none',
-        transform: pageReady ? 'scaleY(1)' : 'scaleY(0)',
-        transformOrigin: 'bottom',
-        transition: rm ? 'none' : `transform .75s cubic-bezier(0.16,1,0.3,1) ${INTRO_HERO_FADE_DELAY_MS}ms`,
       }} />
 
       {/* Content */}
@@ -283,7 +206,6 @@ function HeroSection({ pageReady }) {
           fontFamily: "var(--font-sans)",
           fontSize: 12.5, letterSpacing: '.26em', textTransform: 'uppercase',
           color: 'rgba(242,235,220,0.72)', marginBottom: 20,
-          ...rise(reached.eyebrow, '0.7s'),
         }}>
           City Bell · desde 1977
         </div>
@@ -294,7 +216,6 @@ function HeroSection({ pageReady }) {
           lineHeight: .9, letterSpacing: '-.025em',
           color: '#F7F4EF',
           textShadow: '0 4px 32px rgba(0,0,0,0.35)',
-          ...rise(reached.h1, '0.8s'),
         }}>
           Tu casa,<br />
           <em style={{ fontStyle: 'normal' }}>en su mejor luz</em>
@@ -305,28 +226,14 @@ function HeroSection({ pageReady }) {
 }
 
 // ─── 2. Comprá por categoría (flotante sobre el hero) ──────────────────────────
-// Stays hidden until the hero's cinematic intro finishes dispatching 'fnx-intro-done',
-// so the photo + headline always land before the category cards appear.
 function CategoriasSection() {
   const navigate = useNavigate()
-  const rm = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
-  const [ready, setReady] = useState(rm)
-
-  useEffect(() => {
-    if (rm) return
-    const onIntroDone = () => setReady(true)
-    document.addEventListener('fnx-intro-done', onIntroDone)
-    return () => document.removeEventListener('fnx-intro-done', onIntroDone)
-  }, [rm])
 
   return (
     <section
       id="categorias"
       style={{
         maxWidth: 1440, margin: '0 auto', padding: '0 40px 120px', position: 'relative', zIndex: 3, scrollMarginTop: 90,
-        opacity: ready ? 1 : 0,
-        transform: ready ? 'translateY(0)' : 'translateY(24px)',
-        transition: rm ? 'none' : 'opacity .8s cubic-bezier(0.16,1,0.3,1), transform .8s cubic-bezier(0.16,1,0.3,1)',
       }}
     >
       <div

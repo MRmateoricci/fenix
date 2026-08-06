@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useCart } from '../context/CartContext'
 import PageSEO from '../components/SEO'
@@ -24,8 +25,15 @@ const fmt = (n) =>
   }).format(n)
 
 export default function Cart() {
-  const { items, removeItem, updateQuantity, totalPrice } = useCart()
+  const { items, removeItem, updateQuantity, totalPrice, dni, setDni } = useCart()
   const navigate = useNavigate()
+  const [dniTouched, setDniTouched] = useState(false)
+  const validDni = /^\d{7,8}$/.test(dni)
+
+  function continueToCheckout() {
+    setDniTouched(true)
+    if (validDni) navigate('/checkout')
+  }
 
   if (items.length === 0) {
     return (
@@ -183,14 +191,44 @@ export default function Cart() {
 
             <p style={{
               fontFamily: "'Inter', system-ui, sans-serif",
-              fontSize: 11, color: T.muted2, textAlign: 'center',
+              fontSize: 11, color: T.muted2, textAlign: 'center', fontStyle: 'italic',
               margin: '0 0 20px',
             }}>
-              El costo de envío se confirma al finalizar el pedido.
+              *Gastos de envío y descuentos calculados al momento de pagar
             </p>
 
+            <label htmlFor="cart-page-dni" style={{ display: 'block', marginBottom: 7, fontSize: 11, color: T.ink }}>
+              DNI <span style={{ color: T.red }}>*</span>
+            </label>
+            <input
+              id="cart-page-dni"
+              inputMode="numeric"
+              placeholder="Ej: 12345678"
+              value={dni}
+              onChange={(e) => setDni(e.target.value)}
+              onBlur={() => setDniTouched(true)}
+              aria-invalid={dniTouched && !validDni}
+              style={{
+                width: '100%', maxWidth: 220, height: 36, padding: '0 10px',
+                border: `1px solid ${dniTouched && !validDni ? T.red : T.hairlineStrong}`,
+                borderRadius: 2, background: '#fff', color: T.ink, outline: 'none', fontSize: 13,
+              }}
+            />
+            {!dni && (
+              <p style={{ display: 'flex', alignItems: 'center', gap: 7, margin: '7px 0 14px', color: T.red, fontSize: 10.5 }}>
+                <span aria-hidden="true" style={{ display: 'inline-grid', placeItems: 'center', width: 15, height: 15, borderRadius: '50%', background: T.red, color: '#fff', fontSize: 10, fontWeight: 700 }}>!</span>
+                Ingresá tu DNI para continuar.
+              </p>
+            )}
+            {dni && dniTouched && !validDni && (
+              <p style={{ margin: '7px 0 14px', color: T.red, fontSize: 10.5 }}>
+                El DNI debe tener 7 u 8 números.
+              </p>
+            )}
+            {validDni && <div style={{ height: 14 }} />}
+
             <button
-              onClick={() => navigate('/checkout')}
+              onClick={continueToCheckout}
               style={{
                 width: '100%', padding: '14px 0',
                 background: T.red, color: '#fff',

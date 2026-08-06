@@ -93,6 +93,25 @@ CREATE INDEX IF NOT EXISTS idx_email_verification_tokens_active
   ON email_verification_tokens(token_hash, expires_at)
   WHERE used_at IS NULL;
 
+CREATE TABLE IF NOT EXISTS password_reset_tokens (
+  id         UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id    UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token_hash VARCHAR(64) NOT NULL UNIQUE,
+  expires_at TIMESTAMPTZ NOT NULL,
+  used_at    TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_active
+  ON password_reset_tokens(token_hash, expires_at)
+  WHERE used_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS newsletter_subscribers (
+  id         UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+  email      VARCHAR(200) UNIQUE NOT NULL,
+  created_at TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+);
+
 -- Favoritos. product_id referencia products.id (ver cutover de tipo + FK más
 -- abajo, después de que la tabla products exista) — declarado INTEGER acá
 -- solo para que la creación inicial en una base nueva funcione; el bloque de
@@ -210,6 +229,15 @@ ALTER TABLE products ADD COLUMN IF NOT EXISTS product_type      VARCHAR(150);
 ALTER TABLE products ADD COLUMN IF NOT EXISTS published         BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE products ADD COLUMN IF NOT EXISTS price_currency    VARCHAR(3) NOT NULL DEFAULT 'ARS';
 ALTER TABLE products ADD COLUMN IF NOT EXISTS price_exchange_rate NUMERIC(14,4);
+ALTER TABLE products ADD COLUMN IF NOT EXISTS precio_venta_usd   NUMERIC(14,2);
+ALTER TABLE products ADD COLUMN IF NOT EXISTS precio_iva_usd     NUMERIC(14,2);
+ALTER TABLE products ADD COLUMN IF NOT EXISTS original_price_usd NUMERIC(14,2);
+-- Datos físicos listos para cotizadores de envío. Dimensiones en centímetros
+-- y peso en kilogramos para evitar conversiones ambiguas al integrar una API.
+ALTER TABLE products ADD COLUMN IF NOT EXISTS length_cm          NUMERIC(10,2);
+ALTER TABLE products ADD COLUMN IF NOT EXISTS width_cm           NUMERIC(10,2);
+ALTER TABLE products ADD COLUMN IF NOT EXISTS height_cm          NUMERIC(10,2);
+ALTER TABLE products ADD COLUMN IF NOT EXISTS weight_kg          NUMERIC(10,3);
 
 -- Asociaciones confirmadas entre el código que usa cada proveedor en su XLS y
 -- el producto real del catálogo. Se consultan antes de cualquier heurística de
@@ -246,6 +274,15 @@ CREATE TABLE IF NOT EXISTS store_settings (
 INSERT INTO store_settings (id, usd_ars_rate)
 VALUES (1, 1510)
 ON CONFLICT (id) DO NOTHING;
+
+-- Moneda de origen elegida para cada proveedor. Los precios públicos continúan
+-- expresados en ARS; las columnas *_usd conservan los importes fuente para poder
+-- recalcularlos cuando cambia la cotización sin perder precisión.
+CREATE TABLE IF NOT EXISTS supplier_price_settings (
+  supplier   VARCHAR(80) PRIMARY KEY,
+  currency   VARCHAR(3) NOT NULL DEFAULT 'ARS' CHECK (currency IN ('ARS', 'USD')),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
 
 -- `supplier` inicialmente se infería del código con una columna generada. Se
 -- conserva el valor ya calculado, pero pasa a ser editable desde el producto.
@@ -290,8 +327,9 @@ END $$;
 -- reserva para pagar en el local al retirar. pickup_date es la fecha elegida
 -- para retirar (solo pickup). estimated_delivery_date es el tiempo máximo de
 -- Correo Argentino para el CP + 3 días hábiles de margen propio (solo
--- delivery). shipping_cost persiste lo que hoy solo se calculaba en el
--- frontend y se perdía. reservation_expires_at y stock_released_at sostienen
+-- delivery). shipping_cost persiste el valor recalculado por el backend y
+-- shipping_service distingue clásico/expreso. reservation_expires_at y
+-- stock_released_at sostienen
 -- la reserva/liberación de stock (ver backend/services/stockReservation.js).
 -- ─────────────────────────────────────────────────────────────────────────────
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_method VARCHAR(20) NOT NULL DEFAULT 'mercadopago';
@@ -301,10 +339,24 @@ ALTER TABLE orders ADD CONSTRAINT orders_payment_method_check CHECK (payment_met
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS pickup_date DATE;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS estimated_delivery_date DATE;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS shipping_cost NUMERIC(12,2);
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS shipping_service VARCHAR(20);
+ALTER TABLE orders DROP CONSTRAINT IF EXISTS orders_shipping_service_check;
+ALTER TABLE orders ADD CONSTRAINT orders_shipping_service_check CHECK (
+  shipping_service IS NULL OR shipping_service IN ('clasico', 'expreso')
+);
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS reservation_expires_at TIMESTAMPTZ;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS stock_released_at TIMESTAMPTZ;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS review_email_sent_at TIMESTAMPTZ;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS confirmation_email_sent_at TIMESTAMPTZ;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS customer_dni VARCHAR(8);
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS address_extra VARCHAR(120);
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS province VARCHAR(100);
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS billing_same_as_shipping BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS billing_address VARCHAR(255);
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS billing_address_extra VARCHAR(120);
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS billing_city VARCHAR(100);
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS billing_postal_code VARCHAR(20);
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS billing_province VARCHAR(100);
 
 ALTER TABLE orders DROP CONSTRAINT IF EXISTS orders_status_check;
 ALTER TABLE orders ADD CONSTRAINT orders_status_check CHECK (

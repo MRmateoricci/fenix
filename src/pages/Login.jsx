@@ -1,22 +1,24 @@
 import { useState } from 'react'
-import { useNavigate, useLocation, Link } from 'react-router-dom'
+import { useLocation, useNavigate, Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { Field, DarkInput, PrimaryBtn } from '../components/AuthFormKit'
 import PageSEO from '../components/SEO'
+
+const API_BASE = import.meta.env.VITE_API_URL || ''
 
 export default function Login() {
   const { login } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
-  const redirectTo = location.state?.from || '/'
+  const redirectTo = location.state?.from || '/account'
+  const queryError = new URLSearchParams(location.search).get('authError')
 
-  const [email, setEmail]       = useState(location.state?.email || '')
+  const [email, setEmail] = useState(location.state?.email || '')
   const [password, setPassword] = useState('')
-  const [error, setError]       = useState(null)
-  const [loading, setLoading]   = useState(false)
+  const [error, setError] = useState(queryError)
+  const [loading, setLoading] = useState(false)
 
-  async function handleSubmit(e) {
-    e.preventDefault()
+  async function handleSubmit(event) {
+    event.preventDefault()
     setError(null)
     setLoading(true)
     try {
@@ -29,62 +31,115 @@ export default function Login() {
     }
   }
 
+  function socialLogin(provider) {
+    const params = new URLSearchParams({ returnTo: redirectTo })
+    window.location.assign(`${API_BASE}/api/auth/oauth/${provider}?${params}`)
+  }
+
   return (
     <>
       <PageSEO title="Iniciar sesión" description="Ingresá a tu cuenta de Fénix Iluminación." url="/login" />
-      <div style={{ backgroundColor: 'var(--color-bg)', minHeight: '100vh' }}>
-        <div style={{ maxWidth: '26rem', margin: '0 auto', padding: '4rem 1.5rem 6rem' }}>
-          <h1
-            style={{
-              fontFamily: 'var(--font-serif)', color: 'var(--color-text)',
-              fontSize: '2rem', fontWeight: 400, letterSpacing: '-0.01em',
-              textAlign: 'center', marginBottom: '2rem',
-            }}
-          >
-            Iniciar sesión
-          </h1>
+      <main className="fnx-login-page">
+        <section className="fnx-login-card">
+          <h1>Ingresar</h1>
+          <form onSubmit={handleSubmit}>
+            <input
+              type="email"
+              autoComplete="email"
+              placeholder="Correo electrónico"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              required
+            />
+            <input
+              type="password"
+              autoComplete="current-password"
+              placeholder="Contraseña"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              required
+            />
+            {error && <p className="fnx-login-error">{error}</p>}
+            <button className="fnx-login-submit" type="submit" disabled={loading}>
+              {loading ? 'Ingresando…' : 'Ingresar'}
+            </button>
+          </form>
 
-          <div
-            style={{
-              backgroundColor: 'var(--color-surface)',
-              border: '1px solid var(--color-border)',
-              borderRadius: '1rem',
-              padding: '2rem 2.25rem',
-              boxShadow: '0 2px 16px rgba(0,0,0,0.06)',
-            }}
-          >
-            <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-              <Field label="Email">
-                <DarkInput type="email" placeholder="juan@email.com" value={email} onChange={setEmail} />
-              </Field>
-              <Field label="Contraseña">
-                <DarkInput type="password" placeholder="••••••••" value={password} onChange={setPassword} />
-              </Field>
-
-              {error && (
-                <p style={{ fontSize: '0.8rem', color: 'var(--color-primary)', margin: 0 }}>
-                  {error}
-                </p>
-              )}
-
-              <PrimaryBtn type="submit" disabled={loading || !email || !password}>
-                {loading ? 'Ingresando…' : 'Ingresar'}
-              </PrimaryBtn>
-            </form>
-
-            <p style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)', marginTop: '1.25rem', textAlign: 'center' }}>
-              ¿Te olvidaste la contraseña? Escribinos por WhatsApp y te ayudamos.
-            </p>
+          <div className="fnx-login-links">
+            <Link to="/register" state={{ from: redirectTo }}>Crear cuenta</Link>
+            <span>•</span>
+            <Link to="/forgot-password" state={{ email, from: redirectTo }}>¿Olvidaste tu contraseña?</Link>
           </div>
 
-          <p style={{ textAlign: 'center', fontSize: '0.875rem', color: 'var(--color-text-muted)', marginTop: '1.5rem' }}>
-            ¿No tenés cuenta?{' '}
-            <Link to="/register" style={{ color: 'var(--color-primary)', fontWeight: 600, textDecoration: 'none' }}>
-              Creá una acá
-            </Link>
-          </p>
-        </div>
-      </div>
+          <div className="fnx-login-divider"><span>o</span></div>
+
+          <div className="fnx-social-login">
+            <button type="button" className="google" onClick={() => socialLogin('google')}>
+              <b>G</b><span>Continuá con Google</span>
+            </button>
+            <button type="button" className="facebook" onClick={() => socialLogin('facebook')}>
+              <b>f</b><span>Continuá con Facebook</span>
+            </button>
+          </div>
+        </section>
+      </main>
+      <LoginInformation />
     </>
+  )
+}
+
+function LoginInformation() {
+  const [newsletterEmail, setNewsletterEmail] = useState('')
+  const [newsletterState, setNewsletterState] = useState('idle')
+
+  async function subscribe(event) {
+    event.preventDefault()
+    setNewsletterState('loading')
+    try {
+      const response = await fetch(`${API_BASE}/api/newsletter`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: newsletterEmail }),
+      })
+      if (!response.ok) throw new Error()
+      setNewsletterState('success')
+      setNewsletterEmail('')
+    } catch {
+      setNewsletterState('error')
+    }
+  }
+
+  return (
+    <section className="fnx-login-info">
+      <div>
+        <h2>Info</h2>
+        <Link to="/nosotros">Sobre nosotros</Link>
+        <Link to="/?section=contacto">Contacto</Link>
+        <Link to="/account">Entrar a mi cuenta</Link>
+      </div>
+      <div>
+        <h2>Ayuda e información</h2>
+        <Link to="/faq">¿Cómo comprar?</Link>
+        <Link to="/policies/refunds">Cambios y devoluciones</Link>
+        <Link to="/policies/shipping">Tiempos y métodos de envío</Link>
+        <Link to="/policies/refunds">Botón de arrepentimiento</Link>
+      </div>
+      <div className="fnx-login-security">
+        <h2>Seguridad</h2>
+        <span aria-hidden="true">✓</span>
+        <p>Compra segura</p>
+        <small>Pagos protegidos por Mercado Pago</small>
+      </div>
+      <div className="fnx-login-newsletter">
+        <h2>Newsletter</h2>
+        <p>Mantenete informado sobre nuestros lanzamientos y promociones.</p>
+        <form onSubmit={subscribe}>
+          <input type="email" placeholder="tu-email@ejemplo.com" value={newsletterEmail} onChange={(event) => setNewsletterEmail(event.target.value)} required />
+          <button type="submit" disabled={newsletterState === 'loading'} aria-label="Suscribirme">→</button>
+        </form>
+        {newsletterState === 'success' && <small>¡Gracias! Ya estás suscripto.</small>}
+        {newsletterState === 'error' && <small className="error">No pudimos suscribirte. Intentá nuevamente.</small>}
+      </div>
+    </section>
   )
 }

@@ -40,6 +40,87 @@ function readRows(buffer) {
   return XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true, defval: null })
 }
 
+function normalizedHeader(value) {
+  return String(value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9$]+/g, ' ')
+    .replace(/\s+/g, ' ')
+}
+
+function findPriceHeader(rows) {
+  for (let rowIndex = 0; rowIndex < Math.min(rows.length, 25); rowIndex++) {
+    const headers = (rows[rowIndex] || []).map(normalizedHeader)
+    const codeIndex = headers.findIndex(header => /^(ITEM|CODIGO|COD|SKU|ARTICULO|COD ARTICULO|CODIGO ARTICULO|CODIGO PRODUCTO)$/.test(header))
+    const descriptionIndex = headers.findIndex(header => /DESCRIP|DETALLE|^PRODUCTO$/.test(header))
+    if (codeIndex >= 0 && descriptionIndex >= 0) return { rowIndex, headers, codeIndex, descriptionIndex }
+  }
+  return null
+}
+
+function firstHeaderIndex(headers, predicate, excluded = new Set()) {
+  for (let index = 0; index < headers.length; index++) {
+    if (!excluded.has(index) && predicate(headers[index])) return index
+  }
+  return -1
+}
+
+// Lee por nombre de columna para soportar las listas actuales de los proveedores,
+// que intercalan "Costo c/IVA" y también pueden agregar columnas equivalentes en
+// pesos. Si la cabecera no se reconoce, conserva el formato histórico A-E.
+export function parseSupplierPrices(buffer) {
+  const rowsRaw = readRows(buffer)
+  const detected = findPriceHeader(rowsRaw)
+  const headerRowIndex = detected?.rowIndex ?? 0
+  const headers = detected?.headers || []
+  const codeIndex = detected?.codeIndex ?? 0
+  const descriptionIndex = detected?.descriptionIndex ?? 1
+  const used = new Set([codeIndex, descriptionIndex])
+
+  const costIndex = detected
+    ? firstHeaderIndex(headers, header => /COSTO/.test(header) && !/IVA/.test(header), used)
+    : 2
+  if (costIndex >= 0) used.add(costIndex)
+  const saleIndex = detected
+    ? firstHeaderIndex(headers, header => /VENTA/.test(header) && !/IVA/.test(header), used)
+    : 3
+  if (saleIndex >= 0) used.add(saleIndex)
+  const taxIndex = detected
+    ? firstHeaderIndex(headers, header => /PRECIO/.test(header) && /IVA/.test(header) && !/COSTO/.test(header), used)
+    : 4
+
+  const dataRows = rowsRaw.slice(headerRowIndex + 1)
+  const rows = []
+  let skipped = 0
+
+  for (const row of dataRows) {
+    const codigo = normalizeCodigo(row?.[codeIndex])
+    const precioCosto = costIndex >= 0 ? toNumber(row?.[costIndex]) : null
+    const precioVenta = saleIndex >= 0 ? toNumber(row?.[saleIndex]) : null
+    const precioIva = taxIndex >= 0 ? toNumber(row?.[taxIndex]) : null
+    if (!codigo || codigo.length > 64 || [precioCosto, precioVenta, precioIva].every(value => value == null)) {
+      skipped++
+      continue
+    }
+    rows.push({
+      codigo,
+      descripcion: row?.[descriptionIndex] != null ? String(row[descriptionIndex]).trim() : null,
+      precio_costo: precioCosto,
+      precio_venta: precioVenta,
+      precio_iva: precioIva,
+    })
+  }
+
+  return {
+    rows,
+    totalRows: dataRows.length,
+    skipped,
+    columns: { codeIndex, descriptionIndex, costIndex, saleIndex, taxIndex },
+  }
+}
+
 // ── 1. Catálogo maestro (Huergui) ────────────────────────────────────────────
 // A=Ítem B=Descripción C=Grupo D=SubGrupo E=Medida F=Orden G/H vacías
 export function parseHuerguiCatalog(buffer) {
@@ -66,24 +147,7 @@ export function parseHuerguiCatalog(buffer) {
 // ── 2. Lista de precios (ALCIDES) ────────────────────────────────────────────
 // A=Ítem B=Descripción C=Precio Costo D=Precio Venta E=Precio c/IVA F=Fecha G=Días
 export function parseAlcidesPrices(buffer) {
-  const rowsRaw = readRows(buffer)
-  const dataRows = rowsRaw.slice(1)
-  const rows = []
-  let skipped = 0
-
-  for (const r of dataRows) {
-    const codigo = normalizeCodigo(r[0])
-    if (!codigo) { skipped++; continue }
-    rows.push({
-      codigo,
-      descripcion:  r[1] != null ? String(r[1]).trim() : null,
-      precio_costo: toNumber(r[2]),
-      precio_venta: toNumber(r[3]),
-      precio_iva:   toNumber(r[4]),
-    })
-  }
-
-  return { rows, totalRows: dataRows.length, skipped }
+  return parseSupplierPrices(buffer)
 }
 
 // ── 3. Comprobante de venta (Presupuesto POS) ────────────────────────────────

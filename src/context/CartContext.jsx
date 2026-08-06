@@ -1,8 +1,9 @@
-import { createContext, useContext, useReducer, useEffect } from 'react'
+import { createContext, useContext, useReducer, useEffect, useState } from 'react'
 
 const CartContext = createContext(null)
 
 const STORAGE_KEY = 'fenix_cart'
+const DNI_STORAGE_KEY = 'fenix_checkout_dni'
 
 // Dos líneas de carrito son "la misma" si comparten producto, color y medida
 // elegidos. Productos sin color/medida (undefined/null) siguen matcheando
@@ -52,6 +53,8 @@ export function CartProvider({ children }) {
       return []
     }
   })
+  const [dni, setDniState] = useState(() => localStorage.getItem(DNI_STORAGE_KEY) || '')
+  const [lastAdded, setLastAdded] = useState(null)
 
   useEffect(() => {
     try {
@@ -63,6 +66,13 @@ export function CartProvider({ children }) {
 
   function addItem(product) {
     dispatch({ type: 'ADD_ITEM', product })
+    setLastAdded({ ...product, notificationId: Date.now() })
+  }
+
+  function setDni(value) {
+    const normalized = String(value).replace(/\D/g, '').slice(0, 8)
+    setDniState(normalized)
+    try { localStorage.setItem(DNI_STORAGE_KEY, normalized) } catch { /* ignore */ }
   }
 
   function removeItem(id, color = null, size = null) {
@@ -81,7 +91,10 @@ export function CartProvider({ children }) {
   const totalPrice = items.reduce((sum, item) => sum + item.price * item.quantity, 0)
 
   return (
-    <CartContext.Provider value={{ items, addItem, removeItem, updateQuantity, clearCart, totalItems, totalPrice }}>
+    <CartContext.Provider value={{
+      items, addItem, removeItem, updateQuantity, clearCart, totalItems, totalPrice,
+      dni, setDni, lastAdded, dismissAddedNotification: () => setLastAdded(null),
+    }}>
       {children}
     </CartContext.Provider>
   )

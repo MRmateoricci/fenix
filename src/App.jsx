@@ -26,6 +26,10 @@ import Account from './pages/Account'
 import Favorites from './pages/Favorites'
 import Orders from './pages/Orders'
 import VerifyEmail from './pages/VerifyEmail'
+import Policy from './pages/Policy'
+import ForgotPassword from './pages/ForgotPassword'
+import ResetPassword from './pages/ResetPassword'
+import OrderDetail from './pages/OrderDetail'
 
 function MpReturnGuard() {
   const navigate = useNavigate()
@@ -64,7 +68,7 @@ function Layout() {
       <main style={pathname !== '/' ? { paddingTop: 68 } : undefined}>
         <Outlet />
       </main>
-      <Footer />
+      {pathname !== '/login' && <Footer />}
       <WhatsAppFAB />
     </>
   )
@@ -114,8 +118,11 @@ export default function App() {
                   <Route path="/guias" element={<Guias />} />
                   <Route path="/profesionales" element={<Profesionales />} />
                   <Route path="/login" element={<Login />} />
+                  <Route path="/forgot-password" element={<ForgotPassword />} />
+                  <Route path="/reset-password" element={<ResetPassword />} />
                   <Route path="/register" element={<Register />} />
                   <Route path="/verify-email" element={<VerifyEmail />} />
+                  <Route path="/policies/:slug" element={<Policy />} />
                   <Route
                     path="/account"
                     element={
@@ -137,6 +144,14 @@ export default function App() {
                     element={
                       <PrivateCustomerRoute>
                         <Orders />
+                      </PrivateCustomerRoute>
+                    }
+                  />
+                  <Route
+                    path="/orders/:id"
+                    element={
+                      <PrivateCustomerRoute>
+                        <OrderDetail />
                       </PrivateCustomerRoute>
                     }
                   />

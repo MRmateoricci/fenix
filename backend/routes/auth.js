@@ -4,7 +4,7 @@ import jwt from 'jsonwebtoken'
 import crypto from 'crypto'
 import { pool } from '../db/pool.js'
 import { requireAuth } from '../middleware/requireAuth.js'
-import { emailVerificationEmail, sendMail } from '../services/mailer.js'
+import { emailVerificationEmail, passwordResetEmail, sendMail } from '../services/mailer.js'
 import { sendPendingReviewInvitationsForUser } from '../services/reviewInvitations.js'
 import { isValidEmail, normalizeEmail } from '../utils/email.js'
 import 'dotenv/config'
@@ -64,6 +64,100 @@ async function issueEmailVerification(user) {
     to: user.email,
     ...emailVerificationEmail({ firstName: user.first_name, token }),
   })
+}
+
+const frontendBaseUrl = () =>
+  (process.env.FRONTEND_BASE_URL || process.env.APP_BASE_URL || 'http://localhost:5173').replace(/\/$/, '')
+
+const backendBaseUrl = () =>
+  (process.env.APP_BASE_URL || 'http://localhost:3001').replace(/\/$/, '')
+
+function safeReturnTo(value) {
+  return typeof value === 'string' && value.startsWith('/') && !value.startsWith('//')
+    ? value
+    : '/account'
+}
+
+function redirectWithQuery(pathname, key, value) {
+  const url = new URL(safeReturnTo(pathname), frontendBaseUrl())
+  url.searchParams.set(key, value)
+  return url.toString()
+}
+
+function oauthConfig(provider) {
+  if (provider === 'google') {
+    return {
+      clientId: process.env.GOOGLE_CLIENT_ID,
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+      authorizationUrl: 'https://accounts.google.com/o/oauth2/v2/auth',
+      tokenUrl: 'https://oauth2.googleapis.com/token',
+      scope: 'openid email profile',
+    }
+  }
+  if (provider === 'facebook') {
+    return {
+      clientId: process.env.FACEBOOK_APP_ID,
+      clientSecret: process.env.FACEBOOK_APP_SECRET,
+      authorizationUrl: 'https://www.facebook.com/dialog/oauth',
+      tokenUrl: 'https://graph.facebook.com/oauth/access_token',
+      scope: 'email,public_profile',
+    }
+  }
+  return null
+}
+
+async function socialProfile(provider, code, redirectUri) {
+  const config = oauthConfig(provider)
+  const tokenResponse = await fetch(config.tokenUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      code,
+      client_id: config.clientId,
+      client_secret: config.clientSecret,
+      redirect_uri: redirectUri,
+      grant_type: 'authorization_code',
+    }),
+  })
+  const tokens = await tokenResponse.json().catch(() => ({}))
+  if (!tokenResponse.ok || !tokens.access_token) throw new Error('No se pudo validar el acceso social')
+
+  if (provider === 'google') {
+    const response = await fetch('https://openidconnect.googleapis.com/v1/userinfo', {
+      headers: { Authorization: `Bearer ${tokens.access_token}` },
+    })
+    const profile = await response.json().catch(() => ({}))
+    if (!response.ok || !profile.email || profile.email_verified === false) throw new Error('Google no devolvió un email verificado')
+    return { email: profile.email, firstName: profile.given_name, lastName: profile.family_name }
+  }
+
+  const response = await fetch(`https://graph.facebook.com/me?${new URLSearchParams({
+    fields: 'id,email,first_name,last_name',
+    access_token: tokens.access_token,
+  })}`)
+  const profile = await response.json().catch(() => ({}))
+  if (!response.ok || !profile.email) throw new Error('Facebook no compartió un email con la aplicación')
+  return { email: profile.email, firstName: profile.first_name, lastName: profile.last_name }
+}
+
+async function findOrCreateSocialUser(profile) {
+  const email = normalizeEmail(profile.email)
+  const existing = await pool.query('SELECT * FROM users WHERE email = $1', [email])
+  if (existing.rows.length) {
+    const { rows } = await pool.query(
+      'UPDATE users SET email_verified_at = COALESCE(email_verified_at, NOW()) WHERE id = $1 RETURNING *',
+      [existing.rows[0].id]
+    )
+    return rows[0]
+  }
+
+  const randomPasswordHash = await bcrypt.hash(crypto.randomBytes(32).toString('hex'), 10)
+  const { rows } = await pool.query(
+    `INSERT INTO users (email, password_hash, first_name, last_name, email_verified_at)
+     VALUES ($1, $2, $3, $4, NOW()) RETURNING *`,
+    [email, randomPasswordHash, profile.firstName?.trim() || 'Cliente', profile.lastName?.trim() || 'Fénix']
+  )
+  return rows[0]
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -185,6 +279,125 @@ router.post('/resend-verification', requireAuth, async (req, res) => {
   } catch (err) {
     console.error('[POST /api/auth/resend-verification]', err)
     res.status(500).json({ error: 'No pudimos reenviar el correo' })
+  }
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Recuperación de contraseña
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/forgot-password', async (req, res) => {
+  try {
+    if (!isValidEmail(req.body?.email)) {
+      return res.status(400).json({ error: 'Ingresá un email válido' })
+    }
+
+    const { rows } = await pool.query('SELECT * FROM users WHERE email = $1', [normalizeEmail(req.body.email)])
+    const user = rows[0]
+    // Respuesta uniforme: no revelamos si una dirección está registrada.
+    if (!user) return res.json({ ok: true })
+
+    const recent = await pool.query(
+      `SELECT 1 FROM password_reset_tokens
+       WHERE user_id = $1 AND used_at IS NULL AND created_at > NOW() - INTERVAL '1 minute' LIMIT 1`,
+      [user.id]
+    )
+    if (recent.rows.length) return res.json({ ok: true })
+
+    const token = crypto.randomBytes(32).toString('hex')
+    const tokenHash = hashVerificationToken(token)
+    await pool.query('DELETE FROM password_reset_tokens WHERE user_id = $1 AND used_at IS NULL', [user.id])
+    await pool.query(
+      `INSERT INTO password_reset_tokens (user_id, token_hash, expires_at)
+       VALUES ($1, $2, NOW() + INTERVAL '1 hour')`,
+      [user.id, tokenHash]
+    )
+    await sendMail({ to: user.email, ...passwordResetEmail({ firstName: user.first_name, token }) })
+    res.json({ ok: true })
+  } catch (err) {
+    console.error('[POST /api/auth/forgot-password]', err)
+    res.status(500).json({ error: 'No pudimos procesar la solicitud' })
+  }
+})
+
+router.post('/reset-password', async (req, res) => {
+  const token = typeof req.body?.token === 'string' ? req.body.token.trim() : ''
+  const password = typeof req.body?.password === 'string' ? req.body.password : ''
+  if (!token || token.length > 200) return res.status(400).json({ error: 'Enlace inválido' })
+  if (password.length < 6) return res.status(400).json({ error: 'La contraseña debe tener al menos 6 caracteres' })
+
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+    const tokenHash = hashVerificationToken(token)
+    const { rows } = await client.query(
+      `SELECT user_id FROM password_reset_tokens
+       WHERE token_hash = $1 AND used_at IS NULL AND expires_at > NOW() FOR UPDATE`,
+      [tokenHash]
+    )
+    if (!rows.length) {
+      await client.query('ROLLBACK')
+      return res.status(400).json({ error: 'El enlace es inválido o ya venció' })
+    }
+
+    const passwordHash = await bcrypt.hash(password, 10)
+    const userId = rows[0].user_id
+    const updated = await client.query('UPDATE users SET password_hash = $1 WHERE id = $2 RETURNING *', [passwordHash, userId])
+    await client.query('UPDATE password_reset_tokens SET used_at = NOW() WHERE token_hash = $1', [tokenHash])
+    await client.query('COMMIT')
+    res.cookie(COOKIE_NAME, signToken(userId), cookieOptions())
+    res.json({ user: toPublicUser(updated.rows[0]) })
+  } catch (err) {
+    await client.query('ROLLBACK')
+    console.error('[POST /api/auth/reset-password]', err)
+    res.status(500).json({ error: 'No pudimos cambiar la contraseña' })
+  } finally {
+    client.release()
+  }
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Acceso con Google / Facebook (OAuth 2.0, Authorization Code)
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/oauth/:provider', (req, res) => {
+  const provider = req.params.provider
+  const config = oauthConfig(provider)
+  const returnTo = safeReturnTo(req.query.returnTo)
+  if (!config) return res.redirect(redirectWithQuery('/login', 'authError', 'Proveedor no disponible'))
+  if (!config.clientId || !config.clientSecret) {
+    return res.redirect(redirectWithQuery('/login', 'authError', `${provider === 'google' ? 'Google' : 'Facebook'} todavía no está configurado`))
+  }
+
+  const redirectUri = `${backendBaseUrl()}/api/auth/oauth/${provider}/callback`
+  const state = jwt.sign({ purpose: 'social_login', provider, returnTo }, process.env.JWT_SECRET, { expiresIn: '10m' })
+  const query = new URLSearchParams({
+    client_id: config.clientId,
+    redirect_uri: redirectUri,
+    response_type: 'code',
+    scope: config.scope,
+    state,
+  })
+  if (provider === 'google') query.set('prompt', 'select_account')
+  res.redirect(`${config.authorizationUrl}?${query}`)
+})
+
+router.get('/oauth/:provider/callback', async (req, res) => {
+  let returnTo = '/account'
+  try {
+    const provider = req.params.provider
+    const config = oauthConfig(provider)
+    if (!config || !req.query.code || !req.query.state) throw new Error('Respuesta OAuth incompleta')
+    const state = jwt.verify(req.query.state, process.env.JWT_SECRET)
+    if (state.purpose !== 'social_login' || state.provider !== provider) throw new Error('Estado OAuth inválido')
+    returnTo = safeReturnTo(state.returnTo)
+
+    const redirectUri = `${backendBaseUrl()}/api/auth/oauth/${provider}/callback`
+    const profile = await socialProfile(provider, String(req.query.code), redirectUri)
+    const user = await findOrCreateSocialUser(profile)
+    res.cookie(COOKIE_NAME, signToken(user.id), cookieOptions())
+    res.redirect(redirectWithQuery(returnTo, 'socialLogin', 'success'))
+  } catch (err) {
+    console.error('[GET /api/auth/oauth callback]', err)
+    res.redirect(redirectWithQuery(returnTo === '/account' ? '/login' : returnTo, 'authError', err.message || 'No pudimos iniciar sesión'))
   }
 })
 

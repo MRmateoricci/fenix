@@ -401,7 +401,8 @@ La API responde JSON, salvo la descarga/servicio de archivos estáticos en `/upl
 - `GET /api/catalog`
 - `GET /api/catalog/:id`
 - `GET /api/reviews/:productId`
-- `GET /api/shipping/estimate?postalCode=1900`
+- `GET /api/shipping/estimate?postalCode=1894&service=clasico`
+- `GET /api/shipping/estimate?postalCode=5000&service=expreso&packageType=large`
 - `POST /api/orders`
 - `POST /api/auth/verify-email`
 - `GET /api/orders/public/:id`
@@ -443,6 +444,8 @@ El panel acepta estos flujos:
 | --- | --- | --- |
 | Catálogo Huergui | `/api/products/import/catalog` | Crea/actualiza descripción, grupo, subgrupo y medida. |
 | Vista previa de precios proveedor | `/api/products/import/prices/parse` | Extrae precios y propone coincidencias sin modificar la DB. |
+| Alta masiva de precios proveedor | `/api/products/import/prices/bulk` | Recibe varios Excel, toma el proveedor del nombre de cada archivo y crea borradores no publicados. |
+| Moneda por proveedor | `GET /api/products/supplier-settings` y `PATCH /api/products/supplier-settings/:supplier` | Permite elegir ARS/USD y recalcula todos los precios del proveedor. |
 | Reasociación de códigos de precios | `/api/products/import/prices/rematch` | Recalcula coincidencias después de un reemplazo masivo de códigos. |
 | Confirmación de precios proveedor | `/api/products/import/prices/apply` | Aplica las filas revisadas, asociadas o marcadas como producto nuevo. |
 | Venta POS | `/api/products/import/sale` | Descuenta unidades vendidas. |
@@ -454,6 +457,18 @@ El panel acepta estos flujos:
 | Confirmación CLEOS | `/api/products/import/cleos/apply` | Crea o actualiza solamente los productos aceptados y guarda sus imágenes. |
 
 Las planillas se procesan en memoria con un límite de 15 MB. Las imágenes aceptadas son JPEG, PNG, WebP o GIF, con un límite de 8 MB.
+
+La tarjeta “Precios proveedor” permite seleccionar varios archivos o una carpeta
+completa. Admite XLS/XLSX, detecta las columnas por sus encabezados, usa el nombre
+del archivo sin extensión como proveedor y crea solamente productos nuevos con
+`published = false`. Los códigos que ya existen no se modifican. Si el nombre del
+archivo contiene “DOLARES”, “DÓLARES” o “USD”, los importes se convierten a ARS con
+la cotización administrativa vigente y también se conserva el costo original USD.
+La moneda puede corregirse luego desde la tarjeta “Proveedor y moneda”. Esa
+elección se reutiliza en las próximas importaciones del proveedor y tiene
+prioridad sobre el nombre del archivo. Los valores fuente USD se conservan en
+columnas separadas; la administración, el catálogo público, las variantes y el
+checkout reciben siempre el importe final convertido a ARS.
 
 La revisión de precios permite editar costo, venta y precio con IVA; elegir ARS
 o USD para toda la planilla o por fila; desmarcar filas; y asociar manualmente
@@ -505,14 +520,37 @@ venta y stock.
 
 ## Envíos
 
-Las zonas y precios están duplicados deliberadamente en:
+El costo se cotiza con `backend/services/shippingQuotes.js`. Por defecto usa
+`SHIPPING_PROVIDER=manual` y las tarifas temporales de
+`backend/config/shipping.js`; el checkout conserva una copia en
+`src/config/shipping.js` para mostrar la cotización sin demoras.
+
+Las tarifas manuales vigentes son:
+
+| Alcance | Códigos postales | Clásico | Expreso |
+| --- | --- | ---: | ---: |
+| Local | 1894 | $12.020 | $13.219 |
+| Nacional estándar | 1000, 2000, 5000, 7600 | $15.957 | $21.941 |
+| Nacional grande (60 × 40 × 30 cm) | Se activa al informar paquete grande | $33.069 | $46.546 |
+
+Los archivos que contienen el tarifario son:
 
 - `src/config/shipping.js`, para mostrar la estimación en la interfaz.
 - `backend/config/shipping.js`, para recalcular y validar el costo de forma segura.
 
-Todo cambio de zonas, códigos postales o precios debe aplicarse en ambos archivos. El backend es la autoridad final al crear el pedido.
+Todo cambio manual debe aplicarse en ambos archivos. El backend vuelve a cotizar
+y es la autoridad final al crear el pedido; nunca acepta el precio enviado por
+el navegador.
 
-Actualmente hay zonas para City Bell/alrededores, La Plata/Gran La Plata y GBA Sur/Este. Si el código postal no coincide, el checkout deriva la consulta a WhatsApp.
+El cliente puede elegir envío clásico o expreso. Si el código postal no coincide,
+el checkout deriva la consulta a WhatsApp. La tarifa grande ya está contemplada
+por el cotizador, pero requiere que el catálogo o el futuro proveedor informe
+las dimensiones reales del paquete.
+
+Cuando estén disponibles las credenciales, implementar el adaptador marcado en
+`backend/services/shippingQuotes.js`, configurar las variables
+`CORREO_ARGENTINO_*` y cambiar `SHIPPING_PROVIDER` a `correo_argentino`. El resto
+del checkout y la creación de órdenes mantienen el mismo contrato.
 
 ## Mercado Pago y webhooks en desarrollo
 

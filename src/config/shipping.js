@@ -1,44 +1,55 @@
-// Zonas de envío — editá los precios según tus tarifas reales.
-// El CP del cliente se compara contra los prefijos de cada zona (de más específico a menos).
-// Si ninguna zona coincide, se muestra "Consultar por WhatsApp".
+// Copia para la vista previa del checkout. El backend vuelve a cotizar siempre
+// antes de crear la orden y es la autoridad final sobre el costo.
+
+export const SHIPPING_SERVICES = [
+  { id: 'clasico', label: 'Clásico' },
+  { id: 'expreso', label: 'Expreso' },
+]
 
 export const SHIPPING_ZONES = [
   {
-    id: 'gratis',
-    label: 'City Bell y alrededores',
-    description: 'City Bell, Gonnet, Villa Elisa, Ringuelet',
-    price: 0,
-    prefixes: ['1894', '1895', '1896', '1897', '1898', '1899'],
+    id: 'local',
+    label: 'Envío local',
+    description: 'Código postal 1894',
+    prices: { expreso: 13219, clasico: 12020 },
+    postalCodes: ['1894'],
   },
   {
-    id: 'laplata',
-    label: 'La Plata y Gran La Plata',
-    description: 'La Plata, Tolosa, Los Hornos, Melchor Romero, Berisso, Ensenada',
-    price: 2500,
-    prefixes: ['1900', '1901', '1902', '1903', '1904', '1905', '1906', '1907', '1908', '1909', '1910', '1911', '1912', '1913', '1914', '1915', '1923', '1924', '1925'],
-  },
-  {
-    id: 'gba',
-    label: 'GBA Sur y Este',
-    description: 'Berazategui, Quilmes, Florencio Varela, Almirante Brown',
-    price: 4500,
-    prefixes: ['1870', '1875', '1876', '1877', '1878', '1879', '1880', '1881', '1882', '1883', '1884', '1885', '1886', '1887', '1888', '1850', '1851', '1852', '1853', '1854', '1855', '1856', '1858', '1860', '1861', '1862', '1864', '1865'],
+    id: 'nacional_estandar',
+    label: 'Envío nacional estándar',
+    description: 'Tarifa nacional para paquete estándar',
+    prices: { expreso: 21941, clasico: 15957 },
+    postalCodes: ['1000', '2000', '5000', '7600'],
   },
 ]
 
+// Esta tarifa ya forma parte del contrato del cotizador. Se activará cuando el
+// catálogo o la API informen las dimensiones reales del paquete.
+export const LARGE_PACKAGE_RATE = {
+  id: 'nacional_grande',
+  label: 'Envío nacional grande',
+  description: 'Paquete de hasta 60 × 40 × 30 cm',
+  dimensions: { height: 60, width: 40, length: 30 },
+  prices: { expreso: 46546, clasico: 33069 },
+}
+
 export const SHIPPING_FALLBACK = {
+  id: 'unavailable',
   label: 'Zona no disponible',
   description: 'Para tu zona coordinamos el envío por WhatsApp',
   price: null,
 }
 
-export function getShippingForCP(cp) {
-  if (!cp || cp.trim().length < 4) return null
-  const normalized = cp.trim().replace(/\s/g, '')
-  for (const zone of SHIPPING_ZONES) {
-    if (zone.prefixes.some(prefix => normalized.startsWith(prefix))) {
-      return zone
-    }
-  }
-  return SHIPPING_FALLBACK
+export function normalizePostalCode(value) {
+  return String(value || '').trim().replace(/\s/g, '').toUpperCase()
+}
+
+export function getShippingForCP(postalCode, service = 'clasico') {
+  const normalized = normalizePostalCode(postalCode)
+  if (normalized.length < 4) return null
+
+  const zone = SHIPPING_ZONES.find(({ postalCodes }) => postalCodes.includes(normalized))
+  if (!zone || zone.prices[service] == null) return SHIPPING_FALLBACK
+
+  return { ...zone, service, price: zone.prices[service] }
 }

@@ -10,6 +10,7 @@ import {
   toNumber,
   parseHuerguiCatalog,
   parseAlcidesPrices,
+  parseSupplierPrices,
   parseSaleVoucher,
   parseKianPurchaseOrder,
 } from '../services/excelImport.js'
@@ -24,6 +25,7 @@ import {
   upsertCatalogRows,
   matchPriceRows,
   applyPriceUpdates,
+  createSupplierPriceDrafts,
   applySaleDecrement,
   applyPurchaseIncrement,
   matchInvoiceLines,
@@ -52,6 +54,76 @@ function normalizePriceSupplier(value) {
   return supplier && supplier.length <= 80 ? supplier : null
 }
 
+function supplierFromPriceFilename(filename) {
+  const supplier = path.parse(path.basename(String(filename || ''))).name
+    .trim()
+    .replace(/\s+/g, ' ')
+    .toUpperCase()
+  return supplier ? supplier.slice(0, 80) : null
+}
+
+function priceCurrencyFromFilename(filename) {
+  const name = path.parse(path.basename(String(filename || ''))).name
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+  return /(^|[^A-Z])(DOLAR|DOLARES|USD)([^A-Z]|$)/.test(name) || /U\$S/.test(name)
+    ? 'USD'
+    : 'ARS'
+}
+
+function convertedColorOptions(products, currency, usdArsRate) {
+  return products.map(product => {
+    const wasUsd = product.price_currency === 'USD'
+    const previousRate = Number(product.price_exchange_rate) || usdArsRate
+    const convert = (color, arsKey, usdKey) => {
+      const arsValue = color?.[arsKey] == null ? null : Number(color[arsKey])
+      const usdValue = color?.[usdKey] == null ? null : Number(color[usdKey])
+      if (currency === 'USD') {
+        const sourceUsd = wasUsd ? (usdValue ?? (arsValue == null ? null : arsValue / previousRate)) : arsValue
+        return { ars: sourceUsd == null ? null : Math.round(sourceUsd * usdArsRate * 100) / 100, usd: sourceUsd }
+      }
+      const sourceArs = wasUsd ? (usdValue ?? (arsValue == null ? null : arsValue / previousRate)) : arsValue
+      return { ars: sourceArs, usd: sourceArs == null ? null : Math.round(sourceArs / usdArsRate * 100) / 100 }
+    }
+    return {
+      id: product.id,
+      colors: (product.color_options || []).map(color => {
+        const sale = convert(color, 'price', 'priceUsd')
+        const cost = convert(color, 'priceCost', 'priceCostUsd')
+        const tax = convert(color, 'priceWithTax', 'priceWithTaxUsd')
+        return {
+          ...color,
+          price: sale.ars,
+          priceUsd: sale.usd,
+          priceCost: cost.ars,
+          priceCostUsd: cost.usd,
+          priceWithTax: tax.ars,
+          priceWithTaxUsd: tax.usd,
+        }
+      }),
+    }
+  })
+}
+
+function serializeNewProductCodeConflict(product) {
+  return {
+    productId: product.id,
+    codigo: product.codigo,
+    nombre: product.nombre || 'Sin nombre',
+    supplier: product.supplier || null,
+  }
+}
+
+function newProductCodeConflictMessage(conflicts) {
+  const details = conflicts
+    .slice(0, 5)
+    .map(product => `${product.codigo} — ${product.nombre}`)
+    .join('; ')
+  const remaining = conflicts.length > 5 ? `; y ${conflicts.length - 5} más` : ''
+  return `No se pueden crear productos porque estos códigos ya existen: ${details}${remaining}`
+}
+
 function buildProductFilters(query) {
   const {
     search, supplier, lowStock, stockStatus, published,
@@ -67,8 +139,8 @@ function buildProductFilters(query) {
     idx++
   }
   if (supplier) {
-    conditions.push(`supplier = $${idx++}`)
-    params.push(supplier)
+    conditions.push(`supplier ILIKE $${idx++}`)
+    params.push(`%${supplier}%`)
   }
   if (lowStock === 'true') conditions.push('stock <= 5')
   if (stockStatus === 'out') conditions.push('stock <= 0')
@@ -202,18 +274,146 @@ router.patch('/currency-settings', async (req, res) => {
   if (!Number.isFinite(usdArsRate) || usdArsRate <= 0) {
     return res.status(400).json({ error: 'La cotizacion debe ser mayor a cero' })
   }
+  const client = await pool.connect()
   try {
-    const { rows } = await pool.query(
+    await client.query('BEGIN')
+    const current = await client.query('SELECT usd_ars_rate FROM store_settings WHERE id = 1 FOR UPDATE')
+    const previousRate = Number(current.rows[0]?.usd_ars_rate || 1510)
+    const colorProducts = await client.query(
+      `SELECT id, color_options, price_currency, price_exchange_rate
+       FROM products
+       WHERE price_currency = 'USD' AND jsonb_array_length(color_options) > 0
+       FOR UPDATE`
+    )
+    const convertedColors = convertedColorOptions(colorProducts.rows, 'USD', usdArsRate)
+    await client.query(
+      `UPDATE products
+       SET precio_costo_usd = COALESCE(precio_costo_usd, precio_costo / COALESCE(NULLIF(price_exchange_rate, 0), $2)),
+           precio_venta_usd = COALESCE(precio_venta_usd, precio_venta / COALESCE(NULLIF(price_exchange_rate, 0), $2)),
+           precio_iva_usd = COALESCE(precio_iva_usd, precio_iva / COALESCE(NULLIF(price_exchange_rate, 0), $2)),
+           original_price_usd = COALESCE(original_price_usd, original_price / COALESCE(NULLIF(price_exchange_rate, 0), $2)),
+           precio_costo = ROUND(COALESCE(precio_costo_usd, precio_costo / COALESCE(NULLIF(price_exchange_rate, 0), $2)) * $1, 2),
+           precio_venta = ROUND(COALESCE(precio_venta_usd, precio_venta / COALESCE(NULLIF(price_exchange_rate, 0), $2)) * $1, 2),
+           precio_iva = ROUND(COALESCE(precio_iva_usd, precio_iva / COALESCE(NULLIF(price_exchange_rate, 0), $2)) * $1, 2),
+           original_price = ROUND(COALESCE(original_price_usd, original_price / COALESCE(NULLIF(price_exchange_rate, 0), $2)) * $1, 2),
+           price_exchange_rate = $1,
+           updated_at = NOW()
+       WHERE price_currency = 'USD'`,
+      [usdArsRate, previousRate]
+    )
+    for (const product of convertedColors) {
+      await client.query('UPDATE products SET color_options = $1::jsonb WHERE id = $2', [JSON.stringify(product.colors), product.id])
+    }
+    const { rows } = await client.query(
       `INSERT INTO store_settings (id, usd_ars_rate, updated_at)
        VALUES (1, $1, NOW())
        ON CONFLICT (id) DO UPDATE SET usd_ars_rate = EXCLUDED.usd_ars_rate, updated_at = NOW()
        RETURNING usd_ars_rate, updated_at`,
       [usdArsRate]
     )
+    await client.query('COMMIT')
     res.json({ usdArsRate: Number(rows[0].usd_ars_rate), updatedAt: rows[0].updated_at })
   } catch (err) {
+    await client.query('ROLLBACK')
     console.error('[PATCH /api/products/currency-settings]', err)
     res.status(500).json({ error: 'No se pudo guardar la cotizacion' })
+  } finally {
+    client.release()
+  }
+})
+
+router.get('/supplier-settings', async (_req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT product.supplier,
+              COUNT(*)::integer AS product_count,
+              COALESCE(setting.currency,
+                CASE WHEN COUNT(*) FILTER (WHERE product.price_currency = 'USD') > COUNT(*) / 2.0
+                     THEN 'USD' ELSE 'ARS' END
+              ) AS currency,
+              (setting.currency IS NOT NULL) AS configured,
+              setting.updated_at
+       FROM products product
+       LEFT JOIN supplier_price_settings setting ON setting.supplier = product.supplier
+       WHERE product.supplier IS NOT NULL AND BTRIM(product.supplier) <> ''
+       GROUP BY product.supplier, setting.currency, setting.updated_at
+       ORDER BY product.supplier`
+    )
+    res.json({ suppliers: rows.map(row => ({
+      supplier: row.supplier,
+      currency: row.currency,
+      configured: row.configured,
+      productCount: Number(row.product_count),
+      updatedAt: row.updated_at || null,
+    })) })
+  } catch (err) {
+    console.error('[GET /api/products/supplier-settings]', err)
+    res.status(500).json({ error: 'No se pudo cargar la moneda de los proveedores' })
+  }
+})
+
+router.patch('/supplier-settings/:supplier', async (req, res) => {
+  const supplier = normalizePriceSupplier(req.params.supplier)
+  const currency = req.body.currency === 'USD' ? 'USD' : req.body.currency === 'ARS' ? 'ARS' : null
+  if (!supplier || !currency) return res.status(400).json({ error: 'Proveedor o moneda inválidos' })
+
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+    const settings = await client.query('SELECT usd_ars_rate FROM store_settings WHERE id = 1')
+    const usdArsRate = Number(settings.rows[0]?.usd_ars_rate || 1510)
+    const colorProducts = await client.query(
+      `SELECT id, color_options, price_currency, price_exchange_rate
+       FROM products
+       WHERE supplier = $1 AND jsonb_array_length(color_options) > 0
+       FOR UPDATE`,
+      [supplier]
+    )
+
+    const convertedColors = convertedColorOptions(colorProducts.rows, currency, usdArsRate)
+    const update = currency === 'USD'
+      ? await client.query(
+        `UPDATE products
+         SET precio_costo_usd = CASE WHEN price_currency = 'USD' THEN COALESCE(precio_costo_usd, precio_costo / COALESCE(NULLIF(price_exchange_rate, 0), $2)) ELSE precio_costo END,
+             precio_venta_usd = CASE WHEN price_currency = 'USD' THEN COALESCE(precio_venta_usd, precio_venta / COALESCE(NULLIF(price_exchange_rate, 0), $2)) ELSE precio_venta END,
+             precio_iva_usd = CASE WHEN price_currency = 'USD' THEN COALESCE(precio_iva_usd, precio_iva / COALESCE(NULLIF(price_exchange_rate, 0), $2)) ELSE precio_iva END,
+             original_price_usd = CASE WHEN price_currency = 'USD' THEN COALESCE(original_price_usd, original_price / COALESCE(NULLIF(price_exchange_rate, 0), $2)) ELSE original_price END,
+             precio_costo = ROUND((CASE WHEN price_currency = 'USD' THEN COALESCE(precio_costo_usd, precio_costo / COALESCE(NULLIF(price_exchange_rate, 0), $2)) ELSE precio_costo END) * $2, 2),
+             precio_venta = ROUND((CASE WHEN price_currency = 'USD' THEN COALESCE(precio_venta_usd, precio_venta / COALESCE(NULLIF(price_exchange_rate, 0), $2)) ELSE precio_venta END) * $2, 2),
+             precio_iva = ROUND((CASE WHEN price_currency = 'USD' THEN COALESCE(precio_iva_usd, precio_iva / COALESCE(NULLIF(price_exchange_rate, 0), $2)) ELSE precio_iva END) * $2, 2),
+             original_price = ROUND((CASE WHEN price_currency = 'USD' THEN COALESCE(original_price_usd, original_price / COALESCE(NULLIF(price_exchange_rate, 0), $2)) ELSE original_price END) * $2, 2),
+             price_currency = 'USD', price_exchange_rate = $2, updated_at = NOW()
+         WHERE supplier = $1`,
+        [supplier, usdArsRate]
+      )
+      : await client.query(
+        `UPDATE products
+         SET precio_costo = CASE WHEN price_currency = 'USD' THEN COALESCE(precio_costo_usd, precio_costo / COALESCE(NULLIF(price_exchange_rate, 0), $2)) ELSE precio_costo END,
+             precio_venta = CASE WHEN price_currency = 'USD' THEN COALESCE(precio_venta_usd, precio_venta / COALESCE(NULLIF(price_exchange_rate, 0), $2)) ELSE precio_venta END,
+             precio_iva = CASE WHEN price_currency = 'USD' THEN COALESCE(precio_iva_usd, precio_iva / COALESCE(NULLIF(price_exchange_rate, 0), $2)) ELSE precio_iva END,
+             original_price = CASE WHEN price_currency = 'USD' THEN COALESCE(original_price_usd, original_price / COALESCE(NULLIF(price_exchange_rate, 0), $2)) ELSE original_price END,
+             price_currency = 'ARS', price_exchange_rate = $2, updated_at = NOW()
+         WHERE supplier = $1`,
+        [supplier, usdArsRate]
+      )
+
+    for (const product of convertedColors) {
+      await client.query('UPDATE products SET color_options = $1::jsonb WHERE id = $2', [JSON.stringify(product.colors), product.id])
+    }
+    await client.query(
+      `INSERT INTO supplier_price_settings (supplier, currency, updated_at)
+       VALUES ($1, $2, NOW())
+       ON CONFLICT (supplier) DO UPDATE SET currency = EXCLUDED.currency, updated_at = NOW()`,
+      [supplier, currency]
+    )
+    await client.query('COMMIT')
+    res.json({ supplier, currency, productCount: update.rowCount, usdArsRate })
+  } catch (err) {
+    await client.query('ROLLBACK')
+    console.error('[PATCH /api/products/supplier-settings/:supplier]', err)
+    res.status(500).json({ error: 'No se pudo actualizar la moneda del proveedor' })
+  } finally {
+    client.release()
   }
 })
 
@@ -258,6 +458,10 @@ const FIELD_TRANSFORMS = {
   material:          (v) => v,
   cable_type:        (v) => v,
   product_type:      (v) => v,
+  length_cm:         (v) => toNumber(v),
+  width_cm:          (v) => toNumber(v),
+  height_cm:         (v) => toNumber(v),
+  weight_kg:         (v) => toNumber(v),
   published:         (v) => Boolean(v),
 }
 const EDITABLE_FIELDS = Object.keys(FIELD_TRANSFORMS)
@@ -309,8 +513,14 @@ router.post('/batch', async (req, res) => {
       return res.status(400).json({ error: 'El precio debe ser un número mayor o igual a cero' })
     }
 
+    const usdField = field === 'precio_venta' ? 'precio_venta_usd' : field === 'precio_costo' ? 'precio_costo_usd' : null
+    const usdSync = usdField
+      ? `, ${usdField} = CASE WHEN price_currency = 'USD'
+                              THEN $1 / COALESCE((SELECT usd_ars_rate FROM store_settings WHERE id = 1), 1510)
+                              ELSE ${usdField} END`
+      : ''
     const { rows } = await client.query(
-      `UPDATE products SET ${field} = $1 WHERE id = ANY($2::uuid[]) RETURNING *`,
+      `UPDATE products SET ${field} = $1${usdSync} WHERE id = ANY($2::uuid[]) RETURNING *`,
       [value, ids]
     )
     await client.query('COMMIT')
@@ -376,11 +586,27 @@ router.patch('/:id', async (req, res) => {
     if (!sets.length) return res.status(400).json({ error: 'Sin cambios para aplicar' })
 
     params.push(req.params.id)
-    const { rows } = await pool.query(
+    let { rows } = await pool.query(
       `UPDATE products SET ${sets.join(', ')} WHERE id = $${idx} RETURNING *`,
       params
     )
     if (!rows.length) return res.status(404).json({ error: 'Producto no encontrado' })
+    const usdSyncFields = [
+      ['precio_costo', 'precio_costo_usd'],
+      ['precio_venta', 'precio_venta_usd'],
+      ['precio_iva', 'precio_iva_usd'],
+      ['original_price', 'original_price_usd'],
+    ].filter(([arsField]) => arsField in req.body)
+    if (rows[0].price_currency === 'USD' && usdSyncFields.length) {
+      const syncSets = usdSyncFields.map(([arsField, usdField]) => (
+        `${usdField} = ${arsField} / COALESCE((SELECT usd_ars_rate FROM store_settings WHERE id = 1), 1510)`
+      ))
+      const synced = await pool.query(
+        `UPDATE products SET ${syncSets.join(', ')} WHERE id = $1 RETURNING *`,
+        [req.params.id]
+      )
+      rows = synced.rows
+    }
     res.json(rows[0])
   } catch (err) {
     if (err.code === '23505') return res.status(409).json({ error: 'Ya existe un producto con ese código' })
@@ -473,22 +699,25 @@ router.post('/:id/adjust-stock', async (req, res) => {
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
-// POST /api/products/:id/image — sube la foto de un producto ya guardado y
-// devuelve la URL pública (servida en index.js vía /uploads). El producto
-// tiene que existir de antes: para uno nuevo, primero se guarda con
-// image_url = link pegado a mano (ej. foto de catálogo del proveedor), y
-// recién en modo "editar" se puede reemplazar por un archivo subido acá.
+// POST /api/products/image o /:id/image — permite subir una foto tanto durante
+// el alta como al editar. La URL devuelta se guarda junto con el formulario.
 // ─────────────────────────────────────────────────────────────────────────────
 const uploadImage = multer({
   storage: multer.diskStorage({
     destination: (req, file, cb) => cb(null, uploadsDir),
     filename: (req, file, cb) => {
       const ext = path.extname(file.originalname).toLowerCase() || '.jpg'
-      cb(null, `${req.params.id}-${Date.now()}${ext}`)
+      const owner = req.params.id || 'draft'
+      cb(null, `${owner}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}${ext}`)
     },
   }),
   limits: { fileSize: 8 * 1024 * 1024 },
   fileFilter: (req, file, cb) => cb(null, /^image\/(jpeg|png|webp|gif)$/.test(file.mimetype)),
+})
+
+router.post('/image', uploadImage.single('file'), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'Falta el archivo de imagen' })
+  res.json({ url: `${req.protocol}://${req.get('host')}/uploads/${req.file.filename}` })
 })
 
 router.post('/:id/image', uploadImage.single('file'), async (req, res) => {
@@ -605,6 +834,80 @@ router.post('/import/prices/parse', upload.single('file'), async (req, res) => {
   } catch (err) {
     console.error('[POST /api/products/import/prices/parse]', err)
     res.status(500).json({ error: 'No se pudo leer la lista de precios' })
+  } finally {
+    client.release()
+  }
+})
+
+router.post('/import/prices/bulk', upload.array('files', 100), async (req, res) => {
+  const files = Array.isArray(req.files) ? req.files : []
+  if (!files.length) return res.status(400).json({ error: 'Elegí al menos un archivo XLS o XLSX' })
+
+  const parsedFiles = []
+  const failedFiles = []
+  for (const file of files) {
+    try {
+      const supplier = supplierFromPriceFilename(file.originalname)
+      if (!supplier) throw new Error('El nombre del archivo no permite identificar al proveedor')
+      const parsed = parseSupplierPrices(file.buffer)
+      if (!parsed.rows.length) throw new Error('No contiene filas de productos reconocibles')
+      parsedFiles.push({
+        fileName: path.basename(file.originalname),
+        supplier,
+        currency: priceCurrencyFromFilename(file.originalname),
+        ...parsed,
+      })
+    } catch (err) {
+      failedFiles.push({
+        fileName: path.basename(file.originalname),
+        error: err.message || 'No se pudo leer el archivo',
+      })
+    }
+  }
+
+  if (!parsedFiles.length) {
+    return res.status(400).json({
+      error: 'Ninguno de los archivos contiene una lista de precios válida',
+      failedFiles,
+    })
+  }
+
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+    const settings = await client.query('SELECT usd_ars_rate FROM store_settings WHERE id = 1')
+    const usdArsRate = Number(settings.rows[0]?.usd_ars_rate || 1510)
+    const savedCurrencies = await client.query(
+      'SELECT supplier, currency FROM supplier_price_settings WHERE supplier = ANY($1::text[])',
+      [[...new Set(parsedFiles.map(file => file.supplier))]]
+    )
+    const currencyBySupplier = new Map(savedCurrencies.rows.map(row => [row.supplier, row.currency]))
+    for (const file of parsedFiles) file.currency = currencyBySupplier.get(file.supplier) || file.currency
+    await client.query(
+      `INSERT INTO supplier_price_settings (supplier, currency)
+       SELECT entry.supplier, entry.currency
+       FROM jsonb_to_recordset($1::jsonb) AS entry(supplier text, currency text)
+       ON CONFLICT (supplier) DO NOTHING`,
+      [JSON.stringify([...new Map(parsedFiles.map(file => [file.supplier, {
+        supplier: file.supplier,
+        currency: file.currency,
+      }])).values()])]
+    )
+    const result = await createSupplierPriceDrafts(client, parsedFiles, usdArsRate)
+    await client.query('COMMIT')
+    res.json({
+      fileType: 'bulk-prices',
+      totalFiles: files.length,
+      processedFiles: parsedFiles.length,
+      totalRows: parsedFiles.reduce((sum, file) => sum + file.totalRows, 0),
+      exchangeRate: usdArsRate,
+      failedFiles,
+      ...result,
+    })
+  } catch (err) {
+    await client.query('ROLLBACK')
+    console.error('[POST /api/products/import/prices/bulk]', err)
+    res.status(500).json({ error: 'No se pudieron crear los productos de las listas' })
   } finally {
     client.release()
   }
@@ -727,6 +1030,26 @@ router.post('/import/prices/apply', async (req, res) => {
         return res.status(404).json({ error: 'Uno o mas productos asociados ya no existen' })
       }
     }
+    if (newCodes.size) {
+      const existingCodes = await client.query(
+        `SELECT id, codigo,
+                COALESCE(NULLIF(name, ''), NULLIF(descripcion, ''), 'Sin nombre') AS nombre,
+                supplier
+         FROM products
+         WHERE codigo = ANY($1::text[])
+         ORDER BY codigo`,
+        [[...newCodes]]
+      )
+      if (existingCodes.rows.length) {
+        await client.query('ROLLBACK')
+        const conflicts = existingCodes.rows.map(serializeNewProductCodeConflict)
+        return res.status(409).json({
+          error: newProductCodeConflictMessage(conflicts),
+          code: 'PRODUCT_CODES_ALREADY_EXIST',
+          conflicts,
+        })
+      }
+    }
     const settings = await client.query('SELECT usd_ars_rate FROM store_settings WHERE id = 1')
     const usdArsRate = Number(settings.rows[0]?.usd_ars_rate || 1510)
     const result = await applyPriceUpdates(client, normalized, usdArsRate, supplier)
@@ -734,7 +1057,28 @@ router.post('/import/prices/apply', async (req, res) => {
     res.json({ fileType: 'prices', supplier, totalRows: normalized.length, exchangeRate: usdArsRate, ...result })
   } catch (err) {
     await client.query('ROLLBACK')
-    if (err.code === '23505') return res.status(409).json({ error: 'Ya existe un producto con uno de los codigos nuevos' })
+    if (err.code === '23505') {
+      const duplicatedCode = err.detail?.match(/\(codigo\)=\((.+)\)/)?.[1] || null
+      let conflicts = []
+      if (duplicatedCode) {
+        const existingCode = await client.query(
+          `SELECT id, codigo,
+                  COALESCE(NULLIF(name, ''), NULLIF(descripcion, ''), 'Sin nombre') AS nombre,
+                  supplier
+           FROM products
+           WHERE codigo = $1`,
+          [duplicatedCode]
+        )
+        conflicts = existingCode.rows.map(serializeNewProductCodeConflict)
+      }
+      return res.status(409).json({
+        error: conflicts.length
+          ? newProductCodeConflictMessage(conflicts)
+          : 'Ya existe un producto con uno de los códigos nuevos',
+        code: 'PRODUCT_CODES_ALREADY_EXIST',
+        conflicts,
+      })
+    }
     console.error('[POST /api/products/import/prices/apply]', err)
     res.status(500).json({ error: 'No se pudieron actualizar los precios' })
   } finally {

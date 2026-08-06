@@ -93,7 +93,7 @@ export default function Orders() {
                       {fmtDate(order.created_at)}
                     </span>
                     <Link
-                      to={`/track-order?n=${order.order_number}`}
+                      to={`/orders/${order.id}`}
                       className="text-xs font-semibold"
                       style={{ color: 'var(--color-primary)' }}
                     >

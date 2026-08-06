@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useNavigate, Link } from 'react-router-dom'
+import { useLocation, useNavigate, Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { Field, DarkInput, PrimaryBtn } from '../components/AuthFormKit'
 import PageSEO from '../components/SEO'
@@ -18,6 +18,8 @@ function validate({ firstName, lastName, email, password }) {
 export default function Register() {
   const { register } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
+  const redirectTo = location.state?.from || '/account'
 
   const [formData, setFormData] = useState({ firstName: '', lastName: '', email: '', password: '' })
   const [errors, setErrors]     = useState({})
@@ -38,7 +40,7 @@ export default function Register() {
     setLoading(true)
     try {
       await register(formData)
-      navigate('/account', { replace: true })
+      navigate(redirectTo, { replace: true })
     } catch (err) {
       setSubmitError(err.message)
     } finally {
@@ -100,7 +102,7 @@ export default function Register() {
 
           <p style={{ textAlign: 'center', fontSize: '0.875rem', color: 'var(--color-text-muted)', marginTop: '1.5rem' }}>
             ¿Ya tenés cuenta?{' '}
-            <Link to="/login" style={{ color: 'var(--color-primary)', fontWeight: 600, textDecoration: 'none' }}>
+            <Link to="/login" state={{ from: redirectTo }} style={{ color: 'var(--color-primary)', fontWeight: 600, textDecoration: 'none' }}>
               Iniciá sesión
             </Link>
           </p>

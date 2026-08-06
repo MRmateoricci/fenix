@@ -28,6 +28,10 @@ function toBackendPayload(p) {
   if ('material' in p)      out.material           = p.material
   if ('productType' in p)   out.product_type       = p.productType || null
   if ('cableType' in p)     out.cable_type         = p.cableType
+  if ('lengthCm' in p)      out.length_cm           = p.lengthCm
+  if ('widthCm' in p)       out.width_cm            = p.widthCm
+  if ('heightCm' in p)      out.height_cm           = p.heightCm
+  if ('weightKg' in p)      out.weight_kg           = p.weightKg
   if ('published' in p)     out.published          = p.published
   // El backend solo tiene `stock` (entero) — inStock es stock > 0 derivado al
   // leer. Si viene stock explícito se usa tal cual; si solo viene el toggle
@@ -65,6 +69,7 @@ export function AdminProvider({ children }) {
   const [importLoading, setImportLoading]        = useState(false)
   const [importError, setImportError]            = useState(null)
   const [currencySettings, setCurrencySettings]  = useState({ usdArsRate: 1510, updatedAt: null })
+  const [supplierSettings, setSupplierSettings]  = useState([])
 
   // ── fetchCatalog — trae el catálogo público publicado (sin auth) ─────────
   const fetchCatalog = useCallback(async () => {
@@ -238,11 +243,14 @@ export function AdminProvider({ children }) {
     await fetchCatalog()
   }, [updateInventoryItem, fetchCatalog])
 
-  // ── uploadProductImage — sube un archivo de foto para un producto ya guardado
+  // ── uploadProductImage — con ID edita; sin ID prepara una foto para un alta
   const uploadProductImage = useCallback(async (id, file) => {
     const formData = new FormData()
     formData.append('file', file)
-    const res = await fetch(`${API_BASE}/api/products/${id}/image`, {
+    const endpoint = id
+      ? `${API_BASE}/api/products/${id}/image`
+      : `${API_BASE}/api/products/image`
+    const res = await fetch(endpoint, {
       method: 'POST',
       headers: { 'x-admin-token': ADMIN_PASSWORD },
       body: formData,
@@ -319,9 +327,48 @@ export function AdminProvider({ children }) {
     return data
   }, [])
 
+  const fetchInventoryItem = useCallback(async (id) => {
+    const res = await fetch(`${API_BASE}/api/products/${id}`, {
+      headers: { 'x-admin-token': ADMIN_PASSWORD },
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error || 'No se pudo cargar el producto')
+    return data
+  }, [])
+
+  const fetchSupplierSettings = useCallback(async () => {
+    const res = await fetch(`${API_BASE}/api/products/supplier-settings`, {
+      headers: { 'x-admin-token': ADMIN_PASSWORD },
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error || 'No se pudieron cargar los proveedores')
+    setSupplierSettings(data.suppliers || [])
+    return data.suppliers || []
+  }, [])
+
+  const updateSupplierCurrency = useCallback(async (supplier, currency) => {
+    const res = await fetch(`${API_BASE}/api/products/supplier-settings/${encodeURIComponent(supplier)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', 'x-admin-token': ADMIN_PASSWORD },
+      body: JSON.stringify({ currency }),
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error || 'No se pudo actualizar la moneda del proveedor')
+    setSupplierSettings(current => current.some(item => item.supplier === supplier)
+      ? current.map(item => (
+        item.supplier === supplier ? { ...item, currency: data.currency, configured: true, productCount: data.productCount } : item
+      ))
+      : [...current, { supplier, currency: data.currency, configured: true, productCount: data.productCount }]
+    )
+    return data
+  }, [])
+
   useEffect(() => {
-    if (isAdmin) fetchCurrencySettings().catch(() => {})
-  }, [isAdmin, fetchCurrencySettings])
+    if (isAdmin) {
+      fetchCurrencySettings().catch(() => {})
+      fetchSupplierSettings().catch(() => {})
+    }
+  }, [isAdmin, fetchCurrencySettings, fetchSupplierSettings])
 
   const parsePriceFile = useCallback(async (file, supplier) => {
     const formData = new FormData()
@@ -337,6 +384,33 @@ export function AdminProvider({ children }) {
     if (data.usdArsRate) setCurrencySettings(current => ({ ...current, usdArsRate: data.usdArsRate }))
     return data
   }, [])
+
+  const uploadPriceFiles = useCallback(async (files) => {
+    setImportLoading(true)
+    setImportError(null)
+    try {
+      const formData = new FormData()
+      for (const file of files) formData.append('files', file)
+      const res = await fetch(`${API_BASE}/api/products/import/prices/bulk`, {
+        method: 'POST',
+        headers: { 'x-admin-token': ADMIN_PASSWORD },
+        body: formData,
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'No se pudieron importar las listas de precios')
+      if (data.exchangeRate) {
+        setCurrencySettings(current => ({ ...current, usdArsRate: data.exchangeRate }))
+      }
+      fetchSupplierSettings().catch(() => {})
+      setImportResult(data)
+      return data
+    } catch (err) {
+      setImportError(err.message)
+      throw err
+    } finally {
+      setImportLoading(false)
+    }
+  }, [fetchSupplierSettings])
 
   const rematchPriceLines = useCallback(async (lines, supplier) => {
     const res = await fetch(`${API_BASE}/api/products/import/prices/rematch`, {
@@ -359,7 +433,12 @@ export function AdminProvider({ children }) {
         body: JSON.stringify({ actions, supplier }),
       })
       const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'No se pudieron actualizar los precios')
+      if (!res.ok) {
+        const error = new Error(data.error || 'No se pudieron actualizar los precios')
+        error.code = data.code || null
+        error.conflicts = Array.isArray(data.conflicts) ? data.conflicts : []
+        throw error
+      }
       setImportResult(data)
       return data
     } catch (err) {
@@ -370,9 +449,9 @@ export function AdminProvider({ children }) {
     }
   }, [])
 
-  const searchProducts = useCallback(async (query) => {
+  const searchProducts = useCallback(async (query, filters = {}) => {
     if (!query || query.trim().length < 2) return []
-    const params = new URLSearchParams({ search: query.trim(), limit: 8 }).toString()
+    const params = new URLSearchParams({ search: query.trim(), limit: 8, ...filters }).toString()
     const res = await fetch(`${API_BASE}/api/products?${params}`, {
       headers: { 'x-admin-token': ADMIN_PASSWORD },
     })
@@ -476,10 +555,11 @@ export function AdminProvider({ children }) {
       inventory, inventoryTotal, inventorySuppliers, inventoryLoading, inventoryError,
       importResult, importLoading, importError,
       currencySettings, fetchCurrencySettings, updateCurrencySettings,
-      fetchInventory, createInventoryItem, updateInventoryItem, deleteInventoryItem,
+      supplierSettings, fetchSupplierSettings, updateSupplierCurrency,
+      fetchInventory, fetchInventoryItem, createInventoryItem, updateInventoryItem, deleteInventoryItem,
       fetchInventorySelectionIds, applyInventoryBatch,
       adjustInventoryStocks, uploadInventoryFile, uploadProductImage,
-      parsePriceFile, rematchPriceLines, applyPriceUpdates,
+      parsePriceFile, uploadPriceFiles, rematchPriceLines, applyPriceUpdates,
       searchProducts, parseInvoicePdf, applyInvoiceLines,
       parseCleosCatalogPdf, uploadCleosPreviewImage, applyCleosCatalogProducts,
     }}>

@@ -44,7 +44,8 @@ function deliveryLine(order) {
     return `Retiro en local — 473 entre 14C y 15, City Bell${when ? ` el ${when}` : ''}. ${pago}.`
   }
   const when = fmtDate(order.estimated_delivery_date)
-  return `Envío a ${order.address}, ${order.city}${order.postal_code ? ` (CP ${order.postal_code})` : ''}${when ? ` — llega aprox. el ${when}` : ''}.`
+  const service = order.shipping_service ? ` ${order.shipping_service}` : ''
+  return `Envío${service} a ${order.address}, ${order.city}${order.postal_code ? ` (CP ${order.postal_code})` : ''}${when ? ` — llega aprox. el ${when}` : ''}.`
 }
 
 function itemsRows(order) {
@@ -78,6 +79,25 @@ export function emailVerificationEmail({ firstName, token }) {
           </a>
         </p>
         <p style="font-size:13px;color:#6B6257">El enlace vence en 24 horas. Si no creaste esta cuenta, podés ignorar este mensaje.</p>
+      </div>
+    `,
+  }
+}
+
+export function passwordResetEmail({ firstName, token }) {
+  const resetUrl = `${appBaseUrl()}/reset-password?token=${encodeURIComponent(token)}`
+  return {
+    subject: 'Restablecé tu contraseña de Fénix Iluminación',
+    html: `
+      <div style="font-family:Arial,sans-serif;color:#16110B;line-height:1.6;max-width:560px">
+        <h2>Restablecer contraseña</h2>
+        <p>Hola ${escapeHtml(firstName)}. Recibimos una solicitud para cambiar la contraseña de tu cuenta.</p>
+        <p style="margin:24px 0">
+          <a href="${resetUrl}" style="display:inline-block;background:#16110B;color:#fff;text-decoration:none;padding:12px 20px;border-radius:4px;font-weight:600">
+            Crear una nueva contraseña
+          </a>
+        </p>
+        <p style="font-size:13px;color:#6B6257">El enlace vence en una hora. Si no pediste este cambio, podés ignorar el mensaje.</p>
       </div>
     `,
   }

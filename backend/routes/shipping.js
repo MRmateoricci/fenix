@@ -1,5 +1,6 @@
 import { Router } from 'express'
-import { getShippingForCP } from '../config/shipping.js'
+import { SHIPPING_SERVICES } from '../config/shipping.js'
+import { quoteShipping } from '../services/shippingQuotes.js'
 import { estimateDeliveryDate } from '../services/correoArgentino.js'
 
 const router = Router()
@@ -12,8 +13,17 @@ const router = Router()
 router.get('/estimate', async (req, res) => {
   try {
     const { postalCode } = req.query
-    const zone = getShippingForCP(postalCode)
-    if (!zone) {
+    const service = String(req.query.service || 'clasico').toLowerCase()
+    const packageType = String(req.query.packageType || 'standard').toLowerCase()
+    if (!SHIPPING_SERVICES.includes(service)) {
+      return res.status(400).json({ error: 'Servicio de envío inválido' })
+    }
+    if (!['standard', 'large'].includes(packageType)) {
+      return res.status(400).json({ error: 'Tipo de paquete inválido' })
+    }
+
+    const quote = await quoteShipping({ postalCode, service, packageType })
+    if (!quote) {
       return res.status(404).json({ error: 'No pudimos calcular el envío para ese código postal' })
     }
 
@@ -21,7 +31,15 @@ router.get('/estimate', async (req, res) => {
       await estimateDeliveryDate(postalCode)
 
     res.json({
-      zone: { id: zone.id, label: zone.label, description: zone.description, cost: zone.price },
+      zone: {
+        id: quote.id,
+        label: quote.label,
+        description: quote.description,
+        cost: quote.cost,
+      },
+      postalCode: quote.postalCode,
+      service: quote.service,
+      source: quote.source,
       carrierBusinessDays,
       bufferBusinessDays,
       totalBusinessDays,

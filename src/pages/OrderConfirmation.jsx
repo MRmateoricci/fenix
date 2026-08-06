@@ -20,12 +20,18 @@ const STATUS_LABELS = {
 export default function OrderConfirmation() {
   const { clearCart }       = useCart()
   const [searchParams]    = useSearchParams()
-  const mpStatus          = searchParams.get('status')   // success | failure | pending
+  const returnedStatuses  = searchParams.getAll('status')
+  const mpStatus          = returnedStatuses.find((status) => ['success', 'failure', 'pending'].includes(status))
+    || returnedStatuses[0]
+  const paymentStatus     = searchParams.get('collection_status')
+    || returnedStatuses.find((status) => ['approved', 'rejected', 'in_process'].includes(status))
+  const paymentId         = searchParams.get('payment_id') || searchParams.get('collection_id')
   const orderId           = searchParams.get('orderId')
 
   const [order, setOrder]     = useState(null)
   const [loading, setLoading] = useState(true)
   const pollsRef              = useRef(0)
+  const reconciliationRef     = useRef(false)
   const MAX_POLLS             = 10
 
   useEffect(() => {
@@ -34,32 +40,60 @@ export default function OrderConfirmation() {
 
   useEffect(() => {
     if (!orderId) { setLoading(false); return }
+    let cancelled = false
+    let pollTimer
 
     async function fetchOrder() {
       try {
-        const res = await fetch(`${API_BASE}/api/orders/public/${orderId}`)
+        const res = await fetch(`${API_BASE}/api/orders/public/${orderId}`, { cache: 'no-store' })
         if (!res.ok) throw new Error('not found')
         const data = await res.json()
+        if (cancelled) return
         setOrder(data)
 
         // Si MP dijo success pero el webhook aún no llegó, seguimos polling
         if (
           data.status === 'pending_payment' &&
-          mpStatus === 'success' &&
+          (mpStatus === 'success' || paymentStatus === 'approved') &&
           pollsRef.current < MAX_POLLS
         ) {
           pollsRef.current += 1
-          setTimeout(fetchOrder, 3000)
+          pollTimer = setTimeout(fetchOrder, 3000)
           return
         }
       } catch {
         // no-op
       }
-      setLoading(false)
+      if (!cancelled) setLoading(false)
     }
 
-    fetchOrder()
-  }, [orderId, mpStatus])
+    async function verifyReturnAndFetch() {
+      const shouldReconcile = paymentId
+        && (mpStatus === 'success' || paymentStatus === 'approved')
+        && !reconciliationRef.current
+
+      if (shouldReconcile) {
+        reconciliationRef.current = true
+        try {
+          await fetch(`${API_BASE}/api/orders/public/${orderId}/reconcile-payment`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ paymentId }),
+          })
+        } catch {
+          // El polling queda como respaldo si la API de MP está temporalmente caída.
+        }
+      }
+
+      await fetchOrder()
+    }
+
+    verifyReturnAndFetch()
+    return () => {
+      cancelled = true
+      clearTimeout(pollTimer)
+    }
+  }, [orderId, mpStatus, paymentStatus, paymentId])
 
   useEffect(() => {
     if (['paid', 'preparing', 'shipped', 'delivered', 'reserved'].includes(order?.status)) {

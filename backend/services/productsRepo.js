@@ -74,6 +74,92 @@ export async function upsertPriceRows(client, rows) {
   return { created, updated }
 }
 
+// Alta masiva de listas de proveedores. Este flujo solo crea borradores: nunca
+// modifica un producto que ya existe y nunca publica un artículo automáticamente.
+export async function createSupplierPriceDrafts(client, files, usdArsRate) {
+  const seenCodes = new Set()
+  const fileResults = []
+  let created = 0
+  let skipped = 0
+
+  for (const file of files) {
+    const uniqueRows = []
+    let duplicateRows = 0
+
+    for (const row of file.rows) {
+      const codeKey = String(row.codigo || '').trim().toUpperCase()
+      if (seenCodes.has(codeKey)) {
+        duplicateRows++
+        continue
+      }
+      seenCodes.add(codeKey)
+      uniqueRows.push(row)
+    }
+
+    let fileCreated = 0
+    const existingCodes = []
+    for (const batch of chunk(uniqueRows)) {
+      const params = []
+      for (const row of batch) {
+        const currency = file.currency === 'USD' ? 'USD' : 'ARS'
+        const toArs = value => value == null
+          ? null
+          : Math.round((currency === 'USD' ? Number(value) * usdArsRate : Number(value)) * 100) / 100
+        const costArs = toArs(row.precio_costo)
+        const saleArs = toArs(row.precio_venta)
+        const taxArs = toArs(row.precio_iva)
+        const costUsd = row.precio_costo == null
+          ? null
+          : Math.round((currency === 'USD' ? Number(row.precio_costo) : Number(row.precio_costo) / usdArsRate) * 100) / 100
+        const saleUsd = row.precio_venta == null
+          ? null
+          : Math.round((currency === 'USD' ? Number(row.precio_venta) : Number(row.precio_venta) / usdArsRate) * 100) / 100
+        const taxUsd = row.precio_iva == null
+          ? null
+          : Math.round((currency === 'USD' ? Number(row.precio_iva) : Number(row.precio_iva) / usdArsRate) * 100) / 100
+        params.push(
+          row.codigo, row.descripcion, costArs, saleArs, taxArs, costUsd, saleUsd, taxUsd,
+          currency, usdArsRate, file.supplier
+        )
+      }
+
+      const { rows: inserted } = await client.query(
+        `INSERT INTO products (
+           codigo, descripcion, precio_costo, precio_venta, precio_iva,
+           precio_costo_usd, precio_venta_usd, precio_iva_usd,
+           price_currency, price_exchange_rate, supplier,
+           source, price_updated_at, published
+         )
+         VALUES ${valuesClause(batch.length, 11, ["'price_list'", 'NOW()', 'FALSE'])}
+         ON CONFLICT (codigo) DO NOTHING
+         RETURNING codigo`,
+        params
+      )
+      const insertedCodes = new Set(inserted.map(row => row.codigo))
+      fileCreated += inserted.length
+      existingCodes.push(...batch.filter(row => !insertedCodes.has(row.codigo)).map(row => row.codigo))
+    }
+
+    const fileSkipped = Number(file.skipped || 0) + duplicateRows + existingCodes.length
+    created += fileCreated
+    skipped += fileSkipped
+    fileResults.push({
+      fileName: file.fileName,
+      supplier: file.supplier,
+      currency: file.currency,
+      totalRows: file.totalRows,
+      created: fileCreated,
+      skipped: fileSkipped,
+      invalidRows: Number(file.skipped || 0),
+      duplicateRows,
+      existingCount: existingCodes.length,
+      existingCodes: existingCodes.slice(0, 25),
+    })
+  }
+
+  return { created, skipped, files: fileResults }
+}
+
 // La lista de precios se revisa antes de tocar la base. Este paso busca primero
 // coincidencias exactas y, si no hay, rankea candidatos por similitud de codigo
 // y descripcion para que el administrador corrija rapido el emparejamiento.
@@ -279,23 +365,28 @@ export async function applyPriceUpdates(client, actions, usdArsRate, supplier = 
     const saleUsd = action.precioVenta == null
       ? null
       : Math.round((currency === 'USD' ? action.precioVenta : action.precioVenta / usdArsRate) * 100) / 100
+    const taxUsd = action.precioIva == null
+      ? null
+      : Math.round((currency === 'USD' ? action.precioIva : action.precioIva / usdArsRate) * 100) / 100
 
     if (action.type === 'create') {
       const { rows } = await client.query(
         `INSERT INTO products (
            codigo, descripcion, precio_costo, precio_venta, precio_iva,
-           precio_costo_usd, price_currency, price_exchange_rate,
+           precio_costo_usd, precio_venta_usd, precio_iva_usd,
+           price_currency, price_exchange_rate,
            source, supplier, price_updated_at, published
          )
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'price_list', $9, NOW(), FALSE)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'price_list', $11, NOW(), FALSE)
          RETURNING id`,
-        [action.codigo, action.descripcion, costArs, saleArs, taxArs, costUsd, currency, usdArsRate, action.supplier || 'OTRO']
+        [action.codigo, action.descripcion, costArs, saleArs, taxArs, costUsd, saleUsd, taxUsd, currency, usdArsRate, action.supplier || 'OTRO']
       )
       mappedProductId = rows[0]?.id || null
       created++
     } else if (action.colorVariant) {
       const { rows } = await client.query(
-        `SELECT color_options, precio_costo, precio_venta, precio_iva, precio_costo_usd
+        `SELECT color_options, precio_costo, precio_venta, precio_iva,
+                precio_costo_usd, precio_venta_usd, precio_iva_usd
          FROM products WHERE id = $1`,
         [action.productId]
       )
@@ -316,6 +407,7 @@ export async function applyPriceUpdates(client, actions, usdArsRate, supplier = 
         priceWithTax: taxArs ?? previousColor.priceWithTax ?? (product?.precio_iva == null ? null : Number(product.precio_iva)),
         priceUsd: saleUsd ?? previousColor.priceUsd ?? null,
         priceCostUsd: costUsd ?? previousColor.priceCostUsd ?? null,
+        priceWithTaxUsd: taxUsd ?? previousColor.priceWithTaxUsd ?? null,
       }
       const nextColors = [...currentColors]
       if (colorIndex >= 0) nextColors[colorIndex] = color
@@ -335,17 +427,21 @@ export async function applyPriceUpdates(client, actions, usdArsRate, supplier = 
              precio_venta = $3,
              precio_iva = $4,
              precio_costo_usd = $5,
-             price_currency = $6,
-             price_exchange_rate = $7,
+             precio_venta_usd = $6,
+             precio_iva_usd = $7,
+             price_currency = $8,
+             price_exchange_rate = $9,
              price_updated_at = NOW(),
              updated_at = NOW()
-         WHERE id = $8`,
+         WHERE id = $10`,
         [
           JSON.stringify(nextColors),
           minimumColorValue('priceCost', product?.precio_costo),
           minimumColorValue('price', product?.precio_venta),
           minimumColorValue('priceWithTax', product?.precio_iva),
           minimumColorValue('priceCostUsd', product?.precio_costo_usd),
+          minimumColorValue('priceUsd', product?.precio_venta_usd),
+          minimumColorValue('priceWithTaxUsd', product?.precio_iva_usd),
           currency,
           usdArsRate,
           action.productId,
@@ -359,12 +455,14 @@ export async function applyPriceUpdates(client, actions, usdArsRate, supplier = 
              precio_venta = COALESCE($2, precio_venta),
              precio_iva = COALESCE($3, precio_iva),
              precio_costo_usd = COALESCE($4, precio_costo_usd),
-             price_currency = $5,
-             price_exchange_rate = $6,
+             precio_venta_usd = COALESCE($5, precio_venta_usd),
+             precio_iva_usd = COALESCE($6, precio_iva_usd),
+             price_currency = $7,
+             price_exchange_rate = $8,
              price_updated_at = NOW(),
              updated_at = NOW()
-         WHERE id = $7`,
-        [costArs, saleArs, taxArs, costUsd, currency, usdArsRate, action.productId]
+         WHERE id = $9`,
+        [costArs, saleArs, taxArs, costUsd, saleUsd, taxUsd, currency, usdArsRate, action.productId]
       )
       updated += rowCount
     }

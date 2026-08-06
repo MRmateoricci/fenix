@@ -1,193 +1,147 @@
-import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { useEffect, useState } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { Field, DarkInput, PrimaryBtn } from '../components/AuthFormKit'
 import PageSEO from '../components/SEO'
 
+const API_BASE = import.meta.env.VITE_API_URL || ''
+
+const fmt = (value) => new Intl.NumberFormat('es-AR', {
+  style: 'currency', currency: 'ARS', maximumFractionDigits: 0,
+}).format(Number(value || 0))
+
+const date = (value) => new Date(value).toLocaleDateString('es-AR', {
+  day: 'numeric', month: 'long', year: 'numeric',
+})
+
+const paidLabel = (status) => ['paid', 'preparing', 'shipped', 'delivered'].includes(status) ? 'Pagada' : 'Pendiente'
+const fulfillmentLabel = (status) => ({
+  delivered: 'Concluida', shipped: 'En camino', preparing: 'En preparación',
+  cancelled: 'Cancelada', payment_failed: 'Pago rechazado', expired: 'Vencida',
+}[status] || 'Pendiente')
+
 export default function Account() {
-  const { user, updateProfile, resendVerificationEmail } = useAuth()
-
+  const { user, updateProfile, resendVerificationEmail, logout } = useAuth()
+  const navigate = useNavigate()
+  const [orders, setOrders] = useState([])
+  const [ordersLoading, setOrdersLoading] = useState(true)
+  const [editing, setEditing] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [message, setMessage] = useState('')
+  const [verificationStatus, setVerificationStatus] = useState('')
   const [formData, setFormData] = useState({
-    firstName:  user.firstName  || '',
-    lastName:   user.lastName   || '',
-    phone:      user.phone      || '',
-    address:    user.address    || '',
-    city:       user.city       || '',
-    postalCode: user.postalCode || '',
+    firstName: user.firstName || '', lastName: user.lastName || '', phone: user.phone || '',
+    address: user.address || '', city: user.city || '', postalCode: user.postalCode || '',
   })
-  const [saved, setSaved]     = useState(false)
-  const [error, setError]     = useState(null)
-  const [saving, setSaving]   = useState(false)
-  const [verificationStatus, setVerificationStatus] = useState(null)
-  const [resendingVerification, setResendingVerification] = useState(false)
 
-  function setField(key, value) {
-    setFormData((prev) => ({ ...prev, [key]: value }))
-    setSaved(false)
+  useEffect(() => {
+    fetch(`${API_BASE}/api/orders/mine`, { credentials: 'include' })
+      .then((response) => response.ok ? response.json() : [])
+      .then(setOrders)
+      .finally(() => setOrdersLoading(false))
+  }, [])
+
+  async function signOut() {
+    await logout()
+    navigate('/', { replace: true })
   }
 
-  async function handleSubmit(e) {
-    e.preventDefault()
-    setError(null)
+  async function save(event) {
+    event.preventDefault()
     setSaving(true)
+    setMessage('')
     try {
       await updateProfile(formData)
-      setSaved(true)
-    } catch (err) {
-      setError(err.message)
+      setMessage('Datos guardados.')
+      setEditing(false)
+    } catch (error) {
+      setMessage(error.message)
     } finally {
       setSaving(false)
     }
   }
 
-  async function handleResendVerification() {
-    setVerificationStatus(null)
-    setResendingVerification(true)
+  async function resendVerification() {
+    setVerificationStatus('Enviando…')
     try {
       await resendVerificationEmail()
-      setVerificationStatus({ type: 'success', text: 'Te enviamos un nuevo enlace de verificación.' })
-    } catch (err) {
-      setVerificationStatus({ type: 'error', text: err.message })
-    } finally {
-      setResendingVerification(false)
+      setVerificationStatus('Te enviamos un nuevo enlace de verificación.')
+    } catch (error) {
+      setVerificationStatus(error.message)
     }
   }
 
   return (
     <>
-      <PageSEO title="Mi cuenta" description="Gestioná tus datos, favoritos y pedidos en Fénix Iluminación." url="/account" />
-      <div style={{ backgroundColor: 'var(--color-bg)', minHeight: '100vh' }}>
-        <div style={{ maxWidth: '42rem', margin: '0 auto', padding: '3rem 1.5rem 6rem' }}>
-          <h1
-            style={{
-              fontFamily: 'var(--font-serif)', color: 'var(--color-text)',
-              fontSize: '2.25rem', fontWeight: 400, letterSpacing: '-0.01em',
-              textAlign: 'center', marginBottom: '1.5rem',
-            }}
-          >
-            Mi cuenta
-          </h1>
+      <PageSEO title="Mi cuenta" description="Gestioná tus datos y pedidos en Fénix Iluminación." url="/account" />
+      <main className="fnx-account-page">
+        <header className="fnx-account-head">
+          <h1>Mi cuenta</h1>
+          <button type="button" onClick={signOut}>Cerrar sesión →</button>
+        </header>
 
-          {/* Tabs a Favoritos / Pedidos */}
-          <div style={{ display: 'flex', justifyContent: 'center', gap: '1rem', marginBottom: '2.5rem' }}>
-            <Link
-              to="/favorites"
-              style={{
-                padding: '0.6rem 1.25rem', borderRadius: '0.75rem',
-                border: '1.5px solid var(--color-border)', color: 'var(--color-text)',
-                fontSize: '0.85rem', fontWeight: 500, textDecoration: 'none',
-              }}
-            >
-              Mis favoritos
-            </Link>
-            <Link
-              to="/orders"
-              style={{
-                padding: '0.6rem 1.25rem', borderRadius: '0.75rem',
-                border: '1.5px solid var(--color-border)', color: 'var(--color-text)',
-                fontSize: '0.85rem', fontWeight: 500, textDecoration: 'none',
-              }}
-            >
-              Mis pedidos
-            </Link>
+        {!user.emailVerified && (
+          <div className="fnx-account-verification">
+            <span>Confirmá que <strong>{user.email}</strong> es tuyo para poder publicar reseñas.</span>
+            <button type="button" onClick={resendVerification}>Reenviar verificación</button>
+            {verificationStatus && <small>{verificationStatus}</small>}
           </div>
+        )}
 
-          <div
-            style={{
-              backgroundColor: 'var(--color-surface)',
-              border: '1px solid var(--color-border)',
-              borderRadius: '1rem',
-              padding: '2rem 2.25rem',
-              boxShadow: '0 2px 16px rgba(0,0,0,0.06)',
-            }}
-          >
-            {!user.emailVerified && (
-              <div style={{
-                padding: '1rem', marginBottom: '1.5rem', borderRadius: 12,
-                backgroundColor: '#FFF6E5', border: '1px solid #EBCB87',
-              }}>
-                <p style={{ margin: 0, fontSize: '0.875rem', color: '#694B0C' }}>
-                  Confirmá que <strong>{user.email}</strong> es tuyo. La verificación es necesaria para publicar reseñas.
-                </p>
-                <button
-                  type="button"
-                  onClick={handleResendVerification}
-                  disabled={resendingVerification}
-                  style={{
-                    marginTop: '0.75rem', color: 'var(--color-primary)', fontWeight: 600,
-                    fontSize: '0.82rem', textDecoration: 'underline',
-                    cursor: resendingVerification ? 'not-allowed' : 'pointer',
-                  }}
-                >
-                  {resendingVerification ? 'Enviando…' : 'Reenviar email de verificación'}
-                </button>
-                {verificationStatus && (
-                  <p style={{
-                    margin: '0.5rem 0 0', fontSize: '0.78rem',
-                    color: verificationStatus.type === 'success' ? '#166534' : 'var(--color-primary)',
-                  }}>
-                    {verificationStatus.text}
-                  </p>
-                )}
+        <div className="fnx-account-layout">
+          <section className="fnx-account-orders">
+            <h2>Historial de pedidos</h2>
+            <i />
+            {ordersLoading ? (
+              <p className="fnx-account-empty">Cargando pedidos…</p>
+            ) : orders.length === 0 ? (
+              <p className="fnx-account-empty">Todavía no hiciste ningún pedido.</p>
+            ) : (
+              <div className="fnx-account-orders-table">
+                <div className="head"><b>Pedido</b><b>Fecha</b><b>Estado del pago</b><b>Finalización</b><b>Total</b></div>
+                {orders.map((order) => (
+                  <div className="row" key={order.id}>
+                    <Link to={`/orders/${order.id}`}>#{order.order_number}</Link>
+                    <span>{date(order.created_at)}</span>
+                    <span>{paidLabel(order.status)}</span>
+                    <span>{fulfillmentLabel(order.status)}</span>
+                    <strong>{fmt(order.total_amount)}</strong>
+                  </div>
+                ))}
               </div>
             )}
-            <h2
-              style={{
-                fontFamily: 'var(--font-serif)', fontSize: '1.35rem', fontWeight: 400,
-                color: 'var(--color-text)', borderBottom: '1px solid var(--color-border)',
-                paddingBottom: '1rem', marginBottom: '1.75rem',
-              }}
-            >
-              Mis datos
-            </h2>
+          </section>
 
-            <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.25rem' }}>
-                <Field label="Nombre">
-                  <DarkInput value={formData.firstName} onChange={(v) => setField('firstName', v)} />
-                </Field>
-                <Field label="Apellido">
-                  <DarkInput value={formData.lastName} onChange={(v) => setField('lastName', v)} />
-                </Field>
-              </div>
-              <Field label="Email">
-                <div style={{
-                  padding: '0.75rem 1rem', borderRadius: '0.625rem',
-                  fontSize: '0.9rem', backgroundColor: 'var(--color-surface-2)',
-                  border: '1.5px solid var(--color-border)', color: 'var(--color-text-muted)',
-                }}>
-                  {user.email}
-                </div>
-              </Field>
-              <Field label="Teléfono">
-                <DarkInput type="tel" placeholder="11-1234-5678" value={formData.phone} onChange={(v) => setField('phone', v)} />
-              </Field>
-              <Field label="Dirección">
-                <DarkInput placeholder="Calle 123" value={formData.address} onChange={(v) => setField('address', v)} />
-              </Field>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.25rem' }}>
-                <Field label="Ciudad">
-                  <DarkInput value={formData.city} onChange={(v) => setField('city', v)} />
-                </Field>
-                <Field label="Código postal">
-                  <DarkInput value={formData.postalCode} onChange={(v) => setField('postalCode', v)} />
-                </Field>
-              </div>
-
-              {error && (
-                <p style={{ fontSize: '0.8rem', color: 'var(--color-primary)', margin: 0 }}>{error}</p>
-              )}
-              {saved && !error && (
-                <p style={{ fontSize: '0.8rem', color: '#166534', margin: 0 }}>Datos guardados.</p>
-              )}
-
-              <PrimaryBtn type="submit" disabled={saving}>
-                {saving ? 'Guardando…' : 'Guardar cambios'}
-              </PrimaryBtn>
-            </form>
-          </div>
+          <aside className="fnx-account-details">
+            <h2>Detalles de la cuenta</h2>
+            <i />
+            <strong>{user.firstName} {user.lastName}</strong>
+            {user.address && <span>{user.address}</span>}
+            {user.city && <span>{user.city}</span>}
+            {user.postalCode && <span>{user.postalCode}</span>}
+            <span>Argentina</span>
+            {user.phone && <span>{user.phone}</span>}
+            <span>{user.email}</span>
+            <button type="button" onClick={() => setEditing((value) => !value)}>Editar datos →</button>
+            <Link to="/favorites">Ver favoritos →</Link>
+            {message && <small>{message}</small>}
+          </aside>
         </div>
-      </div>
+
+        {editing && (
+          <section className="fnx-account-edit">
+            <h2>Editar datos</h2>
+            <form onSubmit={save}>
+              <input value={formData.firstName} onChange={(event) => setFormData({ ...formData, firstName: event.target.value })} placeholder="Nombre" />
+              <input value={formData.lastName} onChange={(event) => setFormData({ ...formData, lastName: event.target.value })} placeholder="Apellido" />
+              <input value={formData.phone} onChange={(event) => setFormData({ ...formData, phone: event.target.value })} placeholder="Teléfono" />
+              <input className="wide" value={formData.address} onChange={(event) => setFormData({ ...formData, address: event.target.value })} placeholder="Dirección" />
+              <input value={formData.city} onChange={(event) => setFormData({ ...formData, city: event.target.value })} placeholder="Ciudad" />
+              <input value={formData.postalCode} onChange={(event) => setFormData({ ...formData, postalCode: event.target.value })} placeholder="Código postal" />
+              <div className="wide actions"><button type="button" onClick={() => setEditing(false)}>Cancelar</button><button type="submit" disabled={saving}>{saving ? 'Guardando…' : 'Guardar cambios'}</button></div>
+            </form>
+          </section>
+        )}
+      </main>
     </>
   )
 }

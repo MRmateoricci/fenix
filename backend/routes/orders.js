@@ -5,8 +5,10 @@ import { requireAdmin } from '../middleware/requireAdmin.js'
 import { attachUserIfPresent, requireAuth } from '../middleware/requireAuth.js'
 import { reserveStock, releaseOrderStock, InsufficientStockError } from '../services/stockReservation.js'
 import { estimateDeliveryDate } from '../services/correoArgentino.js'
-import { getShippingForCP } from '../config/shipping.js'
+import { SHIPPING_SERVICES } from '../config/shipping.js'
+import { quoteShipping } from '../services/shippingQuotes.js'
 import { sendOrderConfirmationNotifications } from '../services/orderNotifications.js'
+import { PaymentReconciliationError, reconcileMercadoPagoPayment } from '../services/mercadopagoPayments.js'
 import { sendReviewInvitationForOrder } from '../services/reviewInvitations.js'
 import { isValidEmail, normalizeEmail } from '../utils/email.js'
 import 'dotenv/config'
@@ -16,7 +18,6 @@ const router = Router()
 // Pedidos pay-in-store sin pagar/retirar: vencen a los 2 días de la fecha de
 // retiro elegida. Pedidos mercadopago sin completar el pago: vencen a los 45
 // minutos (MP no avisa cuando el cliente simplemente abandona el checkout).
-const PICKUP_RESERVATION_GRACE_DAYS  = 2
 const PENDING_PAYMENT_EXPIRY_MINUTES = 45
 
 // Estados que liberan el stock reservado de un pedido (ver stockReservation.js
@@ -57,41 +58,59 @@ router.post('/', attachUserIfPresent, async (req, res) => {
     const deliveryType  = customer?.deliveryType
     const pickupDate    = customer?.pickupDate
     const paymentMethod = customer?.paymentMethod || 'mercadopago'
+    const shippingService = String(customer?.shippingService || 'clasico').toLowerCase()
     let customerEmail   = normalizeEmail(customer?.email)
+    let orderUserId     = req.userId || null
+
+    const customerDni = String(customer?.dni || '').replace(/\D/g, '')
+    const billingSameAsShipping = deliveryType === 'delivery' && customer?.billingSameAsShipping !== false
 
     if (!isValidEmail(customerEmail) || !customer?.nombre || !items?.length) {
       return res.status(400).json({ error: 'Faltan campos requeridos' })
     }
+    if (!/^\d{7,8}$/.test(customerDni)) {
+      return res.status(400).json({ error: 'Ingresá un DNI válido (7 u 8 números)' })
+    }
     if (!['pickup', 'delivery'].includes(deliveryType)) {
       return res.status(400).json({ error: 'Modalidad de entrega inválida' })
     }
-    if (!['mercadopago', 'pay_in_store'].includes(paymentMethod)) {
-      return res.status(400).json({ error: 'Método de pago inválido' })
-    }
-    if (paymentMethod === 'pay_in_store' && deliveryType !== 'pickup') {
-      return res.status(400).json({ error: 'Pagar en el local solo está disponible para retiro en el local' })
+    if (paymentMethod !== 'mercadopago') {
+      return res.status(400).json({ error: 'Por el momento, Mercado Pago es el único método de pago disponible' })
     }
     if (deliveryType === 'pickup' && !pickupDate) {
       return res.status(400).json({ error: 'Falta la fecha de retiro' })
     }
+    if (deliveryType === 'delivery' && !SHIPPING_SERVICES.includes(shippingService)) {
+      return res.status(400).json({ error: 'Servicio de envío inválido' })
+    }
+    if (deliveryType === 'delivery' && (!customer?.direccion?.trim() || !customer?.ciudad?.trim() || !customer?.provincia?.trim())) {
+      return res.status(400).json({ error: 'Completá la dirección de envío' })
+    }
+    if (!billingSameAsShipping && (
+      !customer?.billingAddress?.trim() || !customer?.billingCity?.trim() ||
+      !customer?.billingPostalCode?.trim() || !customer?.billingProvince?.trim()
+    )) {
+      return res.status(400).json({ error: 'Completá la dirección de facturación' })
+    }
 
-    if (req.userId) {
+    if (orderUserId) {
       const { rows: users } = await pool.query(
         'SELECT email FROM users WHERE id = $1',
-        [req.userId]
+        [orderUserId]
       )
       if (!users.length) return res.status(401).json({ error: 'Sesión inválida' })
       customerEmail = users[0].email
     } else {
+      // Si el email ya pertenece a una cuenta, asociamos el pedido igualmente.
+      // El cliente puede comprar como invitado y luego encontrar la compra al
+      // iniciar sesión con ese mismo email.
       const existingUser = await pool.query(
-        'SELECT 1 FROM users WHERE email = $1 LIMIT 1',
+        'SELECT id, email FROM users WHERE email = $1 LIMIT 1',
         [customerEmail]
       )
       if (existingUser.rows.length) {
-        return res.status(409).json({
-          code: 'ACCOUNT_LOGIN_REQUIRED',
-          error: 'Este email ya tiene una cuenta. Iniciá sesión para continuar con la compra.',
-        })
+        orderUserId = existingUser.rows[0].id
+        customerEmail = existingUser.rows[0].email
       }
     }
 
@@ -134,11 +153,14 @@ router.post('/', attachUserIfPresent, async (req, res) => {
     let shippingCost = 0
     let estimatedDeliveryDate = null
     if (deliveryType === 'delivery') {
-      const zone = getShippingForCP(customer.codigoPostal)
-      if (!zone) {
+      const quote = await quoteShipping({
+        postalCode: customer.codigoPostal,
+        service: shippingService,
+      })
+      if (!quote) {
         return res.status(400).json({ error: 'No pudimos calcular el envío para ese código postal — consultanos por WhatsApp' })
       }
-      shippingCost = zone.price
+      shippingCost = quote.cost
       const estimate = await estimateDeliveryDate(customer.codigoPostal)
       estimatedDeliveryDate = estimate.estimatedDate
     }
@@ -146,14 +168,11 @@ router.post('/', attachUserIfPresent, async (req, res) => {
     const total = productsTotal + shippingCost
 
     let reservationExpiresAt = null
-    if (deliveryType === 'pickup' && paymentMethod === 'pay_in_store') {
-      reservationExpiresAt = new Date(pickupDate)
-      reservationExpiresAt.setDate(reservationExpiresAt.getDate() + PICKUP_RESERVATION_GRACE_DAYS)
-    } else if (paymentMethod === 'mercadopago') {
+    if (paymentMethod === 'mercadopago') {
       reservationExpiresAt = new Date(Date.now() + PENDING_PAYMENT_EXPIRY_MINUTES * 60 * 1000)
     }
 
-    const initialStatus = paymentMethod === 'pay_in_store' ? 'reserved' : 'pending_payment'
+    const initialStatus = 'pending_payment'
     const orderNumber   = generateOrderNumber()
 
     const client = await pool.connect()
@@ -165,10 +184,12 @@ router.post('/', attachUserIfPresent, async (req, res) => {
       const { rows } = await client.query(
         `INSERT INTO orders
            (order_number, status, customer_name, customer_email, customer_phone,
-            delivery_type, address, city, postal_code, total_amount, shipping_cost,
+            delivery_type, address, city, postal_code, total_amount, shipping_cost, shipping_service,
             payment_method, pickup_date, estimated_delivery_date, reservation_expires_at,
-            items, user_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+            items, user_id, customer_dni, address_extra, province, billing_same_as_shipping,
+            billing_address, billing_address_extra, billing_city, billing_postal_code, billing_province)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,
+                 $19, $20, $21, $22, $23, $24, $25, $26, $27)
          RETURNING *`,
         [
           orderNumber, initialStatus,
@@ -181,12 +202,22 @@ router.post('/', attachUserIfPresent, async (req, res) => {
           customer.codigoPostal || null,
           total,
           shippingCost || null,
+          deliveryType === 'delivery' ? shippingService : null,
           paymentMethod,
           deliveryType === 'pickup' ? pickupDate : null,
           estimatedDeliveryDate,
           reservationExpiresAt,
           JSON.stringify(itemsSnapshot),
-          req.userId || null,
+          orderUserId,
+          customerDni,
+          customer.piso?.trim() || null,
+          customer.provincia?.trim() || null,
+          billingSameAsShipping,
+          billingSameAsShipping ? customer.direccion?.trim() || null : customer.billingAddress?.trim() || null,
+          billingSameAsShipping ? customer.piso?.trim() || null : customer.billingAddressExtra?.trim() || null,
+          billingSameAsShipping ? customer.ciudad?.trim() || null : customer.billingCity?.trim() || null,
+          billingSameAsShipping ? customer.codigoPostal?.trim() || null : customer.billingPostalCode?.trim() || null,
+          billingSameAsShipping ? customer.provincia?.trim() || null : customer.billingProvince?.trim() || null,
         ]
       )
       order = rows[0]
@@ -234,15 +265,6 @@ router.post('/', attachUserIfPresent, async (req, res) => {
       checkoutUrl = usesProductionCredentials ? initPoint : sandboxInitPoint
     }
 
-    // Las reservas para pagar en el local quedan confirmadas al crearse.
-    // Los pedidos de Mercado Pago se notifican recién cuando el webhook
-    // confirma el estado `paid`.
-    if (paymentMethod === 'pay_in_store') {
-      sendOrderConfirmationNotifications(order.id).catch((err) => {
-        console.error('[order confirmation notifications]', err)
-      })
-    }
-
     res.status(201).json({
       orderId:      order.id,
       orderNumber:  order.order_number,
@@ -256,10 +278,36 @@ router.post('/', attachUserIfPresent, async (req, res) => {
 
 const PUBLIC_ORDER_FIELDS = `
   id, order_number, status, customer_name, delivery_type,
-  address, city, postal_code, total_amount, shipping_cost,
+  address, city, postal_code, total_amount, shipping_cost, shipping_service,
   payment_method, pickup_date, estimated_delivery_date,
   items, created_at, paid_at
 `
+
+// POST /api/orders/public/:id/reconcile-payment
+// El retorno de Checkout Pro puede llegar antes que el webhook. Usamos el ID
+// solo para volver a consultar a Mercado Pago y verificar orden, monto y moneda.
+router.post('/public/:id/reconcile-payment', async (req, res) => {
+  try {
+    const { paymentId } = req.body || {}
+    const { order } = await reconcileMercadoPagoPayment({
+      paymentId,
+      expectedOrderId: req.params.id,
+    })
+
+    res.set('Cache-Control', 'no-store')
+    res.json({
+      id: order.id,
+      status: order.status,
+      paidAt: order.paid_at,
+    })
+  } catch (err) {
+    if (err instanceof PaymentReconciliationError) {
+      return res.status(err.statusCode).json({ error: err.message })
+    }
+    console.error('[POST /api/orders/public/:id/reconcile-payment]', err)
+    res.status(502).json({ error: 'No pudimos verificar el pago con Mercado Pago' })
+  }
+})
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/orders/public/:id
@@ -316,6 +364,28 @@ router.get('/mine', requireAuth, async (req, res) => {
   }
 })
 
+// Detalle privado de un pedido perteneciente a la cuenta autenticada.
+router.get('/mine/:id', requireAuth, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, order_number, status, customer_name, customer_email, customer_phone, customer_dni,
+              delivery_type, address, address_extra, city, province, postal_code,
+              billing_same_as_shipping, billing_address, billing_address_extra,
+              billing_city, billing_province, billing_postal_code,
+              total_amount, shipping_cost, shipping_service, payment_method,
+              pickup_date, estimated_delivery_date, items, created_at, paid_at
+       FROM orders WHERE id = $1 AND user_id = $2`,
+      [req.params.id, req.userId]
+    )
+    if (!rows.length) return res.status(404).json({ error: 'Pedido no encontrado' })
+    res.set('Cache-Control', 'no-store')
+    res.json(rows[0])
+  } catch (err) {
+    console.error('[GET /api/orders/mine/:id]', err)
+    res.status(500).json({ error: 'Error interno' })
+  }
+})
+
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/orders  (admin)
 // Query params: ?status=paid&search=email&page=1&limit=50
@@ -346,7 +416,7 @@ router.get('/', requireAdmin, async (req, res) => {
     const [data, countResult] = await Promise.all([
       pool.query(
         `SELECT id, order_number, status, customer_name, customer_email, customer_phone,
-                delivery_type, address, city, postal_code, total_amount, shipping_cost,
+                delivery_type, address, city, postal_code, total_amount, shipping_cost, shipping_service,
                 payment_method, pickup_date, estimated_delivery_date, items,
                 created_at, paid_at, mp_payment_id
          FROM orders ${where}

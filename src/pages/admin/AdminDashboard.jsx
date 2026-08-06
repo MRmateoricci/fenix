@@ -74,6 +74,14 @@ const GridIcon = () => (
   </svg>
 )
 
+const StoreIcon = () => (
+  <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" strokeWidth="1.4" style={{ flexShrink: 0 }}>
+    <path d="M1.5 5.3h12l-1-3.2h-10z" strokeLinejoin="round"/>
+    <path d="M2.5 5.3v7.6h10V5.3M5.5 12.9V9h4v3.9" strokeLinejoin="round"/>
+    <path d="M1.5 5.3c0 1 .7 1.7 1.6 1.7s1.6-.7 1.6-1.7c0 1 .7 1.7 1.6 1.7S8 6.3 8 5.3c0 1 .7 1.7 1.6 1.7s1.6-.7 1.6-1.7c0 1 .7 1.7 1.6 1.7s1.6-.7 1.6-1.7" strokeLinecap="round"/>
+  </svg>
+)
+
 const TagIcon = () => (
   <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" strokeWidth="1.4" style={{ flexShrink: 0 }}>
     <circle cx="4.5" cy="4.5" r="1.3"/>
@@ -136,12 +144,45 @@ function ConfirmModal({ message, onConfirm, onCancel }) {
   )
 }
 
+function DismissibleErrorNotice({ children, marginBottom = 20, fontSize = 13 }) {
+  const [visible, setVisible] = useState(true)
+
+  if (!visible) return null
+
+  return (
+    <div
+      role="alert"
+      style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16,
+        background: C.white, border: `1px solid ${C.border}`, borderLeft: `3px solid ${C.red}`,
+        borderRadius: 8, padding: '11px 12px 11px 14px', marginBottom,
+        color: C.ink, fontSize, boxShadow: '0 1px 2px rgba(15, 23, 42, 0.04)',
+      }}
+    >
+      <span style={{ lineHeight: 1.4 }}>{children}</span>
+      <button
+        type="button"
+        onClick={() => setVisible(false)}
+        aria-label="Cerrar aviso"
+        title="Cerrar aviso"
+        style={{
+          display: 'grid', placeItems: 'center', flexShrink: 0,
+          width: 28, height: 28, padding: 0, border: 'none', borderRadius: 6,
+          background: 'transparent', color: C.text3, cursor: 'pointer', fontSize: 16,
+        }}
+      >
+        ✕
+      </button>
+    </div>
+  )
+}
+
 // ── FormField — input reutilizable para los modales de producto/inventario ──
 // Definido a nivel de módulo (no dentro del componente que lo usa): si se
 // redefine en cada render, React lo trata como un tipo de componente distinto
 // y remonta el <input> en cada tecla, haciendo que pierda el foco todo el
 // tiempo y parezca que "no deja escribir".
-function FormField({ label, value, onChange, type = 'text', placeholder = '', span = 1 }) {
+function FormField({ label, value, onChange, type = 'text', placeholder = '', span = 1, step }) {
   return (
     <div style={{ gridColumn: `span ${span}`, display: 'flex', flexDirection: 'column', gap: 5 }}>
       <label style={lbl}>{label}</label>
@@ -151,6 +192,7 @@ function FormField({ label, value, onChange, type = 'text', placeholder = '', sp
         onChange={e => onChange(e.target.value)}
         placeholder={placeholder}
         min={type === 'number' ? 0 : undefined}
+        step={type === 'number' ? step : undefined}
         style={inp}
       />
     </div>
@@ -209,7 +251,7 @@ function InventoryLookup({ onSelect }) {
 }
 
 // ── ImageFileField — sube un archivo y conserva internamente la URL devuelta
-// por el servidor. El producto debe existir para asociar el archivo a su ID.
+// por el servidor. También admite imágenes durante el alta de un producto.
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024
 
 function ImageFileField({ label, value, onChange, productId, compact = false }) {
@@ -254,13 +296,9 @@ function ImageFileField({ label, value, onChange, productId, compact = false }) 
             style={{ width: compact ? 34 : 44, height: compact ? 34 : 44, objectFit: 'cover', borderRadius: 6, border: `1px solid ${C.border}`, flexShrink: 0 }}
           />
         )}
-        {productId ? (
-          <button type="button" disabled={uploading} onClick={() => inputRef.current?.click()} style={{ ...outlineBtn, fontSize: compact ? 10.5 : 11.5, padding: compact ? '5px 8px' : '7px 12px', opacity: uploading ? 0.6 : 1 }}>
-            {uploading ? 'Subiendo...' : 'Subir archivo'}
-          </button>
-        ) : (
-          <span style={{ fontSize: compact ? 10 : 11, color: C.muted }}>Guardá primero el producto para subir la imagen</span>
-        )}
+        <button type="button" disabled={uploading} onClick={() => inputRef.current?.click()} style={{ ...outlineBtn, fontSize: compact ? 10.5 : 11.5, padding: compact ? '5px 8px' : '7px 12px', opacity: uploading ? 0.6 : 1 }}>
+          {uploading ? 'Subiendo...' : 'Subir archivo'}
+        </button>
         {value && (
           <button type="button" onClick={() => onChange('')} style={{ ...outlineBtn, fontSize: compact ? 10.5 : 11.5, padding: compact ? '5px 8px' : '7px 12px', color: C.red }}>
             Quitar
@@ -285,11 +323,12 @@ function guessCategory(grupo, subgrupo) {
 }
 
 const EMPTY = {
-  codigo: '', supplier: 'OTRO', inventoryDescription: '', grupo: '', subgrupoInterno: '', medida: '',
+  codigo: '', supplier: 'OTRO', inventoryDescription: '',
   priceCost: '', priceWithTax: '',
   name: '', category: CATS[0], subcategory: '', productType: '',
   price: '', originalPrice: '',
   description: '', image: '', hoverImage: '',
+  lengthCm: '', widthCm: '', heightCm: '', weightKg: '',
   inStock: true, stock: '', colors: [], sizes: [],
   published: true,
 }
@@ -302,9 +341,6 @@ function draftFromInventoryRow(inv) {
     codigo:      inv.codigo || '',
     supplier:    inv.supplier || 'OTRO',
     inventoryDescription: inv.descripcion || '',
-    grupo:       inv.grupo || '',
-    subgrupoInterno: inv.subgrupo || '',
-    medida:      inv.medida || '',
     priceCost:   inv.precio_costo ?? '',
     priceWithTax: inv.precio_iva ?? '',
     name:        inv.name || inv.descripcion || '',
@@ -322,6 +358,10 @@ function draftFromInventoryRow(inv) {
     watts:       inv.watts,
     material:    inv.material,
     productType: inv.product_type || inv.cable_type || '',
+    lengthCm:    inv.length_cm ?? '',
+    widthCm:     inv.width_cm ?? '',
+    heightCm:    inv.height_cm ?? '',
+    weightKg:    inv.weight_kg ?? '',
     colors:      inv.color_options || [],
     sizes:       inv.size_options || [],
     published:   Boolean(inv.published),
@@ -333,9 +373,6 @@ function toUnifiedProductPayload(data) {
     codigo: data.codigo,
     supplier: data.supplier || 'OTRO',
     descripcion: data.inventoryDescription || null,
-    grupo: data.grupo || null,
-    subgrupo: data.subgrupoInterno || null,
-    medida: data.medida || null,
     precio_costo: data.priceCost,
     precio_venta: data.price,
     precio_iva: data.priceWithTax,
@@ -344,6 +381,10 @@ function toUnifiedProductPayload(data) {
     category: data.category || null,
     subcategory: data.subcategory || null,
     product_type: data.productType || null,
+    length_cm: data.lengthCm === '' ? null : Number(data.lengthCm),
+    width_cm: data.widthCm === '' ? null : Number(data.widthCm),
+    height_cm: data.heightCm === '' ? null : Number(data.heightCm),
+    weight_kg: data.weightKg === '' ? null : Number(data.weightKg),
     description_larga: data.description?.trim() || null,
     original_price: data.originalPrice ?? null,
     image_url: data.image || null,
@@ -358,22 +399,28 @@ function toUnifiedProductPayload(data) {
   }
 }
 
-function ProductModal({ product, onSave, onClose }) {
+function ProductModal({ product, onSave, onClose, publishOnSave = false }) {
   const { currencySettings } = useAdmin()
   const isNew = !product
   const [form, setForm] = useState(() => isNew ? EMPTY : {
+    ...EMPTY,
     ...product,
     price:         String(product.price ?? ''),
     originalPrice: String(product.originalPrice ?? ''),
     priceCost:     String(product.priceCost ?? ''),
     priceWithTax:  String(product.priceWithTax ?? ''),
     stock:         String(product.stock ?? ''),
+    lengthCm:      String(product.lengthCm ?? ''),
+    widthCm:       String(product.widthCm ?? ''),
+    heightCm:      String(product.heightCm ?? ''),
+    weightKg:      String(product.weightKg ?? ''),
     colors:        product.colors || [],
     sizes:         product.sizes || [],
   })
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
-  const valid = form.codigo.trim() && (!form.published || (form.name.trim() && form.price && Number(form.price) > 0))
+  const willBePublished = publishOnSave || form.published
+  const valid = (!isNew || form.codigo.trim()) && (!willBePublished || (form.name.trim() && form.price && Number(form.price) > 0))
   const subOptions = getSubcategoryOptions(form.category).map(node => node.label)
   const typeOptions = getProductTypeOptions(form.category, form.subcategory).map(node => node.label)
   const usdArsRate = Number(currencySettings.usdArsRate) || 1510
@@ -400,13 +447,14 @@ function ProductModal({ product, onSave, onClose }) {
     out.codigo = form.codigo.trim()
     out.supplier = form.supplier.trim().toUpperCase() || 'OTRO'
     out.inventoryDescription = form.inventoryDescription.trim()
-    out.grupo = form.grupo.trim()
-    out.subgrupoInterno = form.subgrupoInterno.trim()
-    out.medida = form.medida.trim()
+    out.lengthCm = form.lengthCm === '' ? null : Number(form.lengthCm)
+    out.widthCm = form.widthCm === '' ? null : Number(form.widthCm)
+    out.heightCm = form.heightCm === '' ? null : Number(form.heightCm)
+    out.weightKg = form.weightKg === '' ? null : Number(form.weightKg)
     out.priceCost = form.priceCost === '' ? null : Number(form.priceCost)
     out.priceWithTax = form.priceWithTax === '' ? null : Number(form.priceWithTax)
-    if (form.originalPrice) out.originalPrice = Number(form.originalPrice)
-    else delete out.originalPrice
+    out.originalPrice = form.originalPrice ? Number(form.originalPrice) : null
+    if (publishOnSave) out.published = true
     if (form.stock !== '') {
       out.stock   = Number(form.stock)
       out.inStock = out.stock > 0
@@ -433,22 +481,29 @@ function ProductModal({ product, onSave, onClose }) {
         zIndex: 1000, padding: 16,
       }}
     >
-      <div style={{
+      <div className="adm-product-modal" style={{
         background: C.paper, borderRadius: 12,
-        width: '100%', maxWidth: 780,
-        maxHeight: '92vh', overflowY: 'auto',
-        padding: 32, boxShadow: '0 24px 80px rgba(0,0,0,0.3)',
+        width: '100%', maxWidth: 1180,
+        maxHeight: '94vh', overflow: 'hidden',
+        display: 'flex', flexDirection: 'column',
+        boxShadow: '0 24px 80px rgba(0,0,0,0.3)',
       }}>
         {/* Header */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+        <div className="adm-product-modal__header" style={{
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          padding: '24px 28px 18px', borderBottom: `1px solid ${C.border}`, flexShrink: 0,
+        }}>
           <h2 style={{ fontFamily: ADMIN_FONT, fontSize: 22, color: C.ink, margin: 0, fontWeight: 500 }}>
-            {isNew ? 'Nuevo producto' : 'Editar producto'}
+            {publishOnSave ? 'Configurar y publicar' : isNew ? 'Nuevo producto' : 'Editar producto'}
           </h2>
           <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.text3, fontSize: 18, lineHeight: 1 }}>✕</button>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-          <h3 style={{ ...sectionTitle, gridColumn: 'span 2', margin: '0 0 2px' }}>Datos internos</h3>
+        <div className="adm-product-modal__body" style={{ overflowY: 'auto', padding: '24px 28px', flex: 1, minHeight: 0 }}>
+        <div className="adm-product-modal__columns">
+          <section className="adm-product-modal__section">
+          <h3 style={{ ...sectionTitle, margin: '0 0 14px' }}>Datos internos</h3>
+          <div className="adm-product-modal__fields">
           <FormField label="Código *" value={form.codigo} onChange={v => set('codigo', v)} placeholder="ej: ALC-PO043" />
           <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
             <label style={lbl}>Proveedor</label>
@@ -456,23 +511,29 @@ function ProductModal({ product, onSave, onClose }) {
             <datalist id="supplier-options">{SUPPLIER_FILTERS.filter(s => s !== 'Todos').map(s => <option key={s} value={s} />)}</datalist>
           </div>
           <FormField label="Descripción interna" value={form.inventoryDescription} onChange={v => set('inventoryDescription', v)} span={2} />
-          <FormField label="Marca / grupo" value={form.grupo} onChange={v => set('grupo', v)} />
-          <FormField label="Subgrupo interno" value={form.subgrupoInterno} onChange={v => set('subgrupoInterno', v)} />
-          <FormField label="Medida" value={form.medida} onChange={v => set('medida', v)} />
           <FormField label="Stock" value={form.stock} onChange={v => set('stock', v)} type="number" />
+          <div style={{ gridColumn: 'span 2', marginTop: 4 }}>
+            <label style={lbl}>Dimensiones para envío</label>
+            <p style={{ fontSize: 10.5, color: C.muted, margin: '3px 0 8px' }}>Medidas del paquete en centímetros y peso aproximado en kilogramos.</p>
+            <div className="adm-product-modal__shipping-fields">
+              <FormField label="Largo (cm)" value={form.lengthCm} onChange={v => set('lengthCm', v)} type="number" step="0.01" />
+              <FormField label="Ancho (cm)" value={form.widthCm} onChange={v => set('widthCm', v)} type="number" step="0.01" />
+              <FormField label="Alto (cm)" value={form.heightCm} onChange={v => set('heightCm', v)} type="number" step="0.01" />
+              <FormField label="Peso aprox. (kg)" value={form.weightKg} onChange={v => set('weightKg', v)} type="number" step="0.001" />
+            </div>
+          </div>
           <FormField label="Precio costo (ARS)" value={form.priceCost} onChange={v => set('priceCost', v)} type="number" />
           <FormField label="Precio de venta (ARS)" value={form.price} onChange={v => set('price', v)} type="number" />
           <FormField label="Precio con IVA (ARS)" value={form.priceWithTax} onChange={v => set('priceWithTax', v)} type="number" />
           <div style={{ gridColumn: 'span 2', color: C.muted, fontSize: 11.5, marginTop: -4 }}>
             Equivalentes con US$ 1 = {fmt(usdArsRate)}: costo {form.priceCost !== '' ? fmtUsd(Number(form.priceCost) / usdArsRate) : '—'} · venta {form.price !== '' ? fmtUsd(Number(form.price) / usdArsRate) : '—'} · con IVA {form.priceWithTax !== '' ? fmtUsd(Number(form.priceWithTax) / usdArsRate) : '—'}
           </div>
+          </div>
+          </section>
 
-          <div style={{
-            gridColumn: 'span 2', marginTop: 10, padding: 16,
-            background: '#F9FAFB', border: `1px solid ${C.border}`, borderRadius: 8,
-          }}>
+          <section className="adm-product-modal__section adm-product-modal__section--store">
             <h3 style={{ ...sectionTitle, margin: '0 0 14px' }}>Información para la tienda online</h3>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+            <div className="adm-product-modal__fields">
               <FormField label="Nombre del producto *" value={form.name} onChange={v => set('name', v)} span={2} />
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
@@ -529,14 +590,15 @@ function ProductModal({ product, onSave, onClose }) {
               <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
                 <label style={lbl}>Visibilidad en la tienda</label>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, height: 38 }}>
-                  <Toggle value={form.published} onChange={v => set('published', v)} />
-                  <span style={{ fontSize: 13, color: form.published ? C.green : C.text3, fontWeight: 600 }}>
-                    {form.published ? 'Publicado' : 'Sin publicar (borrador)'}
+                  {!publishOnSave && <Toggle value={form.published} onChange={v => set('published', v)} />}
+                  {publishOnSave && <span aria-hidden="true" style={{ width: 9, height: 9, borderRadius: '50%', background: C.green }} />}
+                  <span style={{ fontSize: 13, color: willBePublished ? C.green : C.text3, fontWeight: 600 }}>
+                    {publishOnSave ? 'Se publicará al guardar' : form.published ? 'Publicado' : 'Sin publicar (borrador)'}
                   </span>
                 </div>
               </div>
             </div>
-          </div>
+          </section>
         </div>
 
         {/* Variantes de color */}
@@ -592,10 +654,10 @@ function ProductModal({ product, onSave, onClose }) {
           )}
         </div>
 
-        {/* Variantes de medida */}
+        {/* Variantes de medida comerciales */}
         <div style={{ marginTop: 20 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-            <label style={lbl}>Medidas (opcional)</label>
+            <label style={lbl}>Variantes de medida (opcional)</label>
             <button type="button" onClick={addSize} style={{ ...outlineBtn, padding: '5px 12px', fontSize: 11 }}>
               + Agregar medida
             </button>
@@ -643,11 +705,12 @@ function ProductModal({ product, onSave, onClose }) {
             />
           </div>
         )}
+        </div>
 
         {/* Actions */}
-        <div style={{
+        <div className="adm-product-modal__actions" style={{
           display: 'flex', gap: 10, justifyContent: 'flex-end',
-          marginTop: 28, paddingTop: 20, borderTop: `1px solid ${C.border}`,
+          padding: '16px 28px', borderTop: `1px solid ${C.border}`, flexShrink: 0,
         }}>
           <button onClick={onClose} style={outlineBtn}>Cancelar</button>
           <button
@@ -655,7 +718,7 @@ function ProductModal({ product, onSave, onClose }) {
             disabled={!valid || saving}
             style={{ ...solidBtn, background: valid && !saving ? C.red : '#ddd', color: valid && !saving ? '#fff' : '#aaa', cursor: valid && !saving ? 'pointer' : 'not-allowed' }}
           >
-            {saving ? 'Guardando...' : isNew ? '+ Agregar producto' : 'Guardar cambios'}
+            {saving ? 'Guardando...' : publishOnSave ? 'Publicar producto' : isNew ? '+ Agregar producto' : 'Guardar cambios'}
           </button>
         </div>
       </div>
@@ -934,12 +997,16 @@ function OverviewTab({ products }) {
   )
 }
 
-// ── ProductsTab ───────────────────────────────────────────────────────────────
-function ProductsTab({ products, onUpdate, onAdd, onDelete }) {
+// ── StoreTab ──────────────────────────────────────────────────────────────────
+function StoreTab({ products, onUpdate, onDelete }) {
+  const { fetchInventoryItem } = useAdmin()
   const [search, setSearch]     = useState('')
   const [catFilter, setCat]     = useState('Todas')
   const [editProduct, setEdit]  = useState(null)
-  const [addOpen, setAddOpen]   = useState(false)
+  const [publishCandidate, setPublishCandidate] = useState(null)
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const [loadingProductId, setLoadingProductId] = useState(null)
+  const [loadError, setLoadError] = useState('')
   const [confirmId, setConfirmId] = useState(null)
   const [hoveredRow, setHoveredRow] = useState(null)
 
@@ -960,6 +1027,25 @@ function ProductsTab({ products, onUpdate, onAdd, onDelete }) {
   const withOffer  = products.filter(p => p.originalPrice).length
   const outOfStock = products.filter(p => !p.inStock).length
 
+  async function openStoreProduct(product) {
+    if (loadingProductId) return
+    setLoadingProductId(product.id)
+    setLoadError('')
+    try {
+      const inventoryProduct = await fetchInventoryItem(product.id)
+      setEdit(draftFromInventoryRow(inventoryProduct))
+    } catch (err) {
+      setLoadError(err.message || 'No se pudo cargar el producto')
+    } finally {
+      setLoadingProductId(null)
+    }
+  }
+
+  function selectProductToPublish(product) {
+    setPickerOpen(false)
+    setPublishCandidate({ ...draftFromInventoryRow(product), published: true })
+  }
+
   return (
     <div>
       {/* Stats bar + add button */}
@@ -969,10 +1055,18 @@ function ProductsTab({ products, onUpdate, onAdd, onDelete }) {
           {outOfStock > 0 && <span style={pill(C.redLight, C.red)}>{outOfStock} sin stock</span>}
           {withOffer > 0 && <span style={pill(C.amberLight, C.amberDark)}>{withOffer} con oferta</span>}
         </div>
-        <button onClick={() => setAddOpen(true)} style={{ ...solidBtn, background: C.red, color: '#fff' }}>
-          + Nuevo producto
+        <button onClick={() => setPickerOpen(true)} style={{ ...solidBtn, background: C.red, color: '#fff' }}>
+          + Publicar producto
         </button>
       </div>
+
+      <p style={{ margin: '-10px 0 18px', color: C.muted, fontSize: 12.5 }}>
+        Acá se muestran únicamente los productos publicados. Para sumar uno, elegilo desde Productos y completá su ficha antes de publicarlo.
+      </p>
+
+      {loadError && (
+        <DismissibleErrorNotice key={loadError} marginBottom={16} fontSize={12.5}>{loadError}</DismissibleErrorNotice>
+      )}
 
       {/* Search + Filter */}
       <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
@@ -1056,44 +1150,23 @@ function ProductsTab({ products, onUpdate, onAdd, onDelete }) {
               )}
             </div>
 
-            {/* Stock toggle + count */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, minWidth: 120 }}>
-              <Toggle
-                size="sm"
-                value={p.inStock}
-                onChange={v => onUpdate(p.id, { inStock: v })}
-              />
-              <span style={{ fontSize: 12, color: p.inStock ? C.green : C.red, fontWeight: 600, width: 56 }}>
-                {p.inStock ? 'En stock' : 'Sin stock'}
+            {/* Stock de referencia; se edita desde Productos. */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexShrink: 0, minWidth: 110 }}>
+              <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: '50%', background: p.inStock ? C.green : C.red }} />
+              <span style={{ fontSize: 12, color: p.inStock ? C.green : C.red, fontWeight: 600 }}>
+                Stock: {p.stock ?? 0}
               </span>
-              {p.stock !== undefined && (
-                <input
-                  type="number"
-                  value={p.stock}
-                  min={0}
-                  onChange={e => {
-                    const val = Number(e.target.value)
-                    onUpdate(p.id, { stock: val, inStock: val > 0 })
-                  }}
-                  title="Cantidad en stock"
-                  style={{
-                    width: 52, border: `1px solid ${C.border}`, borderRadius: 5,
-                    padding: '3px 6px', fontSize: 12, textAlign: 'center',
-                    color: C.ink, background: C.paper, fontFamily: 'inherit',
-                    outline: 'none',
-                  }}
-                />
-              )}
             </div>
 
             {/* Actions */}
             <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
               <button
-                onClick={() => setEdit(p)}
+                onClick={() => openStoreProduct(p)}
+                disabled={loadingProductId === p.id}
                 title="Editar"
-                style={{ ...iconBtn, background: C.amberLight, color: C.amberDark }}
+                style={{ ...iconBtn, background: C.amberLight, color: C.amberDark, opacity: loadingProductId === p.id ? 0.55 : 1 }}
               >
-                ✎
+                {loadingProductId === p.id ? '…' : '✎'}
               </button>
               <button
                 onClick={() => setConfirmId(p.id)}
@@ -1108,12 +1181,19 @@ function ProductsTab({ products, onUpdate, onAdd, onDelete }) {
       </div>
 
       {/* Modals */}
-      {(editProduct || addOpen) && (
+      {(editProduct || publishCandidate) && (
         <ProductModal
-          product={addOpen ? null : editProduct}
-          onSave={addOpen ? onAdd : (data) => onUpdate(editProduct.id, data)}
-          onClose={() => { setEdit(null); setAddOpen(false) }}
+          product={publishCandidate || editProduct}
+          publishOnSave={Boolean(publishCandidate)}
+          onSave={publishCandidate
+            ? (data) => onUpdate(publishCandidate.id, { ...data, published: true })
+            : (data) => onUpdate(editProduct.id, data)}
+          onClose={() => { setEdit(null); setPublishCandidate(null) }}
         />
+      )}
+
+      {pickerOpen && (
+        <StoreProductPicker onSelect={selectProductToPublish} onClose={() => setPickerOpen(false)} />
       )}
 
       {confirmId !== null && (
@@ -1672,7 +1752,133 @@ const WORK_STATUS_PRIORITY = {
   shipped: 3,
 }
 
-function OperationalOrdersSection({ title, subtitle, orders, emptyText, type, onSelect }) {
+function QuickStatusSelect({ order, onChange, saving = false }) {
+  const style = STATUS_STYLE[order.status] || STATUS_STYLE.pending_payment
+  return (
+    <label className="adm-quick-status" title="Cambiar estado rápidamente">
+      <span style={{ background: style.color }} />
+      <select
+        value={order.status}
+        disabled={saving}
+        aria-label={`Cambiar estado del pedido ${order.order_number}`}
+        onChange={(event) => onChange(order, event.target.value)}
+      >
+        {NEXT_STATUSES.map((status) => (
+          <option key={status} value={status}>{STATUS_LABEL[status]}</option>
+        ))}
+      </select>
+      {saving && <i aria-label="Guardando" />}
+    </label>
+  )
+}
+
+function StoreProductPicker({ onSelect, onClose }) {
+  const { searchProducts } = useAdmin()
+  const [query, setQuery] = useState('')
+  const [results, setResults] = useState([])
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    const normalized = query.trim()
+    if (normalized.length < 2) {
+      setResults([])
+      setLoading(false)
+      return undefined
+    }
+
+    let active = true
+    const timer = setTimeout(async () => {
+      setLoading(true)
+      const matches = await searchProducts(normalized, { published: 'false' })
+      if (active) {
+        setResults(matches)
+        setLoading(false)
+      }
+    }, 250)
+
+    return () => {
+      active = false
+      clearTimeout(timer)
+    }
+  }, [query, searchProducts])
+
+  return (
+    <div
+      onMouseDown={event => { if (event.target === event.currentTarget) onClose() }}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 1000, padding: 16,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        background: 'rgba(0,0,0,0.5)',
+      }}
+    >
+      <div style={{
+        width: '100%', maxWidth: 680, maxHeight: '86vh', overflow: 'hidden',
+        display: 'flex', flexDirection: 'column', background: C.white,
+        borderRadius: 12, boxShadow: '0 24px 80px rgba(0,0,0,0.3)',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'start', justifyContent: 'space-between', gap: 20, padding: '24px 26px 18px', borderBottom: `1px solid ${C.border}` }}>
+          <div>
+            <h2 style={{ margin: 0, fontFamily: ADMIN_FONT, fontSize: 21, fontWeight: 500, color: C.ink }}>Publicar un producto</h2>
+            <p style={{ margin: '6px 0 0', fontSize: 12.5, lineHeight: 1.45, color: C.muted }}>
+              Elegí un producto de Productos. Después vas a poder completar su información e imágenes antes de publicarlo.
+            </p>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Cerrar" style={{ border: 'none', background: 'transparent', color: C.text3, cursor: 'pointer', fontSize: 18 }}>✕</button>
+        </div>
+
+        <div style={{ padding: '20px 26px 24px', overflowY: 'auto' }}>
+          <label htmlFor="store-product-search" style={lbl}>Buscar en Productos</label>
+          <input
+            id="store-product-search"
+            type="search"
+            autoFocus
+            value={query}
+            onChange={event => setQuery(event.target.value)}
+            placeholder="Escribí el código, nombre o descripción..."
+            style={{ ...inp, marginTop: 6 }}
+          />
+
+          <div style={{ marginTop: 14, border: `1px solid ${C.border}`, borderRadius: 8, overflow: 'hidden' }}>
+            {query.trim().length < 2 && (
+              <p style={{ margin: 0, padding: 24, textAlign: 'center', fontSize: 12.5, color: C.muted }}>Escribí al menos 2 caracteres para buscar.</p>
+            )}
+            {query.trim().length >= 2 && loading && (
+              <p style={{ margin: 0, padding: 24, textAlign: 'center', fontSize: 12.5, color: C.muted }}>Buscando productos...</p>
+            )}
+            {query.trim().length >= 2 && !loading && results.length === 0 && (
+              <p style={{ margin: 0, padding: 24, textAlign: 'center', fontSize: 12.5, color: C.muted }}>No encontramos productos sin publicar con esa búsqueda.</p>
+            )}
+            {!loading && results.map((product, index) => (
+              <button
+                key={product.id}
+                type="button"
+                onClick={() => onSelect(product)}
+                style={{
+                  width: '100%', display: 'grid', gridTemplateColumns: '48px minmax(0, 1fr) auto', alignItems: 'center', gap: 12,
+                  padding: '11px 13px', border: 'none', borderBottom: index < results.length - 1 ? `1px solid ${C.hairline}` : 'none',
+                  background: C.white, color: C.ink, textAlign: 'left', cursor: 'pointer', fontFamily: 'inherit',
+                }}
+              >
+                {product.image_url ? (
+                  <img src={product.image_url} alt="" style={{ width: 46, height: 46, objectFit: 'cover', borderRadius: 7, border: `1px solid ${C.hairline}` }} />
+                ) : (
+                  <span aria-hidden="true" style={{ width: 46, height: 46, display: 'grid', placeItems: 'center', borderRadius: 7, background: C.hairline, color: C.muted }}>□</span>
+                )}
+                <span style={{ minWidth: 0 }}>
+                  <strong style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 13 }}>{product.name || product.descripcion || 'Sin nombre'}</strong>
+                  <small style={{ display: 'block', marginTop: 3, color: C.muted, fontSize: 11 }}>{product.codigo} · Stock: {product.stock}</small>
+                </span>
+                <span style={{ ...outlineBtn, padding: '6px 10px', color: C.red, borderColor: '#E9BABA' }}>Configurar</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function OperationalOrdersSection({ title, subtitle, orders, emptyText, type, onSelect, onQuickStatus, updatingOrderIds }) {
   return (
     <section className={`adm-work-queue adm-work-queue--${type}`}>
       <div className="adm-work-queue__head">
@@ -1711,7 +1917,14 @@ function OperationalOrdersSection({ title, subtitle, orders, emptyText, type, on
               </div>
               <div className="adm-work-order__footer">
                 <span>{fmt(order.total_amount)}</span>
-                <button onClick={() => onSelect(order)}>Ver pedido</button>
+                <div className="adm-work-order__actions">
+                  <QuickStatusSelect
+                    order={order}
+                    onChange={onQuickStatus}
+                    saving={updatingOrderIds.has(order.id)}
+                  />
+                  <button onClick={() => onSelect(order)}>Ver pedido</button>
+                </div>
               </div>
             </article>
           ))}
@@ -1726,6 +1939,8 @@ function OrdersTab() {
   const [statusFilter, setStatusFilter] = useState('all')
   const [search, setSearch]             = useState('')
   const [selectedOrder, setSelectedOrder] = useState(null)
+  const [updatingOrderIds, setUpdatingOrderIds] = useState(() => new Set())
+  const [quickStatusError, setQuickStatusError] = useState('')
 
   useEffect(() => {
     fetchOrders({ limit: 500 })
@@ -1770,6 +1985,28 @@ function OrdersTab() {
     fetchOrders({ limit: 500 })
   }
 
+  async function handleQuickStatusChange(order, status) {
+    if (status === order.status || updatingOrderIds.has(order.id)) return
+    if (['cancelled', 'payment_failed', 'expired'].includes(status)) {
+      const confirmed = window.confirm(`¿Cambiar el pedido #${order.order_number} a "${STATUS_LABEL[status]}"? Esta acción puede liberar el stock reservado.`)
+      if (!confirmed) return
+    }
+
+    setQuickStatusError('')
+    setUpdatingOrderIds((current) => new Set(current).add(order.id))
+    try {
+      await updateOrderStatus(order.id, status)
+    } catch (error) {
+      setQuickStatusError(error.message || 'No se pudo actualizar el estado del pedido.')
+    } finally {
+      setUpdatingOrderIds((current) => {
+        const next = new Set(current)
+        next.delete(order.id)
+        return next
+      })
+    }
+  }
+
   return (
     <div>
       <div className="adm-work-queues">
@@ -1780,6 +2017,8 @@ function OrdersTab() {
           emptyText="No hay envíos pendientes."
           type="delivery"
           onSelect={setSelectedOrder}
+          onQuickStatus={handleQuickStatusChange}
+          updatingOrderIds={updatingOrderIds}
         />
         <OperationalOrdersSection
           title="Retiros en el local"
@@ -1788,6 +2027,8 @@ function OrdersTab() {
           emptyText="No hay retiros pendientes."
           type="pickup"
           onSelect={setSelectedOrder}
+          onQuickStatus={handleQuickStatusChange}
+          updatingOrderIds={updatingOrderIds}
         />
       </div>
 
@@ -1797,6 +2038,12 @@ function OrdersTab() {
           <p>Historial y búsqueda por estado</p>
         </div>
       </div>
+
+      {quickStatusError && (
+        <div style={{ background: C.redLight, border: `1px solid ${C.red}`, borderRadius: 8, padding: '10px 14px', marginBottom: 14, color: C.red, fontSize: 12 }}>
+          {quickStatusError}
+        </div>
+      )}
 
       {/* ── Filtros de estado ── */}
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 16 }}>
@@ -1855,12 +2102,12 @@ function OrdersTab() {
               {/* Header de tabla */}
               <div style={{
                 display: 'grid',
-                gridTemplateColumns: '110px 130px 1fr 150px 90px 120px 80px',
+                gridTemplateColumns: '110px 130px 1fr 150px 90px 170px 80px',
                 gap: 8, padding: '8px 14px',
                 borderBottom: `1px solid ${C.hairline}`,
                 background: C.paper,
               }}>
-                {['Número', 'Fecha', 'Cliente', 'Email', 'Total', 'Estado', 'Acción'].map((h) => (
+                {['Número', 'Fecha', 'Cliente', 'Email', 'Total', 'Estado rápido', 'Acción'].map((h) => (
                   <span key={h} style={{ ...lbl }}>{h}</span>
                 ))}
               </div>
@@ -1870,7 +2117,7 @@ function OrdersTab() {
                   key={order.id}
                   style={{
                     display: 'grid',
-                    gridTemplateColumns: '110px 130px 1fr 150px 90px 120px 80px',
+                    gridTemplateColumns: '110px 130px 1fr 150px 90px 170px 80px',
                     gap: 8, padding: '10px 14px', alignItems: 'center',
                     borderBottom: i < filteredOrders.length - 1 ? `1px solid ${C.hairline}` : 'none',
                     transition: 'background 0.12s',
@@ -1893,7 +2140,11 @@ function OrdersTab() {
                   <span style={{ fontSize: 13, fontWeight: 600, color: C.ink }}>
                     {fmt(order.total_amount)}
                   </span>
-                  <StatusBadge status={order.status} />
+                  <QuickStatusSelect
+                    order={order}
+                    onChange={handleQuickStatusChange}
+                    saving={updatingOrderIds.has(order.id)}
+                  />
                   <button
                     onClick={() => setSelectedOrder(order)}
                     style={{ ...solidBtn, background: C.dark, color: '#fff', fontSize: 11, padding: '5px 12px' }}
@@ -1940,10 +2191,18 @@ function OrdersTab() {
         .adm-work-order__destination small { color:${C.muted}; font-size:10.5px; }
         .adm-work-order__footer { margin-top:12px; padding-top:10px; border-top:1px solid ${C.hairline}; }
         .adm-work-order__footer > span { color:${C.ink}; font-size:13px; font-weight:700; }
+        .adm-work-order__actions { display:flex; align-items:center; justify-content:flex-end; gap:7px; min-width:0; }
         .adm-work-order__footer button { border:0; border-radius:6px; padding:6px 11px; background:${C.dark}; color:#fff; cursor:pointer; font:600 10.5px ${ADMIN_FONT}; }
         .adm-work-order__footer button:hover { background:${C.darkHover}; }
+        .adm-quick-status { position:relative; min-width:0; height:30px; display:inline-flex; align-items:center; gap:7px; padding:0 7px; border:1px solid ${C.border}; border-radius:7px; background:${C.white}; }
+        .adm-quick-status > span { width:7px; height:7px; flex:0 0 auto; border-radius:50%; }
+        .adm-quick-status select { min-width:0; max-width:145px; height:28px; padding:0 18px 0 0; border:0; outline:0; background:transparent; color:${C.ink}; cursor:pointer; font:600 10.5px ${ADMIN_FONT}; }
+        .adm-quick-status select:disabled { cursor:wait; opacity:.55; }
+        .adm-quick-status i { position:absolute; right:6px; width:10px; height:10px; border:2px solid ${C.hairline}; border-top-color:${C.red}; border-radius:50%; animation:adm-status-spin .65s linear infinite; }
+        @keyframes adm-status-spin { to { transform:rotate(360deg); } }
         .adm-orders-history-head { margin-bottom:14px; }
         @media (max-width:980px) { .adm-work-queues { grid-template-columns:1fr; } }
+        @media (max-width:560px) { .adm-work-order__footer { align-items:flex-start; flex-direction:column; } .adm-work-order__actions { width:100%; justify-content:space-between; } }
       `}</style>
     </div>
   )
@@ -2072,39 +2331,80 @@ function InventoryProductModal({ product, onSave, onClose }) {
 }
 
 // ── ImportUploadCard ─────────────────────────────────────────────────────────
-function ImportUploadCard({ label, hint, disabled, onFile, accept = '.xls,.xlsx', busyLabel = 'Importando...', children = null }) {
+function ImportUploadCard({
+  label, hint, disabled, onFile, onFiles, accept = '.xls,.xlsx', busyLabel = 'Importando...',
+  children = null, multiple = false, allowDirectory = false,
+}) {
   const inputRef = useRef(null)
+  const directoryInputRef = useRef(null)
+  const handleSelection = (fileList) => {
+    const files = [...(fileList || [])].filter(file => /\.(xlsx|xls)$/i.test(file.name))
+    if (!files.length) return
+    if (onFiles) onFiles(files)
+    else if (onFile) onFile(files[0])
+  }
   return (
     <div style={{
       background: C.white, borderRadius: 10, border: `1px solid ${C.border}`,
-      padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 8,
+      padding: '11px 13px', display: 'flex', flexDirection: 'column', gap: 5,
     }}>
-      <div style={{ fontSize: 13, fontWeight: 600, color: C.ink }}>{label}</div>
-      <p style={{ fontSize: 11.5, color: C.muted, margin: 0, minHeight: 28 }}>{hint}</p>
+      <div style={{ fontSize: 12.5, fontWeight: 600, color: C.ink }}>{label}</div>
+      <p style={{ fontSize: 10.5, lineHeight: 1.35, color: C.muted, margin: 0 }}>{hint}</p>
       {children}
       <input
         ref={inputRef}
         type="file"
         accept={accept}
+        multiple={multiple}
         style={{ display: 'none' }}
         onChange={e => {
-          const file = e.target.files?.[0]
-          if (file) onFile(file)
+          handleSelection(e.target.files)
           e.target.value = ''
         }}
       />
-      <button
-        onClick={() => inputRef.current?.click()}
-        disabled={disabled}
-        style={{
-          ...outlineBtn,
-          fontSize: 11.5, padding: '7px 12px',
-          cursor: disabled ? 'not-allowed' : 'pointer',
-          opacity: disabled ? 0.6 : 1,
-        }}
-      >
-        {disabled ? busyLabel : 'Elegir archivo'}
-      </button>
+      {allowDirectory && (
+        <input
+          ref={directoryInputRef}
+          type="file"
+          accept={accept}
+          multiple
+          webkitdirectory=""
+          directory=""
+          style={{ display: 'none' }}
+          onChange={e => {
+            handleSelection(e.target.files)
+            e.target.value = ''
+          }}
+        />
+      )}
+      <div style={{ display: 'grid', gridTemplateColumns: allowDirectory ? '1fr 1fr' : '1fr', gap: 7 }}>
+        <button
+          onClick={() => inputRef.current?.click()}
+          disabled={disabled}
+          style={{
+            ...outlineBtn,
+            fontSize: 11, padding: '5px 10px',
+            cursor: disabled ? 'not-allowed' : 'pointer',
+            opacity: disabled ? 0.6 : 1,
+          }}
+        >
+          {disabled ? busyLabel : multiple ? 'Elegir archivos' : 'Elegir archivo'}
+        </button>
+        {allowDirectory && (
+          <button
+            onClick={() => directoryInputRef.current?.click()}
+            disabled={disabled}
+            style={{
+              ...outlineBtn,
+              fontSize: 11, padding: '5px 10px',
+              cursor: disabled ? 'not-allowed' : 'pointer',
+              opacity: disabled ? 0.6 : 1,
+            }}
+          >
+            {disabled ? busyLabel : 'Elegir carpeta'}
+          </button>
+        )}
+      </div>
     </div>
   )
 }
@@ -2462,10 +2762,19 @@ function priceLineHasValidPrice(line) {
     .some(value => value !== '' && value != null && Number.isFinite(Number(value)) && Number(value) >= 0)
 }
 
+function normalizePriceReviewCode(value) {
+  return String(value || '').trim().toUpperCase()
+}
+
+function priceLineHasCreateConflict(line) {
+  return line.mode === 'create' && line.createConflict &&
+    normalizePriceReviewCode(line.newCodigo) === normalizePriceReviewCode(line.createConflict.codigo)
+}
+
 function priceLineIsReady(line) {
   const destinationReady = line.mode === 'update'
     ? line.productId && (!line.variantMode || line.colorName?.trim())
-    : line.mode === 'create' && line.newCodigo?.trim()
+    : line.mode === 'create' && line.newCodigo?.trim() && !priceLineHasCreateConflict(line)
   return Boolean(destinationReady && priceLineHasValidPrice(line))
 }
 
@@ -2483,6 +2792,12 @@ function buildPriceReviewLineIssues(lines) {
     if (line.mode === 'update' && !line.productId) addIssue(line, 'Falta asignar el producto')
     if (line.mode === 'update' && line.variantMode && !line.colorName?.trim()) addIssue(line, 'Falta completar el color')
     if (line.mode === 'create' && !line.newCodigo?.trim()) addIssue(line, 'Falta completar el código nuevo')
+    if (priceLineHasCreateConflict(line)) {
+      const conflict = line.createConflict
+      const productLabel = `${conflict.codigo} — ${conflict.nombre || 'Sin nombre'}`
+      const supplierLabel = conflict.supplier ? ` (proveedor: ${conflict.supplier})` : ''
+      addIssue(line, `El código nuevo ya pertenece al producto existente ${productLabel}${supplierLabel}`)
+    }
     if (!priceLineHasValidPrice(line)) addIssue(line, 'No tiene un precio válido')
   }
 
@@ -2975,24 +3290,30 @@ function PriceReviewModal({ parsed, onConfirm, onClose }) {
       })
     })
   }
-  const updateLine = (key, next) => setLines(current => {
-    const updated = current.map(line => line.key === key ? next : line)
-    if (next.mode !== 'update' || !next.productId || !next.variantMode) return updated
+  const updateLine = (key, next) => {
+    setError('')
+    setLines(current => {
+      const nextConflictIsCurrent = next.createConflict &&
+        normalizePriceReviewCode(next.newCodigo) === normalizePriceReviewCode(next.createConflict.codigo)
+      const cleanNext = nextConflictIsCurrent ? next : { ...next, createConflict: null }
+      const updated = current.map(line => line.key === key ? cleanNext : line)
+      if (cleanNext.mode !== 'update' || !cleanNext.productId || !cleanNext.variantMode) return updated
 
-    return updated.map(line => {
-      if (line.key === key || line.mode !== 'update' || line.productId !== next.productId || line.variantMode) return line
-      const inferred = line.colorName?.trim()
-        ? { name: line.colorName.trim(), hex: line.colorHex || '#CCCCCC' }
-        : inferPriceColor(line.codigo, line.descripcion)
-      if (!inferred.name) return line
-      return {
-        ...line,
-        variantMode: true,
-        colorName: inferred.name,
-        colorHex: inferred.hex,
-      }
+      return updated.map(line => {
+        if (line.key === key || line.mode !== 'update' || line.productId !== cleanNext.productId || line.variantMode) return line
+        const inferred = line.colorName?.trim()
+          ? { name: line.colorName.trim(), hex: line.colorHex || '#CCCCCC' }
+          : inferPriceColor(line.codigo, line.descripcion)
+        if (!inferred.name) return line
+        return {
+          ...line,
+          variantMode: true,
+          colorName: inferred.name,
+          colorHex: inferred.hex,
+        }
+      })
     })
-  })
+  }
   const included = lines.filter(line => !line.excluded)
   const assignedProductIds = new Set(
     included.filter(line => line.mode === 'update' && line.productId).map(line => line.productId)
@@ -3044,6 +3365,24 @@ function PriceReviewModal({ parsed, onConfirm, onClose }) {
       })))
       onClose()
     } catch (err) {
+      const conflicts = Array.isArray(err.conflicts) ? err.conflicts : []
+      if (conflicts.length) {
+        const conflictsByCode = new Map(conflicts.map(conflict => [normalizePriceReviewCode(conflict.codigo), conflict]))
+        const affectedKeys = lines
+          .filter(line => line.mode === 'create' && conflictsByCode.has(normalizePriceReviewCode(line.newCodigo)))
+          .map(line => line.key)
+        setLines(current => current.map(line => ({
+          ...line,
+          createConflict: line.mode === 'create'
+            ? conflictsByCode.get(normalizePriceReviewCode(line.newCodigo)) || null
+            : null,
+        })))
+        setOpenSections(current => ({ ...current, attention: true }))
+        setOpenGroups(current => ({
+          ...current,
+          ...Object.fromEntries(affectedKeys.map(key => [`line:${key}`, true])),
+        }))
+      }
       setError(err.message || 'No se pudieron actualizar los precios')
     } finally {
       setSubmitting(false)
@@ -3213,14 +3552,114 @@ function CurrencySettingsCard({ settings, onSave }) {
   }
 
   return (
-    <div style={{ background: C.white, borderRadius: 10, border: `1px solid ${C.border}`, padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-      <div style={{ fontSize: 13, fontWeight: 600, color: C.ink }}>Cotización USD / ARS</div>
-      <p style={{ fontSize: 11.5, color: C.muted, margin: 0 }}>Se usa para importar en USD y mostrar equivalencias.</p>
+    <div style={{ background: C.white, borderRadius: 10, border: `1px solid ${C.border}`, padding: '11px 13px', display: 'flex', flexDirection: 'column', gap: 5 }}>
+      <div style={{ fontSize: 12.5, fontWeight: 600, color: C.ink }}>Cotización USD / ARS</div>
+      <p style={{ fontSize: 10.5, color: C.muted, margin: 0 }}>Conversión vigente para proveedores USD.</p>
       <div style={{ display: 'flex', gap: 7 }}>
         <input type="number" min="0.01" step="0.01" value={value} onChange={event => { setValue(event.target.value); setMessage('') }} aria-label="Cotización de un dólar en pesos" style={{ ...inp, minWidth: 0 }} />
-        <button type="button" onClick={save} disabled={saving} style={{ ...outlineBtn, padding: '7px 10px', whiteSpace: 'nowrap' }}>{saving ? 'Guardando...' : 'Guardar'}</button>
+        <button type="button" onClick={save} disabled={saving} style={{ ...outlineBtn, padding: '5px 9px', whiteSpace: 'nowrap' }}>{saving ? 'Guardando...' : 'Guardar'}</button>
       </div>
       <div style={{ minHeight: 14, fontSize: 10.5, color: message.includes('guardada') ? C.green : C.red }}>{message || `US$ 1 = ${fmt(Number(value) || 0)}`}</div>
+    </div>
+  )
+}
+
+function SupplierToolbar({ supplierNames, settings, inventory, selectedSupplier, usdArsRate, onSelect, onSave }) {
+  const [value, setValue] = useState(selectedSupplier === 'Todos' ? '' : selectedSupplier)
+  const [open, setOpen] = useState(false)
+  const [savingCurrency, setSavingCurrency] = useState('')
+  const [message, setMessage] = useState('')
+  const names = useMemo(() => [...new Set([
+    ...supplierNames,
+    ...settings.map(item => item.supplier),
+  ])].filter(Boolean).sort(PRICE_CODE_COLLATOR.compare), [supplierNames, settings])
+  const normalizedValue = value.trim().toLocaleUpperCase('es-AR')
+  const selectedName = names.find(name => name.toLocaleUpperCase('es-AR') === normalizedValue) || null
+  const selectedSetting = settings.find(item => item.supplier === selectedName) || null
+  const selectedProduct = inventory.find(product => product.supplier === selectedName) || null
+  const currentCurrency = selectedSetting?.currency || selectedProduct?.price_currency || 'ARS'
+  const suggestions = names
+    .filter(name => !normalizedValue || name.toLocaleUpperCase('es-AR').includes(normalizedValue))
+
+  useEffect(() => {
+    setValue(selectedSupplier === 'Todos' ? '' : selectedSupplier)
+  }, [selectedSupplier])
+
+  const chooseSupplier = (supplier) => {
+    setValue(supplier)
+    setOpen(false)
+    setMessage('')
+    onSelect(supplier)
+  }
+
+  const setCurrency = async (currency) => {
+    if (!selectedName) { setMessage('Elegí un proveedor de los resultados.'); return }
+    setSavingCurrency(currency)
+    setMessage('')
+    try {
+      const result = await onSave(selectedName, currency)
+      setMessage(`${result.productCount} productos pasaron a ${currency}.`)
+    } catch (err) {
+      setMessage(err.message || 'No se pudo guardar.')
+    } finally {
+      setSavingCurrency('')
+    }
+  }
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}>
+      <div style={{ position: 'relative', width: 230 }}>
+        <input
+          type="search"
+          value={value}
+          onFocus={() => setOpen(true)}
+          onBlur={() => setTimeout(() => setOpen(false), 120)}
+          onChange={event => {
+            const next = event.target.value.toUpperCase()
+            setValue(next)
+            setOpen(true)
+            setMessage('')
+            onSelect(next || 'Todos')
+          }}
+          placeholder="Buscar proveedor"
+          aria-label="Buscar proveedor para mostrar"
+          style={{ ...headerFilterControl, width: '100%' }}
+        />
+        {open && suggestions.length > 0 && (
+          <div style={{ position: 'absolute', zIndex: 40, top: 'calc(100% + 4px)', left: 0, right: 0, maxHeight: 230, overflowY: 'auto', background: C.white, border: `1px solid ${C.border}`, borderRadius: 8, boxShadow: '0 8px 22px rgba(17,24,39,0.14)' }}>
+            {suggestions.map(name => {
+              const item = settings.find(setting => setting.supplier === name)
+              return (
+                <button key={name} type="button" onMouseDown={() => chooseSupplier(name)} style={{ width: '100%', display: 'flex', justifyContent: 'space-between', gap: 8, padding: '8px 10px', border: 'none', borderBottom: `1px solid ${C.hairline}`, background: C.white, color: C.text2, fontSize: 11.5, cursor: 'pointer', textAlign: 'left' }}>
+                  <strong>{name}</strong>
+                  <span style={{ color: C.muted }}>{item?.productCount ?? ''}{item?.productCount != null ? ' prod.' : ''}</span>
+                </button>
+              )
+            })}
+          </div>
+        )}
+      </div>
+      {value && <button type="button" onClick={() => { setValue(''); setOpen(false); setMessage(''); onSelect('Todos') }} style={{ ...outlineBtn, padding: '6px 9px' }}>Todos</button>}
+      <span style={{ fontSize: 10.5, color: C.muted }}>Moneda:</span>
+      {['ARS', 'USD'].map(currency => (
+        <button
+          key={currency}
+          type="button"
+          onClick={() => setCurrency(currency)}
+          disabled={!selectedName || Boolean(savingCurrency)}
+          title={currency === 'USD' ? `Convertir a ARS con US$ 1 = ${fmt(usdArsRate)}` : 'Mantener los importes en pesos'}
+          style={{
+            ...outlineBtn, padding: '6px 11px',
+            borderColor: selectedName && currentCurrency === currency ? C.red : C.border,
+            background: selectedName && currentCurrency === currency ? C.red : C.white,
+            color: selectedName && currentCurrency === currency ? C.white : C.text3,
+            opacity: selectedName ? 1 : 0.45,
+          }}
+        >
+          {savingCurrency === currency ? '...' : currency}
+        </button>
+      ))}
+      {message && <span style={{ fontSize: 10.5, color: message.includes('pasaron') ? C.green : C.red }}>{message}</span>}
     </div>
   )
 }
@@ -3643,10 +4082,11 @@ function UnifiedProductsTab() {
     inventory, inventoryTotal, inventorySuppliers, inventoryLoading, inventoryError,
     importResult, importLoading, importError,
     currencySettings, updateCurrencySettings,
+    supplierSettings, updateSupplierCurrency,
     fetchInventory, createInventoryItem, updateInventoryItem, deleteInventoryItem, fetchCatalog,
     fetchInventorySelectionIds, applyInventoryBatch,
     adjustInventoryStocks, uploadInventoryFile,
-    parsePriceFile, applyPriceUpdates,
+    uploadPriceFiles,
     parseInvoicePdf, applyInvoiceLines,
     parseCleosCatalogPdf, uploadCleosPreviewImage, applyCleosCatalogProducts,
   } = useAdmin()
@@ -3672,9 +4112,6 @@ function UnifiedProductsTab() {
   const [invoiceError, setInvoiceError]     = useState(null)
   const [invoiceParsed, setInvoiceParsed]   = useState(null)
   const [priceParsing, setPriceParsing]     = useState(false)
-  const [priceError, setPriceError]         = useState(null)
-  const [priceParsed, setPriceParsed]       = useState(null)
-  const [priceSupplier, setPriceSupplier]   = useState('')
   const [cleosParsing, setCleosParsing]     = useState(false)
   const [cleosError, setCleosError]         = useState(null)
   const [cleosParsed, setCleosParsed]       = useState(null)
@@ -3689,11 +4126,6 @@ function UnifiedProductsTab() {
   const [bulkError, setBulkError]           = useState('')
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false)
   const selectPageRef = useRef(null)
-
-  const priceSupplierOptions = useMemo(() => [...new Set([
-    'CLEOS', 'ALCIDES', 'KIAN', 'HUERGUI',
-    ...(inventorySuppliers || []).filter(supplier => supplier && supplier !== 'OTRO'),
-  ])].sort(PRICE_CODE_COLLATOR.compare), [inventorySuppliers])
 
   const inventoryFilters = useMemo(() => ({
     page,
@@ -3766,29 +4198,33 @@ function UnifiedProductsTab() {
     }
   }
 
-  async function handlePriceUpload(file) {
-    setPriceError(null)
-    if (!priceSupplier.trim()) {
-      setPriceError('Elegí o escribí el proveedor antes de cargar la lista de precios.')
-      return
-    }
+  async function handlePriceFilesUpload(files) {
     setPriceParsing(true)
     try {
-      const data = await parsePriceFile(file, priceSupplier.trim())
-      if (!data.lines.length) setPriceError('No se encontraron precios válidos en la planilla.')
-      else setPriceParsed(data)
-    } catch (err) {
-      setPriceError(err.message)
+      await uploadPriceFiles(files)
+      await fetchCatalog()
+      setPage(1)
+      await fetchInventory({ ...inventoryFilters, page: 1 })
+    } catch {
+      // El contexto muestra el error de importación en el panel.
     } finally {
       setPriceParsing(false)
     }
   }
 
-  async function handlePriceConfirm(actions) {
-    await applyPriceUpdates(actions, priceParsed?.supplier || priceSupplier.trim())
+  async function handleSupplierCurrencySave(supplier, currency) {
+    const result = await updateSupplierCurrency(supplier, currency)
     await fetchCatalog()
     setPage(1)
-    await fetchInventory({ ...inventoryFilters, page: 1 })
+    await fetchInventory({ ...inventoryFilters, supplier, page: 1 })
+    return result
+  }
+
+  async function handleCurrencyRateSave(rate) {
+    const result = await updateCurrencySettings(rate)
+    await fetchCatalog()
+    await fetchInventory(inventoryFilters)
+    return result
   }
 
   async function handleInvoiceConfirm(actions) {
@@ -3818,16 +4254,33 @@ function UnifiedProductsTab() {
     fetchInventory({ ...inventoryFilters, page: 1 })
   }
 
-  function queueStockChange(product, delta) {
+  function queueStockValue(product, rawValue) {
     if (stockSaving) return
     setStockSaveError('')
     setStockDrafts(current => {
       const savedStock = Number(product.stock) || 0
       const draft = current[product.id]
-      const nextValue = (draft?.value ?? savedStock) + delta
+      const base = draft?.base ?? savedStock
       const next = { ...current }
-      if (nextValue === (draft?.base ?? savedStock)) delete next[product.id]
-      else next[product.id] = { base: draft?.base ?? savedStock, value: nextValue }
+
+      if (rawValue === '') {
+        next[product.id] = { base, value: '' }
+        return next
+      }
+
+      const value = Number(rawValue)
+      if (!Number.isInteger(value) || value < 0) return current
+      if (value === base) delete next[product.id]
+      else next[product.id] = { base, value }
+      return next
+    })
+  }
+
+  function restoreEmptyStockDraft(product) {
+    setStockDrafts(current => {
+      if (current[product.id]?.value !== '') return current
+      const next = { ...current }
+      delete next[product.id]
       return next
     })
   }
@@ -3838,6 +4291,11 @@ function UnifiedProductsTab() {
   }
 
   async function handleSaveStockChanges() {
+    const hasInvalidStock = Object.values(stockDrafts).some(draft => !Number.isInteger(draft.value) || draft.value < 0)
+    if (hasInvalidStock) {
+      setStockSaveError('Completá el stock pendiente con un número entero mayor o igual a cero.')
+      return
+    }
     const changes = Object.entries(stockDrafts).map(([id, draft]) => ({
       id,
       delta: draft.value - draft.base,
@@ -4025,49 +4483,18 @@ function UnifiedProductsTab() {
       {/* Carga de excel */}
       <h3 style={sectionTitle}>Importaciones y movimientos de stock</h3>
       <div style={{
-        display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-        gap: 12, marginBottom: 20,
+        display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+        gap: 8, marginBottom: 16, alignItems: 'start',
       }}>
-        <ImportUploadCard
-          label="Stock general"
-          hint="Crea o actualiza código, descripción, grupo y subgrupo. No toca precios ni stock."
-          disabled={importLoading}
-          onFile={file => handleUpload('catalog', file)}
-        />
+        {/* Importaciones temporalmente ocultas: stock general, ventas del local y compras a proveedor. */}
         <ImportUploadCard
           label="Precios proveedor"
-          hint="Elegí el proveedor: las asociaciones confirmadas se reutilizan en sus próximas listas."
-          disabled={importLoading || priceParsing || !priceSupplier.trim()}
-          busyLabel={priceParsing ? 'Leyendo precios...' : !priceSupplier.trim() ? 'Elegí un proveedor' : 'Importando...'}
-          onFile={handlePriceUpload}
-        >
-          <label style={{ display: 'grid', gap: 4 }}>
-            <span style={lbl}>Proveedor de esta lista *</span>
-            <input
-              list="price-supplier-options"
-              value={priceSupplier}
-              onChange={event => setPriceSupplier(event.target.value.toUpperCase())}
-              placeholder="Ej. CLEOS"
-              style={{ ...inp, padding: '7px 9px', fontSize: 11.5 }}
-            />
-            <datalist id="price-supplier-options">
-              {priceSupplierOptions.map(supplier => <option key={supplier} value={supplier} />)}
-            </datalist>
-          </label>
-        </ImportUploadCard>
-        <ImportUploadCard
-          label="Comprobante de venta en el local"
-          hint="Descuenta stock por cada código vendido en el local."
-          disabled={importLoading}
-          onFile={file => handleUpload('sale', file)}
-        />
-        <ImportUploadCard
-          label="Compra a proveedor (Excel o PDF)"
-          hint="Suma stock por lo comprado: Excel de orden de compra (KIAN) o PDF de factura/remito de cualquier proveedor."
-          accept=".xls,.xlsx,.pdf"
-          disabled={importLoading || invoiceParsing}
-          busyLabel={invoiceParsing ? 'Leyendo PDF...' : 'Importando...'}
-          onFile={file => /\.pdf$/i.test(file.name) ? handleInvoiceUpload(file) : handleUpload('purchase', file)}
+          hint="Subí varios Excel o una carpeta completa. El nombre de cada archivo se usa como proveedor y los productos se crean sin publicar."
+          disabled={importLoading || priceParsing}
+          busyLabel={priceParsing ? 'Creando productos...' : 'Importando...'}
+          onFiles={handlePriceFilesUpload}
+          multiple
+          allowDirectory
         />
         <ImportUploadCard
           label="Catálogo CLEOS con imágenes"
@@ -4077,27 +4504,13 @@ function UnifiedProductsTab() {
           busyLabel={cleosParsing ? 'Extrayendo productos...' : 'Importando...'}
           onFile={handleCleosUpload}
         />
-        <CurrencySettingsCard settings={currencySettings} onSave={updateCurrencySettings} />
+        <CurrencySettingsCard settings={currencySettings} onSave={handleCurrencyRateSave} />
       </div>
 
-      {priceError && (
-        <div style={{ background: C.redLight, border: `1px solid ${C.red}`, borderRadius: 8, padding: '12px 16px', marginBottom: 20, color: C.red, fontSize: 13 }}>
-          {priceError}
-        </div>
-      )}
-
-      {priceParsed && (
-        <PriceReviewModal
-          parsed={priceParsed}
-          onConfirm={handlePriceConfirm}
-          onClose={() => setPriceParsed(null)}
-        />
-      )}
-
       {invoiceError && (
-        <div style={{ background: C.redLight, border: `1px solid ${C.red}`, borderRadius: 8, padding: '12px 16px', marginBottom: 20, color: C.red, fontSize: 13 }}>
+        <DismissibleErrorNotice key={invoiceError}>
           {invoiceError}
-        </div>
+        </DismissibleErrorNotice>
       )}
 
       {invoiceParsed && (
@@ -4109,9 +4522,9 @@ function UnifiedProductsTab() {
       )}
 
       {cleosError && (
-        <div style={{ background: C.redLight, border: `1px solid ${C.red}`, borderRadius: 8, padding: '12px 16px', marginBottom: 20, color: C.red, fontSize: 13 }}>
+        <DismissibleErrorNotice key={cleosError}>
           {cleosError}
-        </div>
+        </DismissibleErrorNotice>
       )}
 
       {cleosParsed && (
@@ -4124,9 +4537,9 @@ function UnifiedProductsTab() {
       )}
 
       {importError && (
-        <div style={{ background: C.redLight, border: `1px solid ${C.red}`, borderRadius: 8, padding: '12px 16px', marginBottom: 20, color: C.red, fontSize: 13 }}>
+        <DismissibleErrorNotice key={importError}>
           {importError}
-        </div>
+        </DismissibleErrorNotice>
       )}
 
       {showResult && importResult && (
@@ -4136,6 +4549,7 @@ function UnifiedProductsTab() {
             <button onClick={() => setShowResult(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.text3, fontSize: 14 }}>✕</button>
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {importResult.totalFiles !== undefined && <span style={pill('#EEF2FF', '#4338CA')}>{importResult.processedFiles} de {importResult.totalFiles} archivos procesados</span>}
             {importResult.totalRows !== undefined && <span style={pill('#F3F4F6', C.text3)}>{importResult.totalRows} filas leídas</span>}
             {importResult.created !== undefined && <span style={pill(C.greenLight, C.green)}>{importResult.created} creados</span>}
             {importResult.updated !== undefined && <span style={pill(C.amberLight, C.amberDark)}>{importResult.updated} actualizados</span>}
@@ -4143,6 +4557,25 @@ function UnifiedProductsTab() {
             {!!importResult.imagesRemoved && <span style={pill(C.redLight, C.red)}>{importResult.imagesRemoved} imágenes eliminadas</span>}
             {!!importResult.skipped && <span style={pill('#F3F4F6', C.text3)}>{importResult.skipped} omitidos</span>}
           </div>
+          {!!importResult.files?.length && (
+            <div style={{ display: 'grid', gap: 5, marginTop: 10 }}>
+              {importResult.files.map(file => (
+                <div key={file.fileName} style={{ fontSize: 11.5, color: C.text2 }}>
+                  <strong>{file.fileName}</strong> → {file.supplier} · {file.currency} · {file.created} creados
+                  {file.existingCount ? ` · ${file.existingCount} ya existían` : ''}
+                  {file.duplicateRows ? ` · ${file.duplicateRows} repetidos` : ''}
+                  {file.invalidRows ? ` · ${file.invalidRows} filas inválidas` : ''}
+                </div>
+              ))}
+            </div>
+          )}
+          {!!importResult.failedFiles?.length && (
+            <div style={{ marginTop: 10, color: C.red, fontSize: 11.5 }}>
+              {importResult.failedFiles.map(file => (
+                <div key={file.fileName}><strong>{file.fileName}:</strong> {file.error}</div>
+              ))}
+            </div>
+          )}
           {!!importResult.unmatched?.length && (
             <div style={{ marginTop: 10 }}>
               <p style={{ fontSize: 12, color: C.text2, fontWeight: 600, margin: '0 0 4px' }}>
@@ -4163,9 +4596,20 @@ function UnifiedProductsTab() {
 
       {/* Tabla unificada de productos */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 12 }}>
-        <h3 style={{ ...sectionTitle, margin: 0 }}>
-          Todos los productos{inventoryTotal ? <span style={{ fontFamily: ADMIN_FONT }}> ({inventoryTotal})</span> : ''}
-        </h3>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+          <h3 style={{ ...sectionTitle, margin: 0 }}>
+            Todos los productos{inventoryTotal ? <span style={{ fontFamily: ADMIN_FONT }}> ({inventoryTotal})</span> : ''}
+          </h3>
+          <SupplierToolbar
+            supplierNames={inventorySuppliers}
+            settings={supplierSettings}
+            inventory={inventory}
+            selectedSupplier={supplierFilter}
+            usdArsRate={usdArsRate}
+            onSelect={supplier => { setSupplier(supplier); setPage(1) }}
+            onSave={handleSupplierCurrencySave}
+          />
+        </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           {pendingStockCount > 0 && (
             <>
@@ -4194,15 +4638,15 @@ function UnifiedProductsTab() {
       </div>
 
       {stockSaveError && (
-        <div style={{ background: C.redLight, border: `1px solid ${C.red}`, borderRadius: 8, padding: '10px 14px', marginBottom: 16, color: C.red, fontSize: 12.5 }}>
+        <DismissibleErrorNotice key={stockSaveError} marginBottom={16} fontSize={12.5}>
           {stockSaveError}
-        </div>
+        </DismissibleErrorNotice>
       )}
 
       {inventoryError && (
-        <div style={{ background: C.redLight, border: `1px solid ${C.red}`, borderRadius: 8, padding: '12px 16px', marginBottom: 16, color: C.red, fontSize: 13 }}>
+        <DismissibleErrorNotice key={inventoryError} marginBottom={16}>
           {inventoryError} — asegurate de que el backend esté corriendo.
-        </div>
+        </DismissibleErrorNotice>
       )}
 
       {selectedCount > 0 && (
@@ -4244,9 +4688,9 @@ function UnifiedProductsTab() {
       )}
 
       {bulkError && (
-        <div style={{ background: C.redLight, border: `1px solid ${C.red}`, borderRadius: 8, padding: '10px 14px', marginBottom: 12, color: C.red, fontSize: 12.5 }}>
+        <DismissibleErrorNotice key={bulkError} marginBottom={12} fontSize={12.5}>
           {bulkError}
-        </div>
+        </DismissibleErrorNotice>
       )}
 
       {!inventoryError && (
@@ -4279,14 +4723,9 @@ function UnifiedProductsTab() {
                 </div>
                 <div style={{ display: 'grid', gap: 7 }}>
                   {sortHeader('supplier', 'Proveedor')}
-                  <select
-                    value={supplierFilter}
-                    onChange={event => { setSupplier(event.target.value); setPage(1) }}
-                    style={headerFilterControl}
-                  >
-                    <option value="Todos">Todos</option>
-                    {inventorySuppliers.map(supplier => <option key={supplier} value={supplier}>{supplier}</option>)}
-                  </select>
+                  <div style={{ ...headerFilterControl, display: 'flex', alignItems: 'center', color: supplierFilter === 'Todos' ? C.muted : C.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {supplierFilter === 'Todos' ? 'Filtro arriba' : supplierFilter}
+                  </div>
                 </div>
                 <div style={{ display: 'grid', gap: 7 }}>
                   {sortHeader('cost', 'P. costo')}
@@ -4349,7 +4788,7 @@ function UnifiedProductsTab() {
                 const costArs = p.precio_costo != null ? Number(p.precio_costo) : p.precio_costo_usd != null ? Number(p.precio_costo_usd) * usdArsRate : null
                 const costUsd = p.precio_costo_usd != null ? Number(p.precio_costo_usd) : p.precio_costo != null ? Number(p.precio_costo) / usdArsRate : null
                 const saleArs = p.precio_venta != null ? Number(p.precio_venta) : null
-                const saleUsd = saleArs != null ? saleArs / usdArsRate : null
+                const saleUsd = p.precio_venta_usd != null ? Number(p.precio_venta_usd) : saleArs != null ? saleArs / usdArsRate : null
                 return (
                 <div
                   key={p.id}
@@ -4387,8 +4826,9 @@ function UnifiedProductsTab() {
                       {p.codigo}{p.category ? ` · ${p.category}` : ''}
                     </div>
                   </div>
-                  <span style={{ fontSize: 11.5, color: C.text3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {p.supplier || 'OTRO'}
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11.5, color: C.text3, overflow: 'hidden', whiteSpace: 'nowrap' }}>
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.supplier || 'OTRO'}</span>
+                    <small style={pill(p.price_currency === 'USD' ? '#EEF2FF' : '#F3F4F6', p.price_currency === 'USD' ? '#4338CA' : C.text3)}>{p.price_currency || 'ARS'}</small>
                   </span>
                   <span style={{ display: 'flex', flexDirection: 'column', fontSize: 12.5, color: C.text2, overflow: 'hidden', whiteSpace: 'nowrap' }}>
                     <span>{costArs != null ? fmt(costArs) : '—'}</span>
@@ -4398,16 +4838,40 @@ function UnifiedProductsTab() {
                     <span>{saleArs != null ? fmt(saleArs) : '—'}</span>
                     {saleUsd != null && <small style={{ color: C.muted, fontSize: 10.5, fontWeight: 400 }}>{fmtUsd(saleUsd)}</small>}
                   </span>
-                  <span style={{
+                  <div style={{
                     display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
                     fontSize: 12, fontWeight: 500, color: C.text2,
-                  }} title={stockDraft ? 'Cambio de stock pendiente de guardar' : 'Stock guardado'}>
+                  }} title={stockDraft ? 'Cambio de stock pendiente de guardar' : 'Stock guardado'} onClick={event => event.stopPropagation()}>
                     <span aria-hidden="true" style={{
                       width: 7, height: 7, borderRadius: '50%', flexShrink: 0,
                       background: stockDraft ? C.amber : displayedStock <= 0 ? C.red : displayedStock <= 5 ? C.amber : C.green,
                     }} />
-                    {displayedStock}
-                  </span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      inputMode="numeric"
+                      value={displayedStock}
+                      disabled={stockSaving}
+                      aria-label={`Stock de ${p.name || p.descripcion || p.codigo}`}
+                      onChange={event => queueStockValue(p, event.target.value)}
+                      onBlur={() => restoreEmptyStockDraft(p)}
+                      onKeyDown={event => {
+                        event.stopPropagation()
+                        if (event.key === 'Enter') {
+                          event.preventDefault()
+                          event.currentTarget.blur()
+                          handleSaveStockChanges()
+                        }
+                      }}
+                      style={{
+                        width: 78, height: 31, boxSizing: 'border-box', padding: '4px 7px',
+                        border: `1px solid ${stockDraft ? C.amber : C.border}`, borderRadius: 6,
+                        background: stockDraft ? C.amberLight : C.white, color: C.ink,
+                        font: `600 12px ${ADMIN_FONT}`, textAlign: 'center', outline: 'none',
+                      }}
+                    />
+                  </div>
                   <span style={{
                     display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
                     fontSize: 10.5, fontWeight: 500, color: C.text2,
@@ -4423,8 +4887,6 @@ function UnifiedProductsTab() {
                     onKeyDown={event => event.stopPropagation()}
                     style={{ display: 'flex', gap: 4, flexShrink: 0 }}
                   >
-                    <TooltipIconButton label="Restar stock" color={C.text3} disabled={stockSaving} onClick={() => queueStockChange(p, -1)}>−</TooltipIconButton>
-                    <TooltipIconButton label="Sumar stock" color={C.green} disabled={stockSaving} onClick={() => queueStockChange(p, 1)}>+</TooltipIconButton>
                     <TooltipIconButton
                       label="Editar producto"
                       color={C.amberDark}
@@ -4484,12 +4946,13 @@ function UnifiedProductsTab() {
 const NAV_ITEMS = [
   { id: 'overview',     label: 'Resumen',        Icon: BarChartIcon },
   { id: 'products',     label: 'Productos',      Icon: GridIcon },
+  { id: 'store',        label: 'Tienda',         Icon: StoreIcon },
   { id: 'offers',       label: 'Ofertas',        Icon: TagIcon },
   { id: 'orders',       label: 'Pedidos',        Icon: ClipboardIcon },
 ]
 
 export default function AdminDashboard() {
-  const { products, updateProduct, logout } = useAdmin()
+  const { products, updateProduct, deleteProduct, logout } = useAdmin()
   const navigate  = useNavigate()
   const [tab, setTab]           = useState('overview')
   const mainRef = useRef(null)
@@ -4610,6 +5073,13 @@ export default function AdminDashboard() {
         )}
         {tab === 'products' && (
           <UnifiedProductsTab />
+        )}
+        {tab === 'store' && (
+          <StoreTab
+            products={products}
+            onUpdate={updateProduct}
+            onDelete={deleteProduct}
+          />
         )}
         {tab === 'offers' && (
           <OffersTab

@@ -11,19 +11,30 @@ import { pool } from '../db/pool.js'
 const router = Router()
 
 const SELECT_FIELDS = `
-  id, name, category, subcategory, precio_venta, original_price, description_larga,
+  id, name, category, subcategory, precio_venta, precio_venta_usd,
+  original_price, original_price_usd, price_currency,
+  COALESCE((SELECT usd_ars_rate FROM store_settings WHERE id = 1), 1510) AS usd_ars_rate,
+  description_larga,
   image_url, hover_image_url, stock, watts, ip_rating, color_temp, material, cable_type, product_type,
-  color_options, size_options
+  color_options, size_options, length_cm, width_cm, height_cm, weight_kg
 `
 
-function mapRow(r) {
+export function mapRow(r) {
+  const usdArsRate = Number(r.usd_ars_rate) || 1510
+  const sourceIsUsd = r.price_currency === 'USD'
+  const salePrice = sourceIsUsd && r.precio_venta_usd != null
+    ? Number(r.precio_venta_usd) * usdArsRate
+    : r.precio_venta
+  const originalPrice = sourceIsUsd && r.original_price_usd != null
+    ? Number(r.original_price_usd) * usdArsRate
+    : r.original_price
   return {
     id: r.id,
     name: r.name,
     category: r.category,
     subcategory: r.subcategory,
-    price: r.precio_venta != null ? Number(r.precio_venta) : null,
-    originalPrice: r.original_price != null ? Number(r.original_price) : null,
+    price: salePrice != null ? Math.round(Number(salePrice) * 100) / 100 : null,
+    originalPrice: originalPrice != null ? Math.round(Number(originalPrice) * 100) / 100 : null,
     description: r.description_larga,
     image: r.image_url,
     hoverImage: r.hover_image_url,
@@ -35,13 +46,24 @@ function mapRow(r) {
     material: r.material,
     cableType: r.cable_type,
     productType: r.product_type || r.cable_type,
+    lengthCm: r.length_cm != null ? Number(r.length_cm) : null,
+    widthCm: r.width_cm != null ? Number(r.width_cm) : null,
+    heightCm: r.height_cm != null ? Number(r.height_cm) : null,
+    weightKg: r.weight_kg != null ? Number(r.weight_kg) : null,
     colors: (r.color_options || []).map(color => ({
       ...color,
-      price: color.price == null ? null : Number(color.price),
-      priceCost: color.priceCost == null ? null : Number(color.priceCost),
-      priceWithTax: color.priceWithTax == null ? null : Number(color.priceWithTax),
+      price: sourceIsUsd && color.priceUsd != null
+        ? Math.round(Number(color.priceUsd) * usdArsRate * 100) / 100
+        : color.price == null ? null : Number(color.price),
+      priceCost: sourceIsUsd && color.priceCostUsd != null
+        ? Math.round(Number(color.priceCostUsd) * usdArsRate * 100) / 100
+        : color.priceCost == null ? null : Number(color.priceCost),
+      priceWithTax: sourceIsUsd && color.priceWithTaxUsd != null
+        ? Math.round(Number(color.priceWithTaxUsd) * usdArsRate * 100) / 100
+        : color.priceWithTax == null ? null : Number(color.priceWithTax),
       priceUsd: color.priceUsd == null ? null : Number(color.priceUsd),
       priceCostUsd: color.priceCostUsd == null ? null : Number(color.priceCostUsd),
+      priceWithTaxUsd: color.priceWithTaxUsd == null ? null : Number(color.priceWithTaxUsd),
     })),
     sizes: r.size_options || [],
     published: true,

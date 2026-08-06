@@ -103,6 +103,7 @@ export async function createPreference(order) {
       surname: lastName,
       email: order.customer_email,
       phone: { number: order.customer_phone },
+      identification: order.customer_dni ? { type: 'DNI', number: order.customer_dni } : undefined,
     },
     back_urls: {
       success: `${returnBaseUrl}/order-confirmation?orderId=${order.id}&status=success`,

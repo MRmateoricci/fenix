@@ -75,6 +75,14 @@ export default function Footer() {
               <Link to="/profesionales" style={LINK} onMouseEnter={enter} onMouseLeave={leave}>Profesionales B2B</Link>
             </div>
 
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
+              <span style={{ fontFamily: 'var(--font-sans)', fontSize: 10.5, color: '#6B6151', marginBottom: 3 }}>legal</span>
+              <Link to="/policies/refunds" style={LINK} onMouseEnter={enter} onMouseLeave={leave}>Política de reembolso</Link>
+              <Link to="/policies/shipping" style={LINK} onMouseEnter={enter} onMouseLeave={leave}>Envíos</Link>
+              <Link to="/policies/privacy" style={LINK} onMouseEnter={enter} onMouseLeave={leave}>Privacidad</Link>
+              <Link to="/policies/terms" style={LINK} onMouseEnter={enter} onMouseLeave={leave}>Términos del servicio</Link>
+            </div>
+
           {/* Contacto */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
               <span style={{

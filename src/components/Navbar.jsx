@@ -24,7 +24,7 @@ function scrollTo(id) {
 }
 
 export default function Navbar() {
-  const { totalItems } = useCart()
+  const { totalItems, lastAdded, dismissAddedNotification } = useCart()
   const { products } = useAdmin()
   const { user, isAuthenticated, logout } = useAuth()
   const [cartOpen,   setCartOpen]   = useState(false)
@@ -134,19 +134,6 @@ export default function Navbar() {
     searchBlurTimer.current = setTimeout(() => setSearchFocused(false), 150)
   }
 
-  const [introReady, setIntroReady] = useState(() => {
-    if (typeof window === 'undefined') return true
-    if (window.location.pathname !== '/') return true
-    return window.matchMedia('(prefers-reduced-motion: reduce)').matches
-  })
-
-  useEffect(() => {
-    if (introReady) return
-    const handler = () => setIntroReady(true)
-    document.addEventListener('fnx-intro-done', handler, { once: true })
-    return () => document.removeEventListener('fnx-intro-done', handler)
-  }, [introReady])
-
   useEffect(() => {
     if (!isHome) { setScrolled(true); return }
     const check = () => setScrolled(window.scrollY > window.innerHeight * 0.82)
@@ -159,6 +146,12 @@ export default function Navbar() {
     document.body.style.overflow = mobileOpen ? 'hidden' : ''
     return () => { document.body.style.overflow = '' }
   }, [mobileOpen])
+
+  useEffect(() => {
+    if (!lastAdded) return undefined
+    const timer = setTimeout(dismissAddedNotification, 3600)
+    return () => clearTimeout(timer)
+  }, [lastAdded, dismissAddedNotification])
 
   function handleLink(item, e) {
     e.preventDefault()
@@ -181,13 +174,12 @@ export default function Navbar() {
       <nav style={{
         position: 'fixed', top: 0, left: 0, right: 0, zIndex: 50,
         height: 64,
-        transition: 'background .3s ease, border-color .3s ease, opacity 0.6s ease',
+        transition: 'background .3s ease, border-color .3s ease',
         background: opaque ? 'rgba(247,244,239,0.96)' : 'transparent',
         backdropFilter: opaque ? 'blur(12px)' : 'none',
         WebkitBackdropFilter: opaque ? 'blur(12px)' : 'none',
         borderBottom: `1px solid ${opaque ? '#DED6C7' : 'transparent'}`,
         color: ink,
-        opacity: introReady ? 1 : 0,
       }}>
         <div style={{
           padding: '0 24px', height: '100%',
@@ -503,6 +495,14 @@ export default function Navbar() {
 
       <CartDrawer open={cartOpen} onClose={() => setCartOpen(false)} />
 
+      {lastAdded && (
+        <AddedToCartNotice
+          item={lastAdded}
+          onClose={dismissAddedNotification}
+          onViewCart={() => { dismissAddedNotification(); setCartOpen(true) }}
+        />
+      )}
+
       <style>{`
         @media (max-width: 900px) {
           .fnx-desktop-nav { display: none !important; }
@@ -510,6 +510,22 @@ export default function Navbar() {
         }
       `}</style>
     </>
+  )
+}
+
+function AddedToCartNotice({ item, onClose, onViewCart }) {
+  return (
+    <div className="fnx-added-notice" role="status" aria-live="polite">
+      <div className="fnx-added-notice__title">
+        <span>{item.name}</span>
+        <strong>Elemento añadido</strong>
+      </div>
+      <div className="fnx-added-notice__body">
+        <button type="button" onClick={onClose} aria-label="Cerrar notificación">×</button>
+        <img src={item.image} alt="" />
+        <button type="button" onClick={onViewCart}>Ver el carrito</button>
+      </div>
+    </div>
   )
 }
 
