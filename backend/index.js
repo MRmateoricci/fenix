@@ -15,6 +15,7 @@ import catalogRouter  from './routes/catalog.js'
 import shippingRouter from './routes/shipping.js'
 import newsletterRouter from './routes/newsletter.js'
 import { uploadsDir } from './config/uploads.js'
+import { createCorsOptionsDelegate } from './config/cors.js'
 import { startExpireReservationsJob } from './jobs/expireReservations.js'
 
 const app  = express()
@@ -27,23 +28,10 @@ const frontendDist = path.resolve(__dirname, '..', 'dist')
 app.set('trust proxy', 1)
 
 // ── CORS ──────────────────────────────────────────────────────────────────────
-const allowedOrigins = [
-  'http://localhost:5173',
-  'http://localhost:4173',
-  process.env.APP_BASE_URL,
-  process.env.FRONTEND_BASE_URL,
-].filter(Boolean)
-
-const allowedOriginPatterns = [/\.ngrok-free\.dev$/, /\.ngrok-free\.app$/, /\.ngrok\.io$/]
-
-app.use(cors({
-  origin: (origin, cb) => {
-    if (!origin || allowedOrigins.includes(origin)) return cb(null, true)
-    if (allowedOriginPatterns.some((re) => re.test(new URL(origin).hostname))) return cb(null, true)
-    cb(new Error(`CORS: origen no permitido → ${origin}`))
-  },
-  credentials: true,
-}))
+app.use(cors(createCorsOptionsDelegate({
+  appBaseUrl: process.env.APP_BASE_URL,
+  frontendBaseUrl: process.env.FRONTEND_BASE_URL,
+})))
 
 // ── Webhooks: necesitan el body raw para verificar la firma ───────────────────
 app.use('/api/webhooks', express.raw({ type: 'application/json' }), (req, _res, next) => {
@@ -114,7 +102,7 @@ if (process.env.NODE_ENV === 'production') {
 // ── Error global ──────────────────────────────────────────────────────────────
 app.use((err, _req, res, _next) => {
   console.error('[Express error]', err)
-  res.status(500).json({ error: err.message || 'Error interno del servidor' })
+  res.status(err.status || 500).json({ error: err.message || 'Error interno del servidor' })
 })
 
 app.listen(PORT, () => {

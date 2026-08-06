@@ -545,6 +545,55 @@ export function AdminProvider({ children }) {
     }
   }, [])
 
+  const parseCatalogImagesPdf = useCallback(async (file, supplier) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('supplier', supplier)
+    const res = await fetch(`${API_BASE}/api/products/import/catalog-images/parse`, {
+      method: 'POST',
+      headers: { 'x-admin-token': ADMIN_PASSWORD },
+      body: formData,
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error || 'No se pudo leer el catálogo con imágenes')
+    return data
+  }, [])
+
+  const uploadCatalogPreviewImage = useCallback(async (importId, file) => {
+    const formData = new FormData()
+    formData.append('importId', importId)
+    formData.append('file', file)
+    const res = await fetch(`${API_BASE}/api/products/import/catalog-images/image`, {
+      method: 'POST',
+      headers: { 'x-admin-token': ADMIN_PASSWORD },
+      body: formData,
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error || 'No se pudo subir la imagen')
+    return data
+  }, [])
+
+  const applyCatalogImages = useCallback(async (importId, supplier, actions) => {
+    setImportLoading(true)
+    setImportError(null)
+    try {
+      const res = await fetch(`${API_BASE}/api/products/import/catalog-images/apply`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-admin-token': ADMIN_PASSWORD },
+        body: JSON.stringify({ importId, supplier, actions }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'No se pudieron guardar las imágenes')
+      setImportResult(data)
+      return data
+    } catch (err) {
+      setImportError(err.message)
+      throw err
+    } finally {
+      setImportLoading(false)
+    }
+  }, [])
+
   return (
     <AdminContext.Provider value={{
       isAdmin, products, productsLoading, productsError, fetchCatalog,
@@ -562,6 +611,7 @@ export function AdminProvider({ children }) {
       parsePriceFile, uploadPriceFiles, rematchPriceLines, applyPriceUpdates,
       searchProducts, parseInvoicePdf, applyInvoiceLines,
       parseCleosCatalogPdf, uploadCleosPreviewImage, applyCleosCatalogProducts,
+      parseCatalogImagesPdf, uploadCatalogPreviewImage, applyCatalogImages,
     }}>
       {children}
     </AdminContext.Provider>

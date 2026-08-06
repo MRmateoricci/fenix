@@ -452,11 +452,14 @@ El panel acepta estos flujos:
 | Compra KIAN | `/api/products/import/purchase` | Incrementa stock y registra precio USD. |
 | Factura/remito PDF | `/api/products/import/invoice/parse` | Extrae líneas y propone coincidencias sin modificar la DB. |
 | Confirmación de PDF | `/api/products/import/invoice/apply` | Aplica las líneas revisadas por el administrador. |
+| Vista previa de imágenes de catálogo | `/api/products/import/catalog-images/parse` | Recibe proveedor y PDF, extrae fotos y propone productos existentes sin modificar la DB. |
+| Imagen alternativa de catálogo | `/api/products/import/catalog-images/image` | Sube una foto alternativa dentro de una revisión pendiente. |
+| Confirmación de imágenes de catálogo | `/api/products/import/catalog-images/apply` | Actualiza únicamente `image_url` en las asociaciones confirmadas del proveedor. |
 | Catálogo CLEOS PDF | `/api/products/import/cleos/parse` | Extrae productos, precios e imágenes y muestra una vista previa editable. |
 | Imagen de revisión CLEOS | `/api/products/import/cleos/image` | Sube una imagen alternativa antes de confirmar la importación. |
 | Confirmación CLEOS | `/api/products/import/cleos/apply` | Crea o actualiza solamente los productos aceptados y guarda sus imágenes. |
 
-Las planillas se procesan en memoria con un límite de 15 MB. Las imágenes aceptadas son JPEG, PNG, WebP o GIF, con un límite de 8 MB.
+Las planillas se procesan en memoria con un límite de 15 MB y los PDF con un límite de 50 MB. Las imágenes aceptadas son JPEG, PNG, WebP o GIF, con un límite de 8 MB.
 
 La tarjeta “Precios proveedor” permite seleccionar varios archivos o una carpeta
 completa. Admite XLS/XLSX, detecta las columnas por sus encabezados, usa el nombre
@@ -513,10 +516,14 @@ guarda en `store_settings` (valor inicial: 1510) mediante
 siguen expresados en ARS, mientras el administrador ve también su equivalente
 en USD.
 
-La revisión CLEOS permite corregir código, nombre, precio USD y potencia; elegir,
-subir, omitir o eliminar la imagen; y asignar categoría/subcategoría individual o
-masivamente. Los productos nuevos quedan sin publicar hasta completar precio de
-venta y stock.
+La tarjeta “Catálogo con imágenes” exige elegir primero un proveedor. Para CLEOS
+reutiliza su extractor específico; para el resto aplica una lectura genérica que
+busca códigos de productos de ese proveedor y relaciona cada uno con la imagen
+más cercana en la página. La revisión muestra la foto propuesta, el producto de
+destino y su imagen actual. Las asociaciones incorrectas pueden buscarse y
+corregirse manualmente dentro del mismo proveedor. Nada cambia hasta confirmar y
+la confirmación sólo reemplaza `image_url`: no modifica precios, stock, textos ni
+el estado de publicación. Las fotos o asociaciones no seleccionadas se omiten.
 
 ## Envíos
 

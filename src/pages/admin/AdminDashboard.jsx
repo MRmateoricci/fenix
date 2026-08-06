@@ -2338,7 +2338,11 @@ function ImportUploadCard({
   const inputRef = useRef(null)
   const directoryInputRef = useRef(null)
   const handleSelection = (fileList) => {
-    const files = [...(fileList || [])].filter(file => /\.(xlsx|xls)$/i.test(file.name))
+    const acceptsPdf = String(accept).toLowerCase().includes('.pdf')
+    const files = [...(fileList || [])].filter(file => acceptsPdf
+      ? /\.pdf$/i.test(file.name)
+      : /\.(xlsx|xls)$/i.test(file.name)
+    )
     if (!files.length) return
     if (onFiles) onFiles(files)
     else if (onFile) onFile(files[0])
@@ -4068,6 +4072,359 @@ function CleosReviewModal({ parsed, onConfirm, onClose, onUploadImage }) {
   )
 }
 
+function CatalogProductPicker({ row, supplier, onChange }) {
+  const { searchProducts } = useAdmin()
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  const [results, setResults] = useState([])
+  const [loading, setLoading] = useState(false)
+  const [codeError, setCodeError] = useState('')
+
+  const normalizeCode = value => String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '')
+
+  const nearbyCodeCandidates = [...new Set([
+    row.detectedCode,
+    ...String(row.nearbyText || '').split('·'),
+  ]
+    .map(value => String(value || '').trim())
+    .filter(value => value.length >= 2 && value.length <= 64)
+    .filter(value => /[A-Za-z]/.test(value) && /\d/.test(value))
+    .filter(value => /^[A-Za-z0-9][A-Za-z0-9 ./_()+-]*$/.test(value))
+  )].slice(0, 8)
+
+  useEffect(() => {
+    if (!open || query.trim().length < 2) {
+      setResults([])
+      setLoading(false)
+      return undefined
+    }
+    let active = true
+    const timer = setTimeout(async () => {
+      setLoading(true)
+      const found = await searchProducts(query, { supplier })
+      if (active) {
+        setResults(found.filter(product => product.supplier === supplier))
+        setLoading(false)
+      }
+    }, 250)
+    return () => { active = false; clearTimeout(timer) }
+  }, [open, query, searchProducts, supplier])
+
+  const choose = (product, selectedCode = query.trim() || row.detectedCode) => {
+    onChange({
+      ...row,
+      detectedCode: selectedCode || product.codigo,
+      match: {
+        id: product.id,
+        codigo: product.codigo,
+        name: product.name || null,
+        descripcion: product.descripcion || null,
+        image_url: product.image_url || null,
+      },
+      accepted: Boolean(row.selectedImageKey),
+    })
+    setOpen(false)
+    setQuery('')
+    setResults([])
+    setCodeError('')
+  }
+
+  const useNearbyCode = async (code) => {
+    setLoading(true)
+    setCodeError('')
+    try {
+      const found = (await searchProducts(code, { supplier }))
+        .filter(product => product.supplier === supplier)
+      const exact = found.find(product => normalizeCode(product.codigo) === normalizeCode(code))
+      if (exact) {
+        choose(exact, code)
+        return
+      }
+      setOpen(true)
+      setQuery(code)
+      setResults(found)
+      setCodeError(found.length
+        ? `No hubo coincidencia exacta para ${code}. Elegí el producto correcto.`
+        : `No se encontró el código ${code} dentro de ${supplier}.`)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  if (!open) {
+    return (
+      <div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          {row.match ? (
+            <span style={pill(C.greenLight, C.green)}>
+              {row.match.codigo} — {row.match.name || row.match.descripcion || 'Sin descripción'}
+            </span>
+          ) : (
+            <span style={pill(C.redLight, C.red)}>Sin producto asociado</span>
+          )}
+          <button type="button" onClick={() => setOpen(true)} style={{ ...outlineBtn, padding: '5px 9px', fontSize: 10.5 }}>
+            {row.match ? 'Cambiar producto' : 'Buscar producto'}
+          </button>
+        </div>
+        {!!nearbyCodeCandidates.length && (
+          <div style={{ marginTop: 11 }}>
+            <p style={{ fontSize: 10.5, color: C.text3, margin: '0 0 6px' }}>
+              Indicá cuál valor del texto cercano es el código de esta foto:
+            </p>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {nearbyCodeCandidates.map(code => (
+                <button
+                  type="button"
+                  key={code}
+                  disabled={loading}
+                  onClick={() => useNearbyCode(code)}
+                  style={{
+                    ...outlineBtn,
+                    padding: '5px 9px', fontSize: 10.5,
+                    borderColor: row.detectedCode === code ? C.green : C.border,
+                    color: row.detectedCode === code ? C.green : C.text2,
+                  }}
+                >
+                  {loading ? 'Buscando...' : `Usar ${code}`}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  return (
+    <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, padding: 9, background: C.white }}>
+      <div style={{ display: 'flex', gap: 7 }}>
+        <input
+          autoFocus
+          value={query}
+          onChange={event => setQuery(event.target.value)}
+          placeholder={`Buscar dentro de ${supplier}...`}
+          style={{ ...inp, padding: '6px 8px', fontSize: 11.5, flex: 1 }}
+        />
+        <button type="button" onClick={() => setOpen(false)} style={{ ...outlineBtn, padding: '5px 9px', fontSize: 10.5 }}>Cancelar</button>
+      </div>
+      <div style={{ display: 'grid', gap: 3, marginTop: results.length ? 7 : 0 }}>
+        {codeError && <span style={{ fontSize: 10.5, color: C.amberDark, padding: '4px 2px' }}>{codeError}</span>}
+        {results.map(product => (
+          <button
+            type="button"
+            key={product.id}
+            onClick={() => choose(product, query.trim())}
+            style={{ border: 0, background: C.paper, borderRadius: 5, padding: '7px 8px', textAlign: 'left', cursor: 'pointer', color: C.text2, fontSize: 11.5 }}
+          >
+            <strong>{product.codigo}</strong> — {product.name || product.descripcion || 'Sin descripción'}
+          </button>
+        ))}
+        {loading && <span style={{ fontSize: 10.5, color: C.muted, padding: 4 }}>Buscando...</span>}
+        {!loading && query.trim().length >= 2 && !results.length && (
+          <span style={{ fontSize: 10.5, color: C.muted, padding: 4 }}>No se encontraron productos de {supplier}.</span>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function CatalogImageReviewRow({ row, supplier, importId, onChange, onUploadImage }) {
+  const set = changes => onChange({ ...row, ...changes })
+  const selectedImage = row.imageOptions.find(option => option.key === row.selectedImageKey) || null
+  const imageInputRef = useRef(null)
+  const [uploading, setUploading] = useState(false)
+  const [uploadError, setUploadError] = useState('')
+
+  const uploadReplacement = async (file) => {
+    if (!file) return
+    setUploadError('')
+    setUploading(true)
+    try {
+      const option = await onUploadImage(importId, file)
+      set({
+        imageOptions: [...row.imageOptions, option],
+        selectedImageKey: option.key,
+        accepted: Boolean(row.match),
+      })
+    } catch (error) {
+      setUploadError(error.message || 'No se pudo subir la imagen')
+    } finally {
+      setUploading(false)
+      if (imageInputRef.current) imageInputRef.current.value = ''
+    }
+  }
+
+  return (
+    <div style={{ border: `1px solid ${row.accepted ? C.border : C.hairline}`, borderRadius: 10, padding: 13, opacity: row.accepted ? 1 : 0.72 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, marginBottom: 10 }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12, fontWeight: 600, color: C.ink }}>
+          <input
+            type="checkbox"
+            checked={row.accepted}
+            disabled={!row.match || !row.selectedImageKey}
+            onChange={event => set({ accepted: event.target.checked })}
+          />
+          {row.accepted ? 'Aplicar esta imagen' : 'No aplicar'}
+        </label>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <span style={pill('#F3F4F6', C.text3)}>Página {row.page}</span>
+          {row.detectedCode && <span style={pill('#EEF2FF', '#4338CA')}>Código leído: {row.detectedCode}</span>}
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(120px, 155px) minmax(0, 1fr)', gap: 15 }}>
+        <div>
+          <div style={{ aspectRatio: '1 / 1', border: `1px solid ${C.border}`, borderRadius: 8, background: '#F4F4F4', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            {selectedImage
+              ? <img src={selectedImage.url} alt="Imagen extraída" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+              : <span style={{ fontSize: 10.5, color: C.muted }}>Sin imagen</span>}
+          </div>
+          {row.imageOptions.length > 1 && (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 4, marginTop: 6 }}>
+              {row.imageOptions.map(option => (
+                <button
+                  type="button"
+                  key={option.key}
+                  onClick={() => set({ selectedImageKey: option.key, accepted: Boolean(row.match) })}
+                  style={{ padding: 2, aspectRatio: '1 / 1', borderRadius: 5, cursor: 'pointer', background: '#fff', border: `2px solid ${option.key === row.selectedImageKey ? C.red : C.hairline}` }}
+                >
+                  <img src={option.url} alt="Alternativa" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+                </button>
+              ))}
+            </div>
+          )}
+          <input
+            ref={imageInputRef}
+            type="file"
+            accept="image/jpeg,image/png,image/webp,image/gif"
+            style={{ display: 'none' }}
+            onChange={event => uploadReplacement(event.target.files?.[0])}
+          />
+          <button type="button" disabled={uploading} onClick={() => imageInputRef.current?.click()} style={{ ...outlineBtn, width: '100%', marginTop: 6, padding: '5px 7px', fontSize: 10.5 }}>
+            {uploading ? 'Subiendo...' : 'Reemplazar imagen'}
+          </button>
+          {uploadError && <p style={{ color: C.red, fontSize: 10, margin: '5px 0 0' }}>{uploadError}</p>}
+        </div>
+
+        <div style={{ minWidth: 0 }}>
+          <p style={{ ...lbl, marginBottom: 6 }}>Esta imagen se insertará en</p>
+          <CatalogProductPicker row={row} supplier={supplier} onChange={onChange} />
+          {row.match?.image_url && (
+            <div style={{ display: 'flex', gap: 9, alignItems: 'center', marginTop: 12, padding: 8, borderRadius: 7, background: '#F8F8F8' }}>
+              <img src={row.match.image_url} alt="Imagen actual" style={{ width: 52, height: 52, objectFit: 'contain', borderRadius: 5, background: '#fff' }} />
+              <span style={{ fontSize: 10.5, color: C.muted }}>Imagen actual del producto. Sólo será reemplazada si confirmás esta fila.</span>
+            </div>
+          )}
+          {row.nearbyText && (
+            <p style={{ fontSize: 10.5, lineHeight: 1.4, color: C.muted, margin: '11px 0 0' }}>
+              Texto cercano en el PDF: {row.nearbyText}
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function CatalogImagesReviewModal({ parsed, onConfirm, onClose, onUploadImage }) {
+  const [rows, setRows] = useState(() => parsed.products.map((row, index) => ({
+    ...row,
+    key: `${row.page}-${row.detectedCode || 'image'}-${index}`,
+    accepted: Boolean(row.match && row.selectedImageKey),
+  })))
+  const [query, setQuery] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState('')
+  const accepted = rows.filter(row => row.accepted && row.match && row.selectedImageKey)
+  const visibleRows = rows.filter(row => {
+    const needle = query.trim().toLowerCase()
+    if (!needle) return true
+    return `${row.detectedCode || ''} ${row.nearbyText || ''} ${row.match?.codigo || ''} ${row.match?.name || ''} ${row.match?.descripcion || ''}`.toLowerCase().includes(needle)
+  })
+
+  const updateRow = (key, next) => setRows(current => current.map(row => row.key === key ? next : row))
+  const handleConfirm = async () => {
+    setError('')
+    if (!accepted.length) {
+      setError('Seleccioná al menos una asociación válida.')
+      return
+    }
+    const productIds = accepted.map(row => row.match.id)
+    if (new Set(productIds).size !== productIds.length) {
+      setError('Hay más de una imagen dirigida al mismo producto. Dejá seleccionada sólo la correcta.')
+      return
+    }
+    setSubmitting(true)
+    try {
+      await onConfirm(parsed.importId, parsed.supplier, accepted.map(row => ({
+        productId: row.match.id,
+        selectedImageKey: row.selectedImageKey,
+      })))
+      onClose()
+    } catch (confirmError) {
+      setError(confirmError.message || 'No se pudieron guardar las imágenes')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 16 }}>
+      <div style={{ background: C.paper, borderRadius: 12, width: '100%', maxWidth: 980, height: '92vh', display: 'flex', flexDirection: 'column', boxShadow: '0 24px 80px rgba(0,0,0,0.3)', overflow: 'hidden' }}>
+        <div style={{ padding: '22px 26px 17px', borderBottom: `1px solid ${C.border}` }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', gap: 15 }}>
+            <div>
+              <h2 style={{ fontFamily: ADMIN_FONT, fontSize: 21, color: C.ink, margin: 0, fontWeight: 500 }}>Revisar imágenes de {parsed.supplier}</h2>
+              <p style={{ fontSize: 11.5, color: C.muted, margin: '6px 0 0' }}>
+                Se extrajeron propuestas de {parsed.pageCount} páginas. Nada se modifica hasta confirmar; sólo se reemplazará la imagen de los productos seleccionados.
+              </p>
+            </div>
+            <button type="button" onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.text3, fontSize: 18 }}>×</button>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 14, flexWrap: 'wrap' }}>
+            <input value={query} onChange={event => setQuery(event.target.value)} placeholder="Buscar código, producto o texto del PDF..." style={{ ...inp, padding: '7px 9px', fontSize: 11.5, flex: '1 1 280px', maxWidth: 430 }} />
+            <span style={pill(C.greenLight, C.green)}>{accepted.length} listas para aplicar</span>
+            <span style={pill('#EEF2FF', '#4338CA')}>{rows.filter(row => row.match).length} asociadas automáticamente</span>
+            {!!rows.filter(row => !row.match).length && <span style={pill(C.amberLight, C.amberDark)}>{rows.filter(row => !row.match).length} para revisar</span>}
+          </div>
+        </div>
+
+        <div style={{ flex: 1, overflowY: 'auto', padding: '17px 26px', display: 'grid', gap: 11 }}>
+          {visibleRows.map(row => (
+            <CatalogImageReviewRow
+              key={row.key}
+              row={row}
+              supplier={parsed.supplier}
+              importId={parsed.importId}
+              onChange={next => updateRow(row.key, next)}
+              onUploadImage={onUploadImage}
+            />
+          ))}
+          {!visibleRows.length && <p style={{ color: C.muted, textAlign: 'center', padding: 30 }}>No hay resultados para esa búsqueda.</p>}
+        </div>
+
+        <div style={{ padding: '15px 26px', borderTop: `1px solid ${C.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+          <div>
+            {error
+              ? <p style={{ margin: 0, color: C.red, fontSize: 11.5 }}>{error}</p>
+              : <span style={{ color: C.muted, fontSize: 11.5 }}>Se actualizarán únicamente {accepted.length} imágenes.</span>}
+          </div>
+          <div style={{ display: 'flex', gap: 9 }}>
+            <button type="button" onClick={onClose} disabled={submitting} style={outlineBtn}>Cancelar</button>
+            <button type="button" onClick={handleConfirm} disabled={submitting || !accepted.length} style={{ ...solidBtn, background: accepted.length ? C.red : '#ddd', color: accepted.length ? '#fff' : '#aaa', cursor: accepted.length && !submitting ? 'pointer' : 'not-allowed' }}>
+              {submitting ? 'Guardando...' : `Confirmar imágenes (${accepted.length})`}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 const SUPPLIER_FILTERS = ['Todos', 'ALCIDES', 'KIAN', 'CLEOS', 'OTRO']
 const INV_PAGE_SIZE = 50
 const headerFilterControl = {
@@ -4088,7 +4445,7 @@ function UnifiedProductsTab() {
     adjustInventoryStocks, uploadInventoryFile,
     uploadPriceFiles,
     parseInvoicePdf, applyInvoiceLines,
-    parseCleosCatalogPdf, uploadCleosPreviewImage, applyCleosCatalogProducts,
+    parseCatalogImagesPdf, uploadCatalogPreviewImage, applyCatalogImages,
   } = useAdmin()
 
   const [search, setSearch]           = useState('')
@@ -4112,9 +4469,10 @@ function UnifiedProductsTab() {
   const [invoiceError, setInvoiceError]     = useState(null)
   const [invoiceParsed, setInvoiceParsed]   = useState(null)
   const [priceParsing, setPriceParsing]     = useState(false)
-  const [cleosParsing, setCleosParsing]     = useState(false)
-  const [cleosError, setCleosError]         = useState(null)
-  const [cleosParsed, setCleosParsed]       = useState(null)
+  const [catalogSupplier, setCatalogSupplier] = useState('')
+  const [catalogParsing, setCatalogParsing]   = useState(false)
+  const [catalogError, setCatalogError]       = useState(null)
+  const [catalogParsed, setCatalogParsed]     = useState(null)
   const [stockDrafts, setStockDrafts]       = useState({})
   const [stockSaving, setStockSaving]       = useState(false)
   const [stockSaveError, setStockSaveError] = useState('')
@@ -4234,21 +4592,25 @@ function UnifiedProductsTab() {
     fetchInventory({ ...inventoryFilters, page: 1 })
   }
 
-  async function handleCleosUpload(file) {
-    setCleosError(null)
-    setCleosParsing(true)
+  async function handleCatalogImagesUpload(file) {
+    if (!catalogSupplier) {
+      setCatalogError('Elegí el proveedor antes de subir el catálogo.')
+      return
+    }
+    setCatalogError(null)
+    setCatalogParsing(true)
     try {
-      const data = await parseCleosCatalogPdf(file)
-      setCleosParsed(data)
+      const data = await parseCatalogImagesPdf(file, catalogSupplier)
+      setCatalogParsed(data)
     } catch (err) {
-      setCleosError(err.message)
+      setCatalogError(err.message)
     } finally {
-      setCleosParsing(false)
+      setCatalogParsing(false)
     }
   }
 
-  async function handleCleosConfirm(importId, actions) {
-    await applyCleosCatalogProducts(importId, actions)
+  async function handleCatalogImagesConfirm(importId, supplier, actions) {
+    await applyCatalogImages(importId, supplier, actions)
     await fetchCatalog()
     setPage(1)
     fetchInventory({ ...inventoryFilters, page: 1 })
@@ -4497,13 +4859,25 @@ function UnifiedProductsTab() {
           allowDirectory
         />
         <ImportUploadCard
-          label="Catálogo CLEOS con imágenes"
-          hint="Lee la lista de precios PDF, extrae las fotos y permite aceptar, editar o descartar cada producto antes de guardarlo."
+          label="Catálogo con imágenes"
+          hint="Elegí el proveedor y subí su PDF. Vas a revisar qué foto se insertará en cada producto antes de guardar."
           accept=".pdf"
-          disabled={importLoading || cleosParsing}
-          busyLabel={cleosParsing ? 'Extrayendo productos...' : 'Importando...'}
-          onFile={handleCleosUpload}
-        />
+          disabled={importLoading || catalogParsing || !catalogSupplier}
+          busyLabel={catalogParsing ? 'Extrayendo imágenes...' : !catalogSupplier ? 'Elegí un proveedor' : 'Importando...'}
+          onFile={handleCatalogImagesUpload}
+        >
+          <select
+            value={catalogSupplier}
+            onChange={event => { setCatalogSupplier(event.target.value); setCatalogError(null) }}
+            aria-label="Proveedor del catálogo"
+            style={{ ...inp, padding: '6px 8px', fontSize: 11, marginTop: 2 }}
+          >
+            <option value="">Seleccionar proveedor...</option>
+            {[...inventorySuppliers].sort(PRICE_CODE_COLLATOR.compare).map(supplier => (
+              <option key={supplier} value={supplier}>{supplier}</option>
+            ))}
+          </select>
+        </ImportUploadCard>
         <CurrencySettingsCard settings={currencySettings} onSave={handleCurrencyRateSave} />
       </div>
 
@@ -4521,18 +4895,18 @@ function UnifiedProductsTab() {
         />
       )}
 
-      {cleosError && (
-        <DismissibleErrorNotice key={cleosError}>
-          {cleosError}
+      {catalogError && (
+        <DismissibleErrorNotice key={catalogError}>
+          {catalogError}
         </DismissibleErrorNotice>
       )}
 
-      {cleosParsed && (
-        <CleosReviewModal
-          parsed={cleosParsed}
-          onConfirm={handleCleosConfirm}
-          onUploadImage={uploadCleosPreviewImage}
-          onClose={() => setCleosParsed(null)}
+      {catalogParsed && (
+        <CatalogImagesReviewModal
+          parsed={catalogParsed}
+          onConfirm={handleCatalogImagesConfirm}
+          onUploadImage={uploadCatalogPreviewImage}
+          onClose={() => setCatalogParsed(null)}
         />
       )}
 

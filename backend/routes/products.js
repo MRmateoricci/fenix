@@ -22,6 +22,10 @@ import {
   saveCleosPreviewImage,
 } from '../services/cleosCatalogImport.js'
 import {
+  applyCatalogImages,
+  parseCatalogImagesPdf,
+} from '../services/catalogImageImport.js'
+import {
   upsertCatalogRows,
   matchPriceRows,
   applyPriceUpdates,
@@ -43,7 +47,7 @@ const upload = multer({
 
 const uploadPdf = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 15 * 1024 * 1024 },
+  limits: { fileSize: 50 * 1024 * 1024 },
   fileFilter: (req, file, cb) => cb(null, /\.pdf$/i.test(file.originalname)),
 })
 
@@ -1187,9 +1191,76 @@ router.post('/import/invoice/apply', async (req, res) => {
   }
 })
 
-// Importación del catálogo visual de CLEOS. El primer paso extrae texto e
-// imágenes a una carpeta temporal y devuelve una vista previa; el segundo
-// crea/actualiza únicamente los productos aceptados por el administrador.
+// Catálogos visuales de proveedores. La lectura se limita a productos ya
+// existentes del proveedor elegido y sólo propone asociaciones para revisar.
+router.post('/import/catalog-images/parse', uploadPdf.single('file'), async (req, res) => {
+  const supplier = normalizePriceSupplier(req.body.supplier)
+  if (!req.file) return res.status(400).json({ error: 'Falta el PDF del catálogo' })
+  if (!supplier) return res.status(400).json({ error: 'Elegí el proveedor del catálogo' })
+
+  try {
+    const { rows: products } = await pool.query(
+      `SELECT id, codigo, name, descripcion, image_url
+       FROM products
+       WHERE supplier = $1
+       ORDER BY codigo`,
+      [supplier]
+    )
+    if (!products.length) {
+      return res.status(404).json({ error: `No hay productos cargados para el proveedor ${supplier}` })
+    }
+    const parsed = await parseCatalogImagesPdf(req.file.buffer, supplier, products)
+    res.json({ ...parsed, supplierProductCount: products.length })
+  } catch (err) {
+    console.error('[POST /api/products/import/catalog-images/parse]', err)
+    res.status(422).json({ error: err.message || 'No se pudo leer el catálogo con imágenes' })
+  }
+})
+
+router.post('/import/catalog-images/image', uploadCleosImage.single('file'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'Falta la imagen del producto' })
+  try {
+    res.json(await saveCleosPreviewImage(req.body.importId, req.file))
+  } catch (err) {
+    console.error('[POST /api/products/import/catalog-images/image]', err)
+    res.status(400).json({ error: err.message || 'No se pudo subir la imagen' })
+  }
+})
+
+router.post('/import/catalog-images/apply', async (req, res) => {
+  const supplier = normalizePriceSupplier(req.body.supplier)
+  const { importId, actions } = req.body
+  if (!supplier) return res.status(400).json({ error: 'El proveedor de la revisión no es válido' })
+
+  const client = await pool.connect()
+  let applied = null
+  try {
+    await client.query('BEGIN')
+    applied = await applyCatalogImages(client, importId, supplier, actions)
+    await client.query('COMMIT')
+    await discardCleosPreview(applied.previewDir).catch(cleanupError => {
+      console.warn('[Catalog images preview cleanup]', cleanupError.message)
+    })
+    res.json({
+      fileType: 'catalog-images',
+      supplier,
+      updated: applied.updated,
+      imagesSaved: applied.imagesSaved,
+    })
+  } catch (err) {
+    await client.query('ROLLBACK')
+    if (applied?.writtenFiles?.length) {
+      await Promise.all(applied.writtenFiles.map(file => unlink(file).catch(() => {})))
+    }
+    console.error('[POST /api/products/import/catalog-images/apply]', err)
+    res.status(400).json({ error: err.message || 'No se pudieron aplicar las imágenes del catálogo' })
+  } finally {
+    client.release()
+  }
+})
+
+// Importación histórica del catálogo visual de CLEOS. Se conserva para
+// compatibilidad; el panel nuevo usa el flujo genérico de imágenes de arriba.
 router.post('/import/cleos/parse', uploadPdf.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Falta el PDF de CLEOS' })
   try {
