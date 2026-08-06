@@ -4079,6 +4079,7 @@ function CatalogProductPicker({ row, supplier, onChange }) {
   const [results, setResults] = useState([])
   const [loading, setLoading] = useState(false)
   const [codeError, setCodeError] = useState('')
+  const selectedProducts = row.selectedProducts || []
 
   const normalizeCode = value => String(value || '')
     .normalize('NFD')
@@ -4115,22 +4116,35 @@ function CatalogProductPicker({ row, supplier, onChange }) {
   }, [open, query, searchProducts, supplier])
 
   const choose = (product, selectedCode = query.trim() || row.detectedCode) => {
+    const selectedProduct = {
+      id: product.id,
+      codigo: product.codigo,
+      name: product.name || null,
+      descripcion: product.descripcion || null,
+      image_url: product.image_url || null,
+    }
+    const nextProducts = selectedProducts.some(selected => selected.id === product.id)
+      ? selectedProducts
+      : [...selectedProducts, selectedProduct]
     onChange({
       ...row,
       detectedCode: selectedCode || product.codigo,
-      match: {
-        id: product.id,
-        codigo: product.codigo,
-        name: product.name || null,
-        descripcion: product.descripcion || null,
-        image_url: product.image_url || null,
-      },
-      accepted: Boolean(row.selectedImageKey),
+      selectedProducts: nextProducts,
+      accepted: Boolean(nextProducts.length && row.selectedImageKey),
     })
     setOpen(false)
     setQuery('')
     setResults([])
     setCodeError('')
+  }
+
+  const removeProduct = (productId) => {
+    const nextProducts = selectedProducts.filter(product => product.id !== productId)
+    onChange({
+      ...row,
+      selectedProducts: nextProducts,
+      accepted: Boolean(nextProducts.length && row.selectedImageKey && row.accepted),
+    })
   }
 
   const useNearbyCode = async (code) => {
@@ -4158,16 +4172,27 @@ function CatalogProductPicker({ row, supplier, onChange }) {
   if (!open) {
     return (
       <div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          {row.match ? (
-            <span style={pill(C.greenLight, C.green)}>
-              {row.match.codigo} — {row.match.name || row.match.descripcion || 'Sin descripción'}
-            </span>
-          ) : (
+        <div style={{ display: 'grid', gap: 7 }}>
+          {selectedProducts.length ? selectedProducts.map(product => (
+            <div key={product.id} style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '7px 9px', borderRadius: 7, background: C.greenLight, color: C.green, fontSize: 11.5 }}>
+              <span style={{ flex: 1, minWidth: 0 }}>
+                <strong>{product.codigo}</strong> — {product.name || product.descripcion || 'Sin descripción'}
+              </span>
+              <button
+                type="button"
+                onClick={() => removeProduct(product.id)}
+                aria-label={`Quitar ${product.codigo}`}
+                title="Quitar producto"
+                style={{ border: 0, background: 'transparent', color: C.green, cursor: 'pointer', fontSize: 16, lineHeight: 1, padding: '0 2px' }}
+              >
+                ×
+              </button>
+            </div>
+          )) : (
             <span style={pill(C.redLight, C.red)}>Sin producto asociado</span>
           )}
-          <button type="button" onClick={() => setOpen(true)} style={{ ...outlineBtn, padding: '5px 9px', fontSize: 10.5 }}>
-            {row.match ? 'Cambiar producto' : 'Buscar producto'}
+          <button type="button" onClick={() => setOpen(true)} style={{ ...outlineBtn, justifySelf: 'start', padding: '5px 9px', fontSize: 10.5 }}>
+            {selectedProducts.length ? 'Agregar otro producto' : 'Buscar producto'}
           </button>
         </div>
         {!!nearbyCodeCandidates.length && (
@@ -4217,10 +4242,12 @@ function CatalogProductPicker({ row, supplier, onChange }) {
           <button
             type="button"
             key={product.id}
+            disabled={selectedProducts.some(selected => selected.id === product.id)}
             onClick={() => choose(product, query.trim())}
-            style={{ border: 0, background: C.paper, borderRadius: 5, padding: '7px 8px', textAlign: 'left', cursor: 'pointer', color: C.text2, fontSize: 11.5 }}
+            style={{ border: 0, background: C.paper, borderRadius: 5, padding: '7px 8px', textAlign: 'left', cursor: selectedProducts.some(selected => selected.id === product.id) ? 'default' : 'pointer', color: C.text2, fontSize: 11.5, opacity: selectedProducts.some(selected => selected.id === product.id) ? 0.55 : 1 }}
           >
             <strong>{product.codigo}</strong> — {product.name || product.descripcion || 'Sin descripción'}
+            {selectedProducts.some(selected => selected.id === product.id) ? ' (ya agregado)' : ''}
           </button>
         ))}
         {loading && <span style={{ fontSize: 10.5, color: C.muted, padding: 4 }}>Buscando...</span>}
@@ -4234,6 +4261,7 @@ function CatalogProductPicker({ row, supplier, onChange }) {
 
 function CatalogImageReviewRow({ row, supplier, importId, onChange, onUploadImage }) {
   const set = changes => onChange({ ...row, ...changes })
+  const selectedProducts = row.selectedProducts || []
   const selectedImage = row.imageOptions.find(option => option.key === row.selectedImageKey) || null
   const imageInputRef = useRef(null)
   const [uploading, setUploading] = useState(false)
@@ -4248,7 +4276,7 @@ function CatalogImageReviewRow({ row, supplier, importId, onChange, onUploadImag
       set({
         imageOptions: [...row.imageOptions, option],
         selectedImageKey: option.key,
-        accepted: Boolean(row.match),
+        accepted: Boolean(selectedProducts.length),
       })
     } catch (error) {
       setUploadError(error.message || 'No se pudo subir la imagen')
@@ -4265,7 +4293,7 @@ function CatalogImageReviewRow({ row, supplier, importId, onChange, onUploadImag
           <input
             type="checkbox"
             checked={row.accepted}
-            disabled={!row.match || !row.selectedImageKey}
+            disabled={!selectedProducts.length || !row.selectedImageKey}
             onChange={event => set({ accepted: event.target.checked })}
           />
           {row.accepted ? 'Aplicar esta imagen' : 'No aplicar'}
@@ -4289,7 +4317,7 @@ function CatalogImageReviewRow({ row, supplier, importId, onChange, onUploadImag
                 <button
                   type="button"
                   key={option.key}
-                  onClick={() => set({ selectedImageKey: option.key, accepted: Boolean(row.match) })}
+                  onClick={() => set({ selectedImageKey: option.key, accepted: Boolean(selectedProducts.length) })}
                   style={{ padding: 2, aspectRatio: '1 / 1', borderRadius: 5, cursor: 'pointer', background: '#fff', border: `2px solid ${option.key === row.selectedImageKey ? C.red : C.hairline}` }}
                 >
                   <img src={option.url} alt="Alternativa" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
@@ -4313,10 +4341,16 @@ function CatalogImageReviewRow({ row, supplier, importId, onChange, onUploadImag
         <div style={{ minWidth: 0 }}>
           <p style={{ ...lbl, marginBottom: 6 }}>Esta imagen se insertará en</p>
           <CatalogProductPicker row={row} supplier={supplier} onChange={onChange} />
-          {row.match?.image_url && (
-            <div style={{ display: 'flex', gap: 9, alignItems: 'center', marginTop: 12, padding: 8, borderRadius: 7, background: '#F8F8F8' }}>
-              <img src={row.match.image_url} alt="Imagen actual" style={{ width: 52, height: 52, objectFit: 'contain', borderRadius: 5, background: '#fff' }} />
-              <span style={{ fontSize: 10.5, color: C.muted }}>Imagen actual del producto. Sólo será reemplazada si confirmás esta fila.</span>
+          {selectedProducts.some(product => product.image_url) && (
+            <div style={{ display: 'grid', gap: 7, marginTop: 12, padding: 8, borderRadius: 7, background: '#F8F8F8' }}>
+              {selectedProducts.filter(product => product.image_url).map(product => (
+                <div key={product.id} style={{ display: 'flex', gap: 9, alignItems: 'center' }}>
+                  <img src={product.image_url} alt={`Imagen actual de ${product.codigo}`} style={{ width: 52, height: 52, objectFit: 'contain', borderRadius: 5, background: '#fff' }} />
+                  <span style={{ fontSize: 10.5, color: C.muted }}>
+                    Imagen actual de <strong>{product.codigo}</strong>. Sólo será reemplazada si confirmás esta fila.
+                  </span>
+                </div>
+              ))}
             </div>
           )}
           {row.nearbyText && (
@@ -4334,36 +4368,41 @@ function CatalogImagesReviewModal({ parsed, onConfirm, onClose, onUploadImage })
   const [rows, setRows] = useState(() => parsed.products.map((row, index) => ({
     ...row,
     key: `${row.page}-${row.detectedCode || 'image'}-${index}`,
+    selectedProducts: row.match ? [row.match] : [],
     accepted: Boolean(row.match && row.selectedImageKey),
   })))
   const [query, setQuery] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
-  const accepted = rows.filter(row => row.accepted && row.match && row.selectedImageKey)
+  const accepted = rows.filter(row => row.accepted && row.selectedProducts.length && row.selectedImageKey)
+  const acceptedAssociations = accepted.flatMap(row => row.selectedProducts.map(product => ({
+    productId: product.id,
+    selectedImageKey: row.selectedImageKey,
+  })))
   const visibleRows = rows.filter(row => {
     const needle = query.trim().toLowerCase()
     if (!needle) return true
-    return `${row.detectedCode || ''} ${row.nearbyText || ''} ${row.match?.codigo || ''} ${row.match?.name || ''} ${row.match?.descripcion || ''}`.toLowerCase().includes(needle)
+    const selectedText = row.selectedProducts
+      .map(product => `${product.codigo || ''} ${product.name || ''} ${product.descripcion || ''}`)
+      .join(' ')
+    return `${row.detectedCode || ''} ${row.nearbyText || ''} ${selectedText}`.toLowerCase().includes(needle)
   })
 
   const updateRow = (key, next) => setRows(current => current.map(row => row.key === key ? next : row))
   const handleConfirm = async () => {
     setError('')
-    if (!accepted.length) {
+    if (!acceptedAssociations.length) {
       setError('Seleccioná al menos una asociación válida.')
       return
     }
-    const productIds = accepted.map(row => row.match.id)
+    const productIds = acceptedAssociations.map(action => action.productId)
     if (new Set(productIds).size !== productIds.length) {
       setError('Hay más de una imagen dirigida al mismo producto. Dejá seleccionada sólo la correcta.')
       return
     }
     setSubmitting(true)
     try {
-      await onConfirm(parsed.importId, parsed.supplier, accepted.map(row => ({
-        productId: row.match.id,
-        selectedImageKey: row.selectedImageKey,
-      })))
+      await onConfirm(parsed.importId, parsed.supplier, acceptedAssociations)
       onClose()
     } catch (confirmError) {
       setError(confirmError.message || 'No se pudieron guardar las imágenes')
@@ -4387,9 +4426,9 @@ function CatalogImagesReviewModal({ parsed, onConfirm, onClose, onUploadImage })
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 14, flexWrap: 'wrap' }}>
             <input value={query} onChange={event => setQuery(event.target.value)} placeholder="Buscar código, producto o texto del PDF..." style={{ ...inp, padding: '7px 9px', fontSize: 11.5, flex: '1 1 280px', maxWidth: 430 }} />
-            <span style={pill(C.greenLight, C.green)}>{accepted.length} listas para aplicar</span>
-            <span style={pill('#EEF2FF', '#4338CA')}>{rows.filter(row => row.match).length} asociadas automáticamente</span>
-            {!!rows.filter(row => !row.match).length && <span style={pill(C.amberLight, C.amberDark)}>{rows.filter(row => !row.match).length} para revisar</span>}
+            <span style={pill(C.greenLight, C.green)}>{acceptedAssociations.length} productos listos para aplicar</span>
+            <span style={pill('#EEF2FF', '#4338CA')}>{rows.filter(row => row.selectedProducts.length).length} imágenes asociadas</span>
+            {!!rows.filter(row => !row.selectedProducts.length).length && <span style={pill(C.amberLight, C.amberDark)}>{rows.filter(row => !row.selectedProducts.length).length} para revisar</span>}
           </div>
         </div>
 
@@ -4411,12 +4450,12 @@ function CatalogImagesReviewModal({ parsed, onConfirm, onClose, onUploadImage })
           <div>
             {error
               ? <p style={{ margin: 0, color: C.red, fontSize: 11.5 }}>{error}</p>
-              : <span style={{ color: C.muted, fontSize: 11.5 }}>Se actualizarán únicamente {accepted.length} imágenes.</span>}
+              : <span style={{ color: C.muted, fontSize: 11.5 }}>Se actualizarán {acceptedAssociations.length} productos con {accepted.length} imágenes seleccionadas.</span>}
           </div>
           <div style={{ display: 'flex', gap: 9 }}>
             <button type="button" onClick={onClose} disabled={submitting} style={outlineBtn}>Cancelar</button>
-            <button type="button" onClick={handleConfirm} disabled={submitting || !accepted.length} style={{ ...solidBtn, background: accepted.length ? C.red : '#ddd', color: accepted.length ? '#fff' : '#aaa', cursor: accepted.length && !submitting ? 'pointer' : 'not-allowed' }}>
-              {submitting ? 'Guardando...' : `Confirmar imágenes (${accepted.length})`}
+            <button type="button" onClick={handleConfirm} disabled={submitting || !acceptedAssociations.length} style={{ ...solidBtn, background: acceptedAssociations.length ? C.red : '#ddd', color: acceptedAssociations.length ? '#fff' : '#aaa', cursor: acceptedAssociations.length && !submitting ? 'pointer' : 'not-allowed' }}>
+              {submitting ? 'Guardando...' : `Confirmar productos (${acceptedAssociations.length})`}
             </button>
           </div>
         </div>
