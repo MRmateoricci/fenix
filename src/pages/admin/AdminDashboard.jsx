@@ -4382,13 +4382,38 @@ function CatalogImageReviewRow({ row, supplier, importId, onChange, onUploadImag
   )
 }
 
+const CATALOG_DRAFT_MAX_AGE_MS = 48 * 60 * 60 * 1000
+
+function catalogDraftKey(supplier) {
+  return `catalogReviewDraft:${supplier}`
+}
+
+function loadCatalogDraft(supplier) {
+  try {
+    const raw = localStorage.getItem(catalogDraftKey(supplier))
+    if (!raw) return null
+    const data = JSON.parse(raw)
+    if (!data?.entries || Date.now() - data.savedAt > CATALOG_DRAFT_MAX_AGE_MS) return null
+    return data
+  } catch {
+    return null
+  }
+}
+
 function CatalogImagesReviewModal({ parsed, onConfirm, onClose, onUploadImage }) {
-  const [rows, setRows] = useState(() => parsed.products.map((row, index) => ({
-    ...row,
-    key: `${row.page}-${row.detectedCode || 'image'}-${index}`,
-    selectedProducts: row.match ? [row.match] : [],
-    accepted: Boolean(row.match && row.selectedImageKey),
-  })))
+  const [draftInfo] = useState(() => loadCatalogDraft(parsed.supplier))
+  const [rows, setRows] = useState(() => parsed.products.map((row, index) => {
+    const key = `${row.page}-${row.detectedCode || 'image'}-${index}`
+    const draftEntry = draftInfo?.entries?.[key]
+    return {
+      ...row,
+      key,
+      selectedProducts: draftEntry ? draftEntry.selectedProducts : (row.match ? [row.match] : []),
+      selectedImageKey: draftEntry ? draftEntry.selectedImageKey : row.selectedImageKey,
+      accepted: draftEntry ? draftEntry.accepted : Boolean(row.match && row.selectedImageKey),
+    }
+  }))
+  const [draftNotice, setDraftNotice] = useState(() => Boolean(draftInfo?.entries && Object.keys(draftInfo.entries).length))
   const [query, setQuery] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
@@ -4411,6 +4436,34 @@ function CatalogImagesReviewModal({ parsed, onConfirm, onClose, onUploadImage })
   })
 
   const updateRow = (key, next) => setRows(current => current.map(row => row.key === key ? next : row))
+
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      const entries = {}
+      rows.forEach(row => {
+        if (row.accepted || row.selectedProducts.length) {
+          entries[row.key] = { selectedProducts: row.selectedProducts, selectedImageKey: row.selectedImageKey, accepted: row.accepted }
+        }
+      })
+      try {
+        localStorage.setItem(catalogDraftKey(parsed.supplier), JSON.stringify({ savedAt: Date.now(), entries }))
+      } catch {
+        // localStorage lleno o no disponible: seguimos sin autoguardado
+      }
+    }, 500)
+    return () => clearTimeout(timeout)
+  }, [rows, parsed.supplier])
+
+  const discardDraft = () => {
+    try { localStorage.removeItem(catalogDraftKey(parsed.supplier)) } catch { /* ignore */ }
+    setRows(parsed.products.map((row, index) => ({
+      ...row,
+      key: `${row.page}-${row.detectedCode || 'image'}-${index}`,
+      selectedProducts: row.match ? [row.match] : [],
+      accepted: Boolean(row.match && row.selectedImageKey),
+    })))
+    setDraftNotice(false)
+  }
 
   const goToRow = key => {
     setQuery('')
@@ -4455,6 +4508,7 @@ function CatalogImagesReviewModal({ parsed, onConfirm, onClose, onUploadImage })
     setSubmitting(true)
     try {
       await onConfirm(parsed.importId, parsed.supplier, acceptedAssociations)
+      try { localStorage.removeItem(catalogDraftKey(parsed.supplier)) } catch { /* ignore */ }
       onClose()
     } catch (confirmError) {
       setError(confirmError.message || 'No se pudieron guardar las imágenes')
@@ -4472,10 +4526,20 @@ function CatalogImagesReviewModal({ parsed, onConfirm, onClose, onUploadImage })
               <h2 style={{ fontFamily: ADMIN_FONT, fontSize: 21, color: C.ink, margin: 0, fontWeight: 500 }}>Revisar imágenes de {parsed.supplier}</h2>
               <p style={{ fontSize: 11.5, color: C.muted, margin: '6px 0 0' }}>
                 Se extrajeron propuestas de {parsed.pageCount} páginas. Nada se modifica hasta confirmar; sólo se reemplazará la imagen de los productos seleccionados.
+                {' '}Tu progreso se guarda automáticamente en este navegador por si se cierra la pestaña.
               </p>
             </div>
             <button type="button" onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.text3, fontSize: 18 }}>×</button>
           </div>
+          {draftNotice && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12, padding: '8px 11px', borderRadius: 7, background: C.amberLight }}>
+              <span style={{ fontSize: 11.5, color: C.amberDark, flex: 1 }}>
+                Se restauró un progreso guardado el {draftInfo?.savedAt ? new Date(draftInfo.savedAt).toLocaleString('es-AR') : ''} para {parsed.supplier}.
+              </span>
+              <button type="button" onClick={discardDraft} style={{ ...outlineBtn, padding: '4px 9px', fontSize: 10.5 }}>Descartar y empezar de nuevo</button>
+              <button type="button" onClick={() => setDraftNotice(false)} style={{ ...outlineBtn, padding: '4px 9px', fontSize: 10.5 }}>Ok, seguir</button>
+            </div>
+          )}
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 14, flexWrap: 'wrap' }}>
             <input value={query} onChange={event => setQuery(event.target.value)} placeholder="Buscar código, producto o texto del PDF..." style={{ ...inp, padding: '7px 9px', fontSize: 11.5, flex: '1 1 280px', maxWidth: 430 }} />
             <span style={pill(C.greenLight, C.green)}>{acceptedAssociations.length} productos listos para aplicar</span>
