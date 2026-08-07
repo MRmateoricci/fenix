@@ -4392,6 +4392,10 @@ function CatalogImagesReviewModal({ parsed, onConfirm, onClose, onUploadImage })
   const [query, setQuery] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
+  const [duplicates, setDuplicates] = useState([])
+  const [highlightKey, setHighlightKey] = useState(null)
+  const [scrollTarget, setScrollTarget] = useState(null)
+  const rowRefs = useRef({})
   const accepted = rows.filter(row => row.accepted && row.selectedProducts.length && row.selectedImageKey)
   const acceptedAssociations = accepted.flatMap(row => row.selectedProducts.map(product => ({
     productId: product.id,
@@ -4407,15 +4411,45 @@ function CatalogImagesReviewModal({ parsed, onConfirm, onClose, onUploadImage })
   })
 
   const updateRow = (key, next) => setRows(current => current.map(row => row.key === key ? next : row))
+
+  const goToRow = key => {
+    setQuery('')
+    setScrollTarget(key)
+  }
+
+  useEffect(() => {
+    if (!scrollTarget) return
+    const el = rowRefs.current[scrollTarget]
+    if (!el) return
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    setHighlightKey(scrollTarget)
+    setScrollTarget(null)
+    const timeout = setTimeout(() => setHighlightKey(current => current === scrollTarget ? null : current), 2500)
+    return () => clearTimeout(timeout)
+  }, [scrollTarget, visibleRows])
+
   const handleConfirm = async () => {
     setError('')
+    setDuplicates([])
     if (!acceptedAssociations.length) {
       setError('Seleccioná al menos una asociación válida.')
       return
     }
     const productIds = acceptedAssociations.map(action => action.productId)
-    if (new Set(productIds).size !== productIds.length) {
-      setError('Hay más de una imagen dirigida al mismo producto. Dejá seleccionada sólo la correcta.')
+    const seenIds = new Set()
+    const duplicateIds = new Set()
+    productIds.forEach(id => {
+      if (seenIds.has(id)) duplicateIds.add(id)
+      seenIds.add(id)
+    })
+    if (duplicateIds.size) {
+      const dupInfo = Array.from(duplicateIds).map(productId => {
+        const dupRows = accepted.filter(row => row.selectedProducts.some(product => product.id === productId))
+        const product = dupRows.flatMap(row => row.selectedProducts).find(p => p.id === productId)
+        return { productId, codigo: product?.codigo || product?.name || productId, rowKeys: dupRows.map(row => row.key) }
+      })
+      setDuplicates(dupInfo)
+      setError(`Hay ${dupInfo.length} producto${dupInfo.length > 1 ? 's' : ''} con más de una imagen asociada: ${dupInfo.map(d => d.codigo).join(', ')}. Dejá seleccionada sólo la imagen correcta en cada uno.`)
       return
     }
     setSubmitting(true)
@@ -4452,14 +4486,19 @@ function CatalogImagesReviewModal({ parsed, onConfirm, onClose, onUploadImage })
 
         <div style={{ flex: 1, overflowY: 'auto', padding: '17px 26px', display: 'grid', gap: 11 }}>
           {visibleRows.map(row => (
-            <CatalogImageReviewRow
+            <div
               key={row.key}
-              row={row}
-              supplier={parsed.supplier}
-              importId={parsed.importId}
-              onChange={next => updateRow(row.key, next)}
-              onUploadImage={onUploadImage}
-            />
+              ref={el => { rowRefs.current[row.key] = el }}
+              style={highlightKey === row.key ? { borderRadius: 10, boxShadow: `0 0 0 3px ${C.red}`, transition: 'box-shadow 0.2s' } : undefined}
+            >
+              <CatalogImageReviewRow
+                row={row}
+                supplier={parsed.supplier}
+                importId={parsed.importId}
+                onChange={next => updateRow(row.key, next)}
+                onUploadImage={onUploadImage}
+              />
+            </div>
           ))}
           {!visibleRows.length && <p style={{ color: C.muted, textAlign: 'center', padding: 30 }}>No hay resultados para esa búsqueda.</p>}
         </div>
@@ -4467,7 +4506,30 @@ function CatalogImagesReviewModal({ parsed, onConfirm, onClose, onUploadImage })
         <div style={{ padding: '15px 26px', borderTop: `1px solid ${C.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
           <div>
             {error
-              ? <p style={{ margin: 0, color: C.red, fontSize: 11.5 }}>{error}</p>
+              ? (
+                <div>
+                  <p style={{ margin: 0, color: C.red, fontSize: 11.5 }}>{error}</p>
+                  {!!duplicates.length && (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 7 }}>
+                      {duplicates.map(dup => (
+                        <div key={dup.productId} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                          <span style={pill('#FEE2E2', C.red)}>{dup.codigo}</span>
+                          {dup.rowKeys.map((key, index) => (
+                            <button
+                              key={key}
+                              type="button"
+                              onClick={() => goToRow(key)}
+                              style={{ ...outlineBtn, padding: '3px 8px', fontSize: 10.5 }}
+                            >
+                              Ir a imagen {dup.rowKeys.length > 1 ? index + 1 : ''}
+                            </button>
+                          ))}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )
               : <span style={{ color: C.muted, fontSize: 11.5 }}>Se actualizarán {acceptedAssociations.length} productos con {accepted.length} imágenes seleccionadas.</span>}
           </div>
           <div style={{ display: 'flex', gap: 9 }}>
