@@ -209,6 +209,11 @@ export default function Products() {
     [products]
   )
   const filters = useFilterParams(priceMax)
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false)
+  const activeCategoryForSubs = filters.selectedCategories.length === 1 ? filters.selectedCategories[0] : null
+  const hasMobileSubFilters = activeCategoryForSubs ? getSubcategoryOptions(activeCategoryForSubs).length > 0 : false
+
+  useEffect(() => { setMobileFiltersOpen(false) }, [activeCategoryForSubs])
   const filtered = useMemo(() => {
     let list = products
     if (filters.query) {
@@ -260,11 +265,11 @@ export default function Products() {
         {/* ── Category tabs ───────────────────────────────────────────────── */}
         <CategoryTabs filters={filters} />
 
-        {/* ── Subcategory filter ──────────────────────────────────────────── */}
-        <SubcategoryTabs filters={filters} />
-
-        {/* ── Product type filter (level 3 of the header taxonomy) ─────────── */}
-        <ProductTypeTabs filters={filters} />
+        {/* ── Subcategory + product type filters (hidden on mobile, moved into the drawer below) ── */}
+        <div className="fnx-products-inline-filters">
+          <SubcategoryTabs filters={filters} />
+          <ProductTypeTabs filters={filters} />
+        </div>
 
         {/* ── Search + sort row ───────────────────────────────────────────── */}
         <div style={{ display: 'flex', gap: 12, marginBottom: 28, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -313,6 +318,25 @@ export default function Products() {
 
         </div>
 
+        {/* ── Mobile filter toggle (< 768px only) — subcategory + tipo live in the drawer ── */}
+        {hasMobileSubFilters && (
+          <button
+            type="button"
+            className="fnx-products-filter-toggle"
+            onClick={() => setMobileFiltersOpen(true)}
+            style={{
+              alignItems: 'center', gap: 8,
+              padding: '11px 16px', marginBottom: 24,
+              border: `1px solid ${T.hairline}`, borderRadius: 2,
+              background: T.panel, color: T.ink, cursor: 'pointer',
+              fontFamily: "var(--font-sans)", fontSize: 13.5, fontWeight: 500,
+            }}
+          >
+            <FilterIcon />
+            {filters.productType || filters.sub ? `Filtrar · ${filters.productType || filters.sub}` : 'Filtrar'}
+          </button>
+        )}
+
         {/* Count */}
         <div style={{
           fontFamily: "'Inter', system-ui, sans-serif",
@@ -336,6 +360,12 @@ export default function Products() {
         }
       </div>
     </div>
+
+    <MobileFilterDrawer
+      open={mobileFiltersOpen}
+      onClose={() => setMobileFiltersOpen(false)}
+      filters={filters}
+    />
     </>
   )
 }
@@ -352,40 +382,61 @@ function CategoryTabs({ filters }) {
   ]
 
   return (
-    <div style={{
-      display: 'flex', gap: 0,
-      borderBottom: `1px solid ${T.hairline}`,
-      marginBottom: 28,
-      overflowX: 'auto',
-    }}>
-      {tabs.map(tab => {
-        const isActive = tab.value === null
-          ? !activeCategory && !filters.sub
-          : activeCategory === tab.value
+    <div style={{ position: 'relative', marginBottom: 28 }}>
+      <div style={{
+        display: 'flex', gap: 0,
+        borderBottom: `1px solid ${T.hairline}`,
+        overflowX: 'auto',
+        WebkitOverflowScrolling: 'touch',
+      }}>
+        {tabs.map(tab => {
+          const isActive = tab.value === null
+            ? !activeCategory && !filters.sub
+            : activeCategory === tab.value
 
-        return (
-          <button
-            key={tab.label}
-            onClick={() => filters.selectCategory(tab.value)}
-            style={{
-              background: 'none', border: 'none', cursor: 'pointer',
-              padding: '13px 22px',
-              fontFamily: "var(--font-sans)",
-              fontSize: 13.5, fontWeight: isActive ? 500 : 400,
-              color: isActive ? T.ink : T.muted,
-              borderBottom: `2px solid ${isActive ? T.ink : 'transparent'}`,
-              marginBottom: -1,
-              whiteSpace: 'nowrap',
-              transition: 'color .15s, border-color .15s',
-            }}
-            onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.color = T.ink2 }}
-            onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.color = T.muted }}
-          >
-            {tab.label}
-          </button>
-        )
-      })}
+          return (
+            <button
+              key={tab.label}
+              onClick={() => filters.selectCategory(tab.value)}
+              style={{
+                background: 'none', border: 'none', cursor: 'pointer',
+                padding: '13px 22px',
+                fontFamily: "var(--font-sans)",
+                fontSize: 13.5, fontWeight: isActive ? 500 : 400,
+                color: isActive ? T.ink : T.muted,
+                borderBottom: `2px solid ${isActive ? T.ink : 'transparent'}`,
+                marginBottom: -1,
+                whiteSpace: 'nowrap',
+                flexShrink: 0,
+                transition: 'color .15s, border-color .15s',
+              }}
+              onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.color = T.ink2 }}
+              onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.color = T.muted }}
+            >
+              {tab.label}
+            </button>
+          )
+        })}
+      </div>
+      {/* Mobile-only hint that the tab row scrolls sideways */}
+      <div
+        aria-hidden="true"
+        className="fnx-cat-tabs-fade"
+        style={{
+          position: 'absolute', top: 0, right: 0, bottom: 0, width: 36,
+          background: `linear-gradient(90deg, transparent, ${T.paper} 75%)`,
+          pointerEvents: 'none',
+        }}
+      />
     </div>
+  )
+}
+
+function FilterIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M4 6h16M8 12h8M11 18h2" />
+    </svg>
   )
 }
 
@@ -464,6 +515,87 @@ function ProductTypeTabs({ filters }) {
         )
       })}
     </div>
+  )
+}
+
+// ─── Mobile filter drawer (< 768px only) — subcategory + tipo, kept off the
+// initial scroll so the product grid is reachable right after the toggle ──────
+function MobileFilterDrawer({ open, onClose, filters }) {
+  useEffect(() => {
+    document.body.style.overflow = open ? 'hidden' : ''
+    return () => { document.body.style.overflow = '' }
+  }, [open])
+
+  useEffect(() => {
+    function onKey(e) { if (e.key === 'Escape') onClose() }
+    if (open) document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [open, onClose])
+
+  return (
+    <>
+      <div
+        className="fnx-mobile-filter-backdrop"
+        onClick={onClose}
+        aria-hidden="true"
+        style={{
+          position: 'fixed', inset: 0, zIndex: 60,
+          background: 'rgba(22,17,11,0.5)',
+          opacity: open ? 1 : 0, pointerEvents: open ? 'auto' : 'none',
+          transition: 'opacity .3s ease',
+        }}
+      />
+      <aside
+        className="fnx-mobile-filter-panel"
+        aria-label="Filtrar productos"
+        aria-hidden={!open}
+        style={{
+          position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 61,
+          maxHeight: '78vh',
+          display: 'flex', flexDirection: 'column',
+          background: T.paper,
+          borderRadius: '14px 14px 0 0',
+          boxShadow: '0 -8px 40px rgba(22,17,11,0.22)',
+          transform: open ? 'translateY(0)' : 'translateY(100%)',
+          transition: 'transform .32s cubic-bezier(0.32,0,0.15,1)',
+        }}
+      >
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '18px 20px', borderBottom: `1px solid ${T.hairline}`, flexShrink: 0,
+        }}>
+          <span style={{ fontFamily: 'var(--font-sans)', fontWeight: 400, fontSize: 18, color: T.ink }}>
+            Filtrar
+          </span>
+          <button
+            onClick={onClose}
+            aria-label="Cerrar filtros"
+            style={{ background: 'none', border: 'none', cursor: 'pointer', color: T.muted, display: 'flex', padding: 4 }}
+          >
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
+              <path d="m6 6 12 12M18 6 6 18" />
+            </svg>
+          </button>
+        </div>
+        <div style={{ flex: 1, overflowY: 'auto', padding: '18px 20px 8px' }}>
+          <SubcategoryTabs filters={filters} />
+          <ProductTypeTabs filters={filters} />
+        </div>
+        <div style={{ padding: '14px 20px', borderTop: `1px solid ${T.hairline}`, flexShrink: 0 }}>
+          <button
+            onClick={onClose}
+            style={{
+              width: '100%', padding: '13px 0', borderRadius: 2,
+              background: T.ink, color: T.paper, border: 'none', cursor: 'pointer',
+              fontFamily: "var(--font-sans)",
+              fontSize: 13.5, fontWeight: 500, letterSpacing: '.04em',
+            }}
+          >
+            Ver resultados
+          </button>
+        </div>
+      </aside>
+    </>
   )
 }
 

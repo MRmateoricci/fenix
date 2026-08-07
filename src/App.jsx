@@ -60,6 +60,10 @@ function ScrollToTop() {
 
 function Layout() {
   const { pathname } = useLocation()
+  // La ficha de producto ya tiene su propio botón "Consultar por WhatsApp" en el CTA;
+  // el FAB flotante es redundante ahí y en mobile puede terminar tapando el título o
+  // los botones apenas carga la página (es fixed, no scrollea con el contenido).
+  const isProductDetail = /^\/products\/[^/]+$/.test(pathname)
   return (
     <>
       <ScrollToTop />
@@ -69,7 +73,7 @@ function Layout() {
         <Outlet />
       </main>
       {pathname !== '/login' && <Footer />}
-      <WhatsAppFAB />
+      {!isProductDetail && <WhatsAppFAB />}
     </>
   )
 }

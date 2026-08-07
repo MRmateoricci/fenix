@@ -1117,6 +1117,22 @@
   }
 }
 
+/* Catálogo — filtros mobile: la subcategoría/tipo pasan a un drawer detrás
+   del botón "Filtrar" para que la grilla de productos quede visible arriba. */
+.fnx-products-filter-toggle { display: none; }
+.fnx-cat-tabs-fade { display: none; }
+
+@media (max-width: 767px) {
+  .fnx-products-inline-filters { display: none !important; }
+  .fnx-products-filter-toggle { display: inline-flex !important; }
+  .fnx-cat-tabs-fade { display: block !important; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fnx-mobile-filter-backdrop,
+  .fnx-mobile-filter-panel { transition: none !important; }
+}
+
 @media (max-width: 620px) {
   .adm-product-modal__header,
   .adm-product-modal__body,
@@ -1149,4 +1165,37 @@
   .adm-product-modal__actions {
     flex-wrap: wrap;
   }
+}
+
+/* Ficha de producto — responsive mobile */
+.fnx-pd-container { padding: 32px 32px 24px; }
+
+.fnx-pd-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 64px;
+  align-items: start;
+}
+
+.fnx-pd-info { position: sticky; top: 96px; align-self: start; }
+
+.fnx-pd-title {
+  font-size: clamp(32px, 3.5vw, 48px);
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+
+.fnx-pd-image-fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 1 / 1;
+  background: var(--color-surface-2);
+}
+
+@media (max-width: 767px) {
+  .fnx-pd-container { padding: 24px 20px 100px; }
+  .fnx-pd-grid { grid-template-columns: 1fr; gap: 28px; }
+  .fnx-pd-info { position: static; top: auto; }
+  .fnx-pd-title { font-size: clamp(26px, 8vw, 36px); }
 }

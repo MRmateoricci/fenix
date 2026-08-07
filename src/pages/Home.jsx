@@ -273,14 +273,18 @@ function CategoryCard({ cat, onClick }) {
           transition: 'box-shadow .35s ease, border-color .25s ease',
         }}
       >
-        <div style={{ position: 'relative', aspectRatio: cat.productShot ? '2.4/1' : '4/4.3' }}>
+        <div style={{
+          position: 'relative',
+          height: cat.productShot ? 'clamp(104px, 9.5vw, 152px)' : undefined,
+          aspectRatio: cat.productShot ? undefined : '4/4.3',
+        }}>
           {cat.image
             ? <img
                 src={cat.image} alt={cat.name}
                 style={{
                   width: '100%', height: '100%', display: 'block',
                   objectFit: cat.productShot ? 'contain' : 'cover',
-                  objectPosition: 'center',
+                  objectPosition: cat.productShot ? 'bottom' : 'center',
                   padding: cat.productShot ? '3%' : 0,
                   boxSizing: 'border-box',
                   transform: hovered ? 'scale(1.06)' : 'scale(1)',

@@ -6,6 +6,7 @@ import { useAuth } from '../context/AuthContext'
 import { useFavorites } from '../context/FavoritesContext'
 import ProductCard from '../components/ProductCard'
 import PageSEO from '../components/SEO'
+import FenixLogo from '../assets/FenixLogo'
 import { SEO as seoCfg } from '../config/seo'
 
 const fmt = (n) =>
@@ -68,11 +69,13 @@ export default function ProductDetail() {
   const [added, setAdded] = useState(false)
   const [selectedColor, setSelectedColor] = useState(product?.colors?.[0] ?? null)
   const [selectedSize, setSelectedSize] = useState(product?.sizes?.[0] ?? null)
+  const [imgError, setImgError] = useState(false)
   const selectedPrice = selectedColor?.price != null ? Number(selectedColor.price) : product?.price
 
   useEffect(() => {
     setSelectedColor(product?.colors?.[0] ?? null)
     setSelectedSize(product?.sizes?.[0] ?? null)
+    setImgError(false)
   }, [product?.id])
 
   useEffect(() => {
@@ -164,7 +167,7 @@ export default function ProductDetail() {
       />
       {/* ── Main section ─────────────────────────────────────────────────────── */}
       <div style={{ backgroundColor: 'var(--color-bg)' }}>
-        <div style={{ maxWidth: 1200, margin: '0 auto', padding: '32px 32px 24px' }}>
+        <div className="fnx-pd-container" style={{ maxWidth: 1200, margin: '0 auto' }}>
 
           {/* Breadcrumb */}
           <nav style={{
@@ -204,12 +207,7 @@ export default function ProductDetail() {
           </nav>
 
           {/* Two-column layout */}
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: '1fr 1fr',
-            gap: 64,
-            alignItems: 'start',
-          }}>
+          <div className="fnx-pd-grid">
 
             {/* ── Left: image + description ─────────────────────────────────── */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
@@ -218,11 +216,18 @@ export default function ProductDetail() {
                 overflow: 'hidden',
                 backgroundColor: 'var(--color-surface-2)',
               }}>
-                <img
-                  src={bigImage}
-                  alt={product.name}
-                  style={{ width: '100%', display: 'block', objectFit: 'cover' }}
-                />
+                {(!bigImage || imgError) ? (
+                  <div className="fnx-pd-image-fallback">
+                    <FenixLogo height={64} />
+                  </div>
+                ) : (
+                  <img
+                    src={bigImage}
+                    alt={product.name}
+                    style={{ width: '100%', display: 'block', objectFit: 'cover' }}
+                    onError={() => setImgError(true)}
+                  />
+                )}
               </div>
 
               {/* Description below image */}
@@ -244,7 +249,7 @@ export default function ProductDetail() {
             </div>
 
             {/* ── Right: product info ───────────────────────────────────────── */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 20, position: 'sticky', top: 96, alignSelf: 'start' }}>
+            <div className="fnx-pd-info" style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
 
               {/* Badges */}
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
@@ -294,10 +299,9 @@ export default function ProductDetail() {
               </div>
 
               {/* Product name */}
-              <h1 style={{
+              <h1 className="fnx-pd-title" style={{
                 fontFamily: 'var(--font-serif)',
                 fontWeight: 400,
-                fontSize: 'clamp(32px, 3.5vw, 48px)',
                 lineHeight: 1.1,
                 letterSpacing: '-0.01em',
                 color: 'var(--color-text)',
@@ -350,7 +354,7 @@ export default function ProductDetail() {
                         <button
                           key={c.name}
                           type="button"
-                          onClick={() => setSelectedColor(c)}
+                          onClick={() => { setSelectedColor(c); setImgError(false) }}
                           title={c.name}
                           aria-label={c.name}
                           aria-pressed={isSelected}
@@ -415,7 +419,7 @@ export default function ProductDetail() {
 
               {/* Quantity selector */}
               {product.inStock && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
                   <span style={{
                     fontSize: 14, fontWeight: 500,
                     color: 'var(--color-text)', fontFamily: 'var(--font-sans)',
