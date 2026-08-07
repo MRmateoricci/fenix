@@ -33,18 +33,35 @@ function generateOrderNumber() {
   return `FX-${rand}`
 }
 
-export function resolveProductVariantPrice(product, selectedColor) {
+// Si el color y la medida elegidos tienen precio propio, la medida manda
+// (suele ser lo que más cambia el costo, ej. largo de un cable); el color
+// solo se usa si la medida no tiene precio propio.
+export function resolveProductVariantPrice(product, selectedColor, selectedSize) {
   const basePrice = Number(product?.precio_venta)
   if (!Number.isFinite(basePrice)) return { error: 'missing_price', price: null }
-  if (!selectedColor) return { error: null, price: basePrice }
+  let price = basePrice
 
-  const colors = Array.isArray(product.color_options) ? product.color_options : []
-  const variant = colors.find(color =>
-    String(color?.name || '').localeCompare(String(selectedColor), 'es-AR', { sensitivity: 'base' }) === 0
-  )
-  if (colors.length && !variant) return { error: 'invalid_color', price: null }
-  const variantPrice = Number(variant?.price)
-  return { error: null, price: Number.isFinite(variantPrice) ? variantPrice : basePrice }
+  if (selectedColor) {
+    const colors = Array.isArray(product.color_options) ? product.color_options : []
+    const variant = colors.find(color =>
+      String(color?.name || '').localeCompare(String(selectedColor), 'es-AR', { sensitivity: 'base' }) === 0
+    )
+    if (colors.length && !variant) return { error: 'invalid_color', price: null }
+    const variantPrice = Number(variant?.price)
+    if (Number.isFinite(variantPrice)) price = variantPrice
+  }
+
+  if (selectedSize) {
+    const sizes = Array.isArray(product.size_options) ? product.size_options : []
+    const variant = sizes.find(size =>
+      String(size?.label || '').localeCompare(String(selectedSize), 'es-AR', { sensitivity: 'base' }) === 0
+    )
+    if (sizes.length && !variant) return { error: 'invalid_size', price: null }
+    const variantPrice = Number(variant?.price)
+    if (Number.isFinite(variantPrice)) price = variantPrice
+  }
+
+  return { error: null, price }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -118,7 +135,7 @@ router.post('/', attachUserIfPresent, async (req, res) => {
     // en lo que manda el cliente (podría mandar cualquier item.price).
     const productIds = items.map((i) => i.id)
     const { rows: dbProducts } = await pool.query(
-      `SELECT id, precio_venta, color_options FROM products WHERE id = ANY($1::uuid[])`,
+      `SELECT id, precio_venta, color_options, size_options FROM products WHERE id = ANY($1::uuid[])`,
       [productIds]
     )
     const productMap = new Map(dbProducts.map((p) => [p.id, p]))
@@ -129,9 +146,12 @@ router.post('/', attachUserIfPresent, async (req, res) => {
       if (!dbProduct || dbProduct.precio_venta == null) {
         return res.status(400).json({ error: `Producto no disponible: ${i.name || i.id}` })
       }
-      const resolvedPrice = resolveProductVariantPrice(dbProduct, i.color)
+      const resolvedPrice = resolveProductVariantPrice(dbProduct, i.color, i.size)
       if (resolvedPrice.error === 'invalid_color') {
         return res.status(400).json({ error: `Color no disponible para ${i.name || i.id}` })
+      }
+      if (resolvedPrice.error === 'invalid_size') {
+        return res.status(400).json({ error: `Medida no disponible para ${i.name || i.id}` })
       }
       const price = resolvedPrice.price
       itemsSnapshot.push({
@@ -143,6 +163,7 @@ router.post('/', attachUserIfPresent, async (req, res) => {
         subtotal: price * i.quantity,
         image:    i.image || null,
         color:    i.color || null,
+        size:     i.size || null,
       })
     }
     const productsTotal = itemsSnapshot.reduce((sum, i) => sum + i.subtotal, 0)

@@ -429,14 +429,14 @@ function ProductModal({ product, onSave, onClose, publishOnSave = false }) {
     ...f,
     colors: f.colors.map((c, i) => i === idx ? { ...c, [key]: value } : c),
   }))
-  const addColor = () => setForm(f => ({ ...f, colors: [...f.colors, { name: '', hex: '#000000', image: '' }] }))
+  const addColor = () => setForm(f => ({ ...f, colors: [...f.colors, { name: '', hex: '#000000', image: '', price: '' }] }))
   const removeColor = (idx) => setForm(f => ({ ...f, colors: f.colors.filter((_, i) => i !== idx) }))
 
   const setSize = (idx, key, value) => setForm(f => ({
     ...f,
     sizes: f.sizes.map((s, i) => i === idx ? { ...s, [key]: value } : s),
   }))
-  const addSize = () => setForm(f => ({ ...f, sizes: [...f.sizes, { label: '' }] }))
+  const addSize = () => setForm(f => ({ ...f, sizes: [...f.sizes, { label: '', price: '' }] }))
   const removeSize = (idx) => setForm(f => ({ ...f, sizes: f.sizes.filter((_, i) => i !== idx) }))
 
   const [saving, setSaving] = useState(false)
@@ -461,8 +461,8 @@ function ProductModal({ product, onSave, onClose, publishOnSave = false }) {
     } else {
       delete out.stock
     }
-    out.colors = form.colors.filter(c => c.name?.trim())
-    out.sizes  = form.sizes.filter(s => s.label.trim())
+    out.colors = form.colors.filter(c => c.name?.trim()).map(c => ({ ...c, price: c.price === '' || c.price == null ? null : Number(c.price) }))
+    out.sizes  = form.sizes.filter(s => s.label.trim()).map(s => ({ ...s, price: s.price === '' || s.price == null ? null : Number(s.price) }))
     setSaving(true)
     try {
       await onSave(out)
@@ -610,14 +610,14 @@ function ProductModal({ product, onSave, onClose, publishOnSave = false }) {
             </button>
           </div>
           <p style={{ fontSize: 11.5, color: C.muted, margin: '0 0 10px' }}>
-            Si cargás colores, el comprador va a poder elegir uno en la página del producto. La imagen por color es opcional; si falta, se usa la foto principal. Las variantes importadas también pueden conservar un precio propio.
+            Si cargás colores, el comprador va a poder elegir uno en la página del producto. La imagen por color es opcional; si falta, se usa la foto principal. Si le cargás un precio a un color, ese precio reemplaza al precio de venta cuando el comprador elige ese color; si lo dejás vacío, usa el precio de venta normal.
           </p>
 
           {form.colors.length > 0 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 4 }}>
               {form.colors.map((c, idx) => (
                 <div key={idx} style={{
-                  display: 'grid', gridTemplateColumns: '38px minmax(130px, 1fr) minmax(220px, 1.5fr) auto', gap: 8, alignItems: 'center',
+                  display: 'grid', gridTemplateColumns: '38px minmax(120px, 1fr) 120px minmax(200px, 1.3fr) auto', gap: 8, alignItems: 'center',
                   padding: 8, background: C.white, border: `1px solid ${C.border}`, borderRadius: 6,
                 }}>
                   <input
@@ -632,6 +632,15 @@ function ProductModal({ product, onSave, onClose, publishOnSave = false }) {
                     value={c.name}
                     onChange={e => setColor(idx, 'name', e.target.value)}
                     placeholder="Nombre (ej: Negro)"
+                    style={inp}
+                  />
+                  <input
+                    type="number"
+                    min={0}
+                    value={c.price ?? ''}
+                    onChange={e => setColor(idx, 'price', e.target.value)}
+                    placeholder="Precio propio"
+                    title="Precio de venta propio de este color (ARS). Vacío = usa el precio de venta del producto."
                     style={inp}
                   />
                   <ImageFileField
@@ -663,14 +672,14 @@ function ProductModal({ product, onSave, onClose, publishOnSave = false }) {
             </button>
           </div>
           <p style={{ fontSize: 11.5, color: C.muted, margin: '0 0 10px' }}>
-            Si el producto viene en distintas medidas (ej: un cable de 5 m o de 10 m), cargalas acá y el comprador va a poder elegir una en la página del producto. Si no cargás ninguna, se vende con una sola medida fija.
+            Si el producto viene en distintas medidas (ej: un cable de 5 m o de 10 m), cargalas acá y el comprador va a poder elegir una en la página del producto. Si no cargás ninguna, se vende con una sola medida fija. Si le cargás un precio a una medida, ese precio reemplaza al precio de venta cuando el comprador elige esa medida; si lo dejás vacío, usa el precio de venta normal.
           </p>
 
           {form.sizes.length > 0 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 4 }}>
               {form.sizes.map((s, idx) => (
                 <div key={idx} style={{
-                  display: 'grid', gridTemplateColumns: '1fr auto', gap: 8, alignItems: 'center',
+                  display: 'grid', gridTemplateColumns: '1fr 140px auto', gap: 8, alignItems: 'center',
                   padding: 8, background: C.white, border: `1px solid ${C.border}`, borderRadius: 6,
                 }}>
                   <input
@@ -678,6 +687,15 @@ function ProductModal({ product, onSave, onClose, publishOnSave = false }) {
                     value={s.label}
                     onChange={e => setSize(idx, 'label', e.target.value)}
                     placeholder="Medida (ej: 5 m, 10 m, 2.5 mm)"
+                    style={inp}
+                  />
+                  <input
+                    type="number"
+                    min={0}
+                    value={s.price ?? ''}
+                    onChange={e => setSize(idx, 'price', e.target.value)}
+                    placeholder="Precio propio"
+                    title="Precio de venta propio de esta medida (ARS). Vacío = usa el precio de venta del producto."
                     style={inp}
                   />
                   <button

@@ -65,7 +65,10 @@ export function mapRow(r) {
       priceCostUsd: color.priceCostUsd == null ? null : Number(color.priceCostUsd),
       priceWithTaxUsd: color.priceWithTaxUsd == null ? null : Number(color.priceWithTaxUsd),
     })),
-    sizes: r.size_options || [],
+    sizes: (r.size_options || []).map(size => ({
+      ...size,
+      price: size.price == null || size.price === '' ? null : Number(size.price),
+    })),
     published: true,
   }
 }

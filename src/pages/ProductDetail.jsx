@@ -70,7 +70,11 @@ export default function ProductDetail() {
   const [selectedColor, setSelectedColor] = useState(product?.colors?.[0] ?? null)
   const [selectedSize, setSelectedSize] = useState(product?.sizes?.[0] ?? null)
   const [imgError, setImgError] = useState(false)
-  const selectedPrice = selectedColor?.price != null ? Number(selectedColor.price) : product?.price
+  const selectedPrice = selectedSize?.price != null
+    ? Number(selectedSize.price)
+    : selectedColor?.price != null
+      ? Number(selectedColor.price)
+      : product?.price
 
   useEffect(() => {
     setSelectedColor(product?.colors?.[0] ?? null)
