@@ -313,19 +313,19 @@ function ImageFileField({ label, value, onChange, productId, compact = false }) 
 // ── ProductModal ──────────────────────────────────────────────────────────────
 // Best-effort: adivina la categoría a partir de grupo/subgrupo del Inventario
 // (marca/distribuidor del proveedor, no coincide 1 a 1 con las categorías de
-// la tienda) — es solo un punto de partida, siempre editable a mano.
+// la tienda). Si no matchea ninguna, se deja vacío para que se asigne a mano.
 function guessCategory(grupo, subgrupo) {
   const text = `${grupo || ''} ${subgrupo || ''}`.toUpperCase()
   if (/LED|LAMPAR|LUMINAR|ILUMINA|REFLECTOR|APLIQUE|PLAFON/.test(text)) return 'Iluminación'
   if (/HERRAMIENT|TALADRO|PINZA|DESTORNILL|SOLDADOR|AMOLADORA|LLAVE/.test(text)) return 'Herramientas'
   if (/CONTACTOR|GUARDAMOTOR|VARIADOR|AUTOMAT|RELE|PLC/.test(text)) return 'Automatización Industrial'
-  return 'Electricidad'
+  return ''
 }
 
 const EMPTY = {
   codigo: '', supplier: 'OTRO', inventoryDescription: '',
   priceCost: '', priceWithTax: '',
-  name: '', category: CATS[0], subcategory: '', productType: '',
+  name: '', category: '', subcategory: '', productType: '',
   price: '', originalPrice: '',
   description: '', image: '', hoverImage: '',
   lengthCm: '', widthCm: '', heightCm: '', weightKg: '',
