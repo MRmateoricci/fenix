@@ -10,7 +10,7 @@ import {
   parseCleosCatalogPdf,
 } from './cleosCatalogImport.js'
 
-const MAX_PAGES = 120
+const MAX_PAGES = 800
 const MAX_PREVIEW_ROWS = 500
 
 function codeKey(value) {
