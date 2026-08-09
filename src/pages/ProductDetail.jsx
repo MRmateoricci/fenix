@@ -139,7 +139,7 @@ export default function ProductDetail() {
     .slice(0, 4)
 
   const displayImage = selectedColor?.image || product.image
-  const bigImage = displayImage.replace('w=400&h=400', 'w=900&h=900')
+  const bigImage = displayImage?.replace('w=400&h=400', 'w=900&h=900') || null
 
   const productSchema = {
     '@context': 'https://schema.org',
