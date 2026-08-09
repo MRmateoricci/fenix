@@ -5,7 +5,6 @@ import { useAdmin } from '../context/AdminContext'
 import { useAuth } from '../context/AuthContext'
 import CartDrawer from './CartDrawer'
 import FenixLogo from '../assets/FenixLogo'
-import { CATEGORY_TREE } from '../data/categoryTree'
 
 const fmtPrice = (n) =>
   new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(n)
@@ -25,7 +24,7 @@ function scrollTo(id) {
 
 export default function Navbar() {
   const { totalItems, lastAdded, dismissAddedNotification } = useCart()
-  const { products } = useAdmin()
+  const { products, categoryTree } = useAdmin()
   const { user, isAuthenticated, logout } = useAuth()
   const [cartOpen,   setCartOpen]   = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
@@ -34,7 +33,7 @@ export default function Navbar() {
   const [searchFocused, setSearchFocused] = useState(false)
   const [accountOpen, setAccountOpen] = useState(false)
   const [categoryOpen, setCategoryOpen] = useState(false)
-  const [activeCategoryLabel, setActiveCategoryLabel] = useState(CATEGORY_TREE[0].label)
+  const [activeCategoryLabel, setActiveCategoryLabel] = useState(categoryTree[0].label)
   const searchBlurTimer = useRef(null)
   const accountRef = useRef(null)
   const categoryRef = useRef(null)
@@ -166,7 +165,7 @@ export default function Navbar() {
   const opaque = scrolled || categoryOpen
   const ink    = opaque ? '#16110B' : '#F7F4EF'
   const searchBorder = opaque ? 'rgba(22,17,11,0.3)' : 'rgba(247,244,239,0.4)'
-  const activeCategory = CATEGORY_TREE.find(c => c.label === activeCategoryLabel) || CATEGORY_TREE[0]
+  const activeCategory = categoryTree.find(c => c.label === activeCategoryLabel) || categoryTree[0]
 
   return (
     <>
@@ -220,7 +219,7 @@ export default function Navbar() {
               </button>
 
               {NAV_ITEMS.map((item) => {
-                const category = item.to ? CATEGORY_TREE.find((cat) => cat.to === item.to) : null
+                const category = item.to ? categoryTree.find((cat) => cat.to === item.to) : null
                 const isActiveCategory = category && categoryOpen && activeCategoryLabel === category.label
 
                 return (
@@ -439,7 +438,7 @@ export default function Navbar() {
               flex: '0 0 240px', borderRight: '1px solid #DED6C7',
               padding: '22px 24px 24px 0', overflowY: 'auto',
             }}>
-              {CATEGORY_TREE.map((cat) => (
+              {categoryTree.map((cat) => (
                 <button
                   key={cat.label}
                   type="button"
@@ -629,6 +628,7 @@ function CartButton({ totalItems, onClick, ink }) {
 
 // ─── Mobile full-screen menu ───────────────────────────────────────────────────
 function MobileMenu({ open, onClose, onNavigate, navigate }) {
+  const { categoryTree } = useAdmin()
   const [catPath, setCatPath] = useState(null) // null = main menu · [] = category root · [...] = drilled in
 
   useEffect(() => { if (!open) setCatPath(null) }, [open])
@@ -637,7 +637,7 @@ function MobileMenu({ open, onClose, onNavigate, navigate }) {
 
   const browsing = catPath !== null
   const currentNode = browsing && catPath.length > 0 ? catPath[catPath.length - 1] : null
-  const currentChildren = browsing ? (currentNode ? currentNode.children : CATEGORY_TREE) : null
+  const currentChildren = browsing ? (currentNode ? currentNode.children : categoryTree) : null
 
   function goLeaf(to) {
     navigate(to)

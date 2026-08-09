@@ -375,3 +375,29 @@ ALTER TABLE orders ADD CONSTRAINT orders_status_check CHECK (
 
 CREATE INDEX IF NOT EXISTS idx_orders_reservation_expires_at ON orders(reservation_expires_at)
   WHERE reservation_expires_at IS NOT NULL;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Subcategorías creadas a mano desde el admin. El árbol "de fábrica" sigue
+-- viviendo en src/data/categoryTree.js (frontend, sin tocar); esta tabla solo
+-- guarda las que el admin agrega, y el panel las combina con las del árbol
+-- estático al mostrar las opciones de categoría/subcategoría de un producto.
+-- ─────────────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS subcategories (
+  id         UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+  category   VARCHAR(100) NOT NULL,
+  name       VARCHAR(150) NOT NULL,
+  created_at TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+  UNIQUE (category, name)
+);
+
+-- Tercer nivel del árbol ("tipo/clasificación" dentro de una subcategoría,
+-- ej. "Unipolares" dentro de "Cables Normalizados"), agregado a mano desde el
+-- admin igual que `subcategories`.
+CREATE TABLE IF NOT EXISTS product_types (
+  id          UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+  category    VARCHAR(100) NOT NULL,
+  subcategory VARCHAR(150) NOT NULL,
+  name        VARCHAR(150) NOT NULL,
+  created_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+  UNIQUE (category, subcategory, name)
+);

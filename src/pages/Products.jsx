@@ -203,7 +203,7 @@ function CatalogHeader({ filters }) {
 
 // ═══════════════════════════════════════════════════════════════════════════════
 export default function Products() {
-  const { products } = useAdmin()
+  const { products, categoryTree } = useAdmin()
   const priceMax = useMemo(
     () => Math.max(PRICE_STEP, Math.ceil(Math.max(0, ...products.map(p => p.price)) / PRICE_STEP) * PRICE_STEP),
     [products]
@@ -211,7 +211,7 @@ export default function Products() {
   const filters = useFilterParams(priceMax)
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false)
   const activeCategoryForSubs = filters.selectedCategories.length === 1 ? filters.selectedCategories[0] : null
-  const hasMobileSubFilters = activeCategoryForSubs ? getSubcategoryOptions(activeCategoryForSubs).length > 0 : false
+  const hasMobileSubFilters = activeCategoryForSubs ? getSubcategoryOptions(activeCategoryForSubs, categoryTree).length > 0 : false
 
   useEffect(() => { setMobileFiltersOpen(false) }, [activeCategoryForSubs])
   const filtered = useMemo(() => {
@@ -365,6 +365,7 @@ export default function Products() {
       open={mobileFiltersOpen}
       onClose={() => setMobileFiltersOpen(false)}
       filters={filters}
+      products={products}
     />
     </>
   )
@@ -442,8 +443,9 @@ function FilterIcon() {
 
 // ─── Subcategory tabs ──────────────────────────────────────────────────────────
 function SubcategoryTabs({ filters }) {
+  const { categoryTree } = useAdmin()
   const activeCategory = filters.selectedCategories.length === 1 ? filters.selectedCategories[0] : null
-  const subs = activeCategory ? getSubcategoryOptions(activeCategory) : []
+  const subs = activeCategory ? getSubcategoryOptions(activeCategory, categoryTree) : []
   if (!subs.length) return null
 
   return (
@@ -477,9 +479,10 @@ function SubcategoryTabs({ filters }) {
 
 // ─── Level-3 tabs — sourced from the same tree as the header menu ─────────────
 function ProductTypeTabs({ filters }) {
+  const { categoryTree } = useAdmin()
   const activeCategory = filters.selectedCategories.length === 1 ? filters.selectedCategories[0] : null
   const types = activeCategory && filters.sub
-    ? getProductTypeOptions(activeCategory, filters.sub)
+    ? getProductTypeOptions(activeCategory, filters.sub, categoryTree)
     : []
   if (!types.length) return null
 
@@ -520,7 +523,7 @@ function ProductTypeTabs({ filters }) {
 
 // ─── Mobile filter drawer (< 768px only) — subcategory + tipo, kept off the
 // initial scroll so the product grid is reachable right after the toggle ──────
-function MobileFilterDrawer({ open, onClose, filters }) {
+function MobileFilterDrawer({ open, onClose, filters, products }) {
   useEffect(() => {
     document.body.style.overflow = open ? 'hidden' : ''
     return () => { document.body.style.overflow = '' }
@@ -600,7 +603,7 @@ function MobileFilterDrawer({ open, onClose, filters }) {
 }
 
 // ─── Filter Panel ──────────────────────────────────────────────────────────────
-function FilterPanel({ filters }) {
+function FilterPanel({ filters, products }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
       {filters.hasActiveFilters && (
@@ -871,7 +874,7 @@ function FilterDrawer({ open, onClose, filters }) {
           </button>
         </div>
         <div style={{ flex: 1, overflowY: 'auto', padding: '24px 24px' }}>
-          <FilterPanel filters={filters} />
+          <FilterPanel filters={filters} products={products} />
         </div>
         <div style={{ padding: '16px 24px', borderTop: `1px solid ${T.hairline}` }}>
           <button

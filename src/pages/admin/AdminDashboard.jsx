@@ -82,6 +82,12 @@ const StoreIcon = () => (
   </svg>
 )
 
+const FolderIcon = () => (
+  <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" strokeWidth="1.4" style={{ flexShrink: 0 }}>
+    <path d="M1 3.3c0-.6.5-1.1 1.1-1.1h3.2l1.4 1.6h6.2c.6 0 1.1.5 1.1 1.1v6.8c0 .6-.5 1.1-1.1 1.1H2.1c-.6 0-1.1-.5-1.1-1.1z" strokeLinejoin="round"/>
+  </svg>
+)
+
 const TagIcon = () => (
   <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" strokeWidth="1.4" style={{ flexShrink: 0 }}>
     <circle cx="4.5" cy="4.5" r="1.3"/>
@@ -400,7 +406,7 @@ function toUnifiedProductPayload(data) {
 }
 
 function ProductModal({ product, onSave, onClose, publishOnSave = false }) {
-  const { currencySettings } = useAdmin()
+  const { currencySettings, categoryTree } = useAdmin()
   const isNew = !product
   const [form, setForm] = useState(() => isNew ? EMPTY : {
     ...EMPTY,
@@ -421,8 +427,8 @@ function ProductModal({ product, onSave, onClose, publishOnSave = false }) {
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
   const willBePublished = publishOnSave || form.published
   const valid = (!isNew || form.codigo.trim()) && (!willBePublished || (form.name.trim() && form.price && Number(form.price) > 0))
-  const subOptions = getSubcategoryOptions(form.category).map(node => node.label)
-  const typeOptions = getProductTypeOptions(form.category, form.subcategory).map(node => node.label)
+  const subOptions = getSubcategoryOptions(form.category, categoryTree).map(node => node.label)
+  const typeOptions = getProductTypeOptions(form.category, form.subcategory, categoryTree).map(node => node.label)
   const usdArsRate = Number(currencySettings.usdArsRate) || 1510
 
   const setColor = (idx, key, value) => setForm(f => ({
@@ -443,6 +449,7 @@ function ProductModal({ product, onSave, onClose, publishOnSave = false }) {
 
   const handleSave = async () => {
     if (!valid || saving) return
+    setSaving(true)
     const out = { ...form, price: form.price === '' ? null : Number(form.price) }
     out.codigo = form.codigo.trim()
     out.supplier = form.supplier.trim().toUpperCase() || 'OTRO'
@@ -463,7 +470,6 @@ function ProductModal({ product, onSave, onClose, publishOnSave = false }) {
     }
     out.colors = form.colors.filter(c => c.name?.trim()).map(c => ({ ...c, price: c.price === '' || c.price == null ? null : Number(c.price) }))
     out.sizes  = form.sizes.filter(s => s.label.trim()).map(s => ({ ...s, price: s.price === '' || s.price == null ? null : Number(s.price) }))
-    setSaving(true)
     try {
       await onSave(out)
       onClose()
@@ -1221,6 +1227,257 @@ function StoreTab({ products, onUpdate, onDelete }) {
           onCancel={() => setConfirmId(null)}
         />
       )}
+    </div>
+  )
+}
+
+// ── CategoriesTab ─────────────────────────────────────────────────────────────
+// Administra los dos niveles que cuelgan de cada categoría del header:
+// subcategoría (ej. "Cables Normalizados" dentro de Electricidad) y tipo/
+// clasificación (ej. "Unipolares" dentro de esa subcategoría). Lo que se crea
+// acá se guarda en las tablas `subcategories`/`product_types` y se refleja en
+// vivo en el mega-menú del header y en los filtros de /products (ver
+// `categoryTree` en AdminContext y `buildCategoryTree` en data/categoryTree.js).
+function CategoriesTab() {
+  const {
+    categoryTree, subcategories, productTypes,
+    createSubcategory, deleteSubcategory, createProductType, deleteProductType,
+  } = useAdmin()
+
+  // ── Nueva subcategoría ──
+  const [subCategory, setSubCategory] = useState(CATS[0])
+  const [subName, setSubName]         = useState('')
+  const [savingSub, setSavingSub]     = useState(false)
+  const [subError, setSubError]       = useState('')
+
+  const handleAddSub = async (e) => {
+    e.preventDefault()
+    const trimmed = subName.trim()
+    if (!trimmed) return
+    setSubError('')
+    setSavingSub(true)
+    try {
+      await createSubcategory(subCategory, trimmed)
+      setSubName('')
+    } catch (err) {
+      setSubError(err.message)
+    } finally {
+      setSavingSub(false)
+    }
+  }
+
+  // ── Nuevo tipo / clasificación ──
+  const [typeCategory, setTypeCategory]       = useState(CATS[0])
+  const [typeSubcategory, setTypeSubcategory] = useState('')
+  const [typeName, setTypeName]               = useState('')
+  const [savingType, setSavingType]           = useState(false)
+  const [typeError, setTypeError]             = useState('')
+
+  const typeSubcategoryOptions = getSubcategoryOptions(typeCategory, categoryTree).map(node => node.label)
+
+  useEffect(() => {
+    if (!typeSubcategoryOptions.includes(typeSubcategory)) {
+      setTypeSubcategory(typeSubcategoryOptions[0] || '')
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [typeCategory, categoryTree])
+
+  const handleAddType = async (e) => {
+    e.preventDefault()
+    const trimmed = typeName.trim()
+    if (!trimmed || !typeSubcategory) return
+    setTypeError('')
+    setSavingType(true)
+    try {
+      await createProductType(typeCategory, typeSubcategory, trimmed)
+      setTypeName('')
+    } catch (err) {
+      setTypeError(err.message)
+    } finally {
+      setSavingType(false)
+    }
+  }
+
+  // ── Árbol completo, para ver y borrar lo agregado ──
+  const [treeError, setTreeError] = useState('')
+  const customSubcategoryId = (cat, name) => subcategories.find(s => s.category === cat && s.name === name)?.id
+  const customTypeId = (cat, sub, name) => productTypes.find(t => t.category === cat && t.subcategory === sub && t.name === name)?.id
+
+  const handleDeleteSub = async (id) => {
+    setTreeError('')
+    try {
+      await deleteSubcategory(id)
+    } catch (err) {
+      setTreeError(err.message)
+    }
+  }
+
+  const handleDeleteType = async (id) => {
+    setTreeError('')
+    try {
+      await deleteProductType(id)
+    } catch (err) {
+      setTreeError(err.message)
+    }
+  }
+
+  return (
+    <div>
+      <h3 style={sectionTitle}>Nueva subcategoría</h3>
+      <div style={{
+        background: C.white, borderRadius: 10, border: `1px solid ${C.border}`,
+        padding: '20px 24px', marginBottom: 28,
+      }}>
+        <p style={{ fontSize: 13, color: C.text3, margin: '0 0 16px' }}>
+          Agregá una subcategoría dentro de una categoría existente (ej. "Ventiladores de Techo" dentro de Herramientas). Va a aparecer en el menú "Categoría" del header y en los filtros de /products.
+        </p>
+        <form onSubmit={handleAddSub} style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+            <label style={lbl}>Categoría</label>
+            <select value={subCategory} onChange={e => setSubCategory(e.target.value)} style={{ ...inp, width: 220 }}>
+              {CATS.map(c => <option key={c} value={c}>{CATEGORY_NAV_LABEL[c]}</option>)}
+            </select>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 5, flex: 1, minWidth: 220 }}>
+            <label style={lbl}>Nombre de la subcategoría</label>
+            <input value={subName} onChange={e => setSubName(e.target.value)} placeholder="ej: Ventiladores de Techo" style={inp} />
+          </div>
+          <button
+            type="submit"
+            disabled={savingSub || !subName.trim()}
+            style={{
+              ...solidBtn,
+              background: !subName.trim() ? '#ddd' : C.red,
+              color: !subName.trim() ? '#aaa' : '#fff',
+              cursor: savingSub || !subName.trim() ? 'not-allowed' : 'pointer',
+            }}
+          >
+            {savingSub ? 'Agregando...' : 'Agregar'}
+          </button>
+        </form>
+        {subError && <p style={{ fontSize: 12, color: C.red, margin: '10px 0 0' }}>{subError}</p>}
+      </div>
+
+      <h3 style={sectionTitle}>Nuevo tipo / clasificación</h3>
+      <div style={{
+        background: C.white, borderRadius: 10, border: `1px solid ${C.border}`,
+        padding: '20px 24px', marginBottom: 28,
+      }}>
+        <p style={{ fontSize: 13, color: C.text3, margin: '0 0 16px' }}>
+          Es el tercer nivel, dentro de una subcategoría (ej. "Unipolares" dentro de "Cables Normalizados"). Podés usar una subcategoría de fábrica o una que hayas creado arriba.
+        </p>
+        <form onSubmit={handleAddType} style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+            <label style={lbl}>Categoría</label>
+            <select value={typeCategory} onChange={e => setTypeCategory(e.target.value)} style={{ ...inp, width: 220 }}>
+              {CATS.map(c => <option key={c} value={c}>{CATEGORY_NAV_LABEL[c]}</option>)}
+            </select>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+            <label style={lbl}>Subcategoría</label>
+            <select
+              value={typeSubcategory}
+              onChange={e => setTypeSubcategory(e.target.value)}
+              disabled={!typeSubcategoryOptions.length}
+              style={{ ...inp, width: 220 }}
+            >
+              {typeSubcategoryOptions.length === 0 && <option value="">Sin subcategorías</option>}
+              {typeSubcategoryOptions.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 5, flex: 1, minWidth: 200 }}>
+            <label style={lbl}>Nombre del tipo</label>
+            <input value={typeName} onChange={e => setTypeName(e.target.value)} placeholder="ej: Unipolares" style={inp} />
+          </div>
+          <button
+            type="submit"
+            disabled={savingType || !typeName.trim() || !typeSubcategory}
+            style={{
+              ...solidBtn,
+              background: !typeName.trim() || !typeSubcategory ? '#ddd' : C.red,
+              color: !typeName.trim() || !typeSubcategory ? '#aaa' : '#fff',
+              cursor: savingType || !typeName.trim() || !typeSubcategory ? 'not-allowed' : 'pointer',
+            }}
+          >
+            {savingType ? 'Agregando...' : 'Agregar'}
+          </button>
+        </form>
+        {typeError && <p style={{ fontSize: 12, color: C.red, margin: '10px 0 0' }}>{typeError}</p>}
+      </div>
+
+      <h3 style={{ ...sectionTitle, margin: 0 }}>Árbol de categorías</h3>
+      <p style={{ fontSize: 12.5, color: C.muted, margin: '4px 0 14px' }}>
+        Así se ve en la tienda: el menú "Categoría" del header y los filtros de /products usan esta misma estructura. Lo gris es de fábrica; lo ámbar lo agregaste vos y se puede borrar.
+      </p>
+      {treeError && <p style={{ fontSize: 12, color: C.red, margin: '0 0 10px' }}>{treeError}</p>}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        {CATS.map(cat => {
+          const subNodes = getSubcategoryOptions(cat, categoryTree)
+          return (
+            <div key={cat} style={{ background: C.white, borderRadius: 10, border: `1px solid ${C.border}`, padding: '16px 20px' }}>
+              <div style={{ fontSize: 14, fontWeight: 600, color: C.ink, marginBottom: 10 }}>{CATEGORY_NAV_LABEL[cat]}</div>
+              {subNodes.length === 0 ? (
+                <span style={{ fontSize: 12, color: C.muted }}>Sin subcategorías todavía.</span>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {subNodes.map(subNode => {
+                    const subId = customSubcategoryId(cat, subNode.label)
+                    const typeNodes = subNode.children || []
+                    return (
+                      <div key={subNode.label} style={{ border: `1px solid ${C.hairline}`, borderRadius: 8, padding: '10px 12px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                          <span style={{
+                            fontSize: 12.5, fontWeight: 600,
+                            color: subId ? C.amberDark : C.text2,
+                          }}>
+                            {subNode.label}
+                          </span>
+                          {subId && (
+                            <button
+                              onClick={() => handleDeleteSub(subId)}
+                              title="Eliminar subcategoría"
+                              style={{ border: 'none', background: 'transparent', color: C.amberDark, cursor: 'pointer', fontSize: 11.5 }}
+                            >
+                              Eliminar ✕
+                            </button>
+                          )}
+                        </div>
+                        {typeNodes.length > 0 && (
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
+                            {typeNodes.map(typeNode => {
+                              const typeId = customTypeId(cat, subNode.label, typeNode.label)
+                              return (
+                                <span
+                                  key={typeNode.label}
+                                  style={{
+                                    ...pill(typeId ? C.amberLight : C.hairline, typeId ? C.amberDark : C.text3),
+                                    display: 'inline-flex', alignItems: 'center', gap: 6,
+                                  }}
+                                >
+                                  {typeNode.label}
+                                  {typeId && (
+                                    <button
+                                      onClick={() => handleDeleteType(typeId)}
+                                      title="Eliminar tipo"
+                                      style={{ border: 'none', background: 'transparent', color: C.amberDark, cursor: 'pointer', fontSize: 12, lineHeight: 1, padding: 0 }}
+                                    >
+                                      ✕
+                                    </button>
+                                  )}
+                                </span>
+                              )
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
     </div>
   )
 }
@@ -3687,6 +3944,7 @@ function SupplierToolbar({ supplierNames, settings, inventory, selectedSupplier,
 }
 
 function CleosProductEditor({ product, onChange, importId, onUploadImage }) {
+  const { categoryTree } = useAdmin()
   const set = (changes) => onChange({ ...product, ...changes })
   const selectedImage = product.removeImage
     ? null
@@ -3694,7 +3952,7 @@ function CleosProductEditor({ product, onChange, importId, onUploadImage }) {
   const imageInputRef = useRef(null)
   const [imageUploading, setImageUploading] = useState(false)
   const [imageError, setImageError] = useState('')
-  const subcategoryOptions = getSubcategoryOptions(product.category).map(node => node.label)
+  const subcategoryOptions = getSubcategoryOptions(product.category, categoryTree).map(node => node.label)
 
   const handleImageUpload = async (file) => {
     if (!file) return
@@ -3906,6 +4164,7 @@ function CleosProductEditor({ product, onChange, importId, onUploadImage }) {
 }
 
 function CleosReviewModal({ parsed, onConfirm, onClose, onUploadImage }) {
+  const { categoryTree } = useAdmin()
   const [products, setProducts] = useState(() => parsed.products.map((product, index) => ({
     ...product,
     key: `${product.code}-${index}`,
@@ -3935,7 +4194,7 @@ function CleosReviewModal({ parsed, onConfirm, onClose, onUploadImage }) {
     setProducts(current => current.map(product => ({ ...product, accepted })))
   }
 
-  const bulkSubcategoryOptions = getSubcategoryOptions(bulkCategory).map(node => node.label)
+  const bulkSubcategoryOptions = getSubcategoryOptions(bulkCategory, categoryTree).map(node => node.label)
   const applyBulkCategory = () => {
     if (!bulkCategory) return
     setProducts(current => current.map(product => product.accepted
@@ -5503,6 +5762,7 @@ function UnifiedProductsTab() {
 const NAV_ITEMS = [
   { id: 'overview',     label: 'Resumen',        Icon: BarChartIcon },
   { id: 'products',     label: 'Productos',      Icon: GridIcon },
+  { id: 'categories',   label: 'Categorías',     Icon: FolderIcon },
   { id: 'store',        label: 'Tienda',         Icon: StoreIcon },
   { id: 'offers',       label: 'Ofertas',        Icon: TagIcon },
   { id: 'orders',       label: 'Pedidos',        Icon: ClipboardIcon },
@@ -5630,6 +5890,9 @@ export default function AdminDashboard() {
         )}
         {tab === 'products' && (
           <UnifiedProductsTab />
+        )}
+        {tab === 'categories' && (
+          <CategoriesTab />
         )}
         {tab === 'store' && (
           <StoreTab

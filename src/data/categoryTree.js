@@ -231,14 +231,50 @@ function categoryValue(node) {
   return new URLSearchParams(query).get('category')
 }
 
-export function getCategoryNode(category) {
-  return CATEGORY_TREE.find((node) => categoryValue(node) === category) || null
+// Agrega al árbol estático las subcategorías y tipos que el admin cargó a
+// mano (tablas `subcategories`/`product_types`, ver AdminContext). Se usa
+// tanto en el mega-menú del header como en los filtros de /products y el
+// panel de admin, para que lo agregado se vea reflejado en todos lados.
+export function buildCategoryTree(customSubcategories = [], customProductTypes = []) {
+  return CATEGORY_TREE.map((catNode) => {
+    const category = categoryValue(catNode)
+    const existingChildren = catNode.children || []
+    const existingLabels = existingChildren.map((node) => node.label)
+
+    const childrenWithExtraTypes = existingChildren.map((subNode) => {
+      const extraTypes = customProductTypes.filter(
+        (t) => t.category === category && t.subcategory === subNode.label
+      )
+      if (!extraTypes.length) return subNode
+      const existingTypeLabels = (subNode.children || []).map((node) => node.label)
+      const newLeaves = extraTypes
+        .filter((t) => !existingTypeLabels.includes(t.name))
+        .map((t) => ({ label: t.name, to: addParam(subNode.to, 'type', t.name) }))
+      return newLeaves.length ? { ...subNode, children: [...(subNode.children || []), ...newLeaves] } : subNode
+    })
+
+    const newSubcategories = customSubcategories
+      .filter((s) => s.category === category && !existingLabels.includes(s.name))
+      .map((s) => {
+        const subTo = addParam(catNode.to, 'sub', s.name)
+        const types = customProductTypes
+          .filter((t) => t.category === category && t.subcategory === s.name)
+          .map((t) => ({ label: t.name, to: addParam(subTo, 'type', t.name) }))
+        return { label: s.name, to: subTo, children: types.length ? types : undefined }
+      })
+
+    return { ...catNode, children: [...childrenWithExtraTypes, ...newSubcategories] }
+  })
 }
 
-export function getSubcategoryOptions(category) {
-  return getCategoryNode(category)?.children || []
+export function getCategoryNode(category, tree = CATEGORY_TREE) {
+  return tree.find((node) => categoryValue(node) === category) || null
 }
 
-export function getProductTypeOptions(category, subcategory) {
-  return getSubcategoryOptions(category).find((node) => node.label === subcategory)?.children || []
+export function getSubcategoryOptions(category, tree = CATEGORY_TREE) {
+  return getCategoryNode(category, tree)?.children || []
+}
+
+export function getProductTypeOptions(category, subcategory, tree = CATEGORY_TREE) {
+  return getSubcategoryOptions(category, tree).find((node) => node.label === subcategory)?.children || []
 }

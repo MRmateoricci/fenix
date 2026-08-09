@@ -1,4 +1,5 @@
-import { createContext, useContext, useState, useEffect, useCallback } from 'react'
+import { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react'
+import { buildCategoryTree } from '../data/categoryTree'
 
 const STORAGE_AUTH     = 'fenix_admin_session'
 const ADMIN_PASSWORD   = 'fenix2024'
@@ -70,6 +71,8 @@ export function AdminProvider({ children }) {
   const [importError, setImportError]            = useState(null)
   const [currencySettings, setCurrencySettings]  = useState({ usdArsRate: 1510, updatedAt: null })
   const [supplierSettings, setSupplierSettings]  = useState([])
+  const [subcategories, setSubcategories]        = useState([])
+  const [productTypes, setProductTypes]          = useState([])
 
   // ── fetchCatalog — trae el catálogo público publicado (sin auth) ─────────
   const fetchCatalog = useCallback(async () => {
@@ -363,6 +366,87 @@ export function AdminProvider({ children }) {
     return data
   }, [])
 
+  // ── fetchSubcategories/fetchProductTypes + create/delete ─────────────────
+  // Subcategorías (nivel 2) y tipos/clasificación (nivel 3) que el admin agrega
+  // a mano, además del árbol "de fábrica" (src/data/categoryTree.js). La
+  // lectura es pública (la usan el mega-menú del header y /products, no solo
+  // el admin) — se trae al montar la app, sin esperar a que haya sesión.
+  const fetchSubcategories = useCallback(async () => {
+    const res = await fetch(`${API_BASE}/api/subcategories`)
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error || 'No se pudieron cargar las subcategorías')
+    setSubcategories(data)
+    return data
+  }, [])
+
+  const createSubcategory = useCallback(async (category, name) => {
+    const res = await fetch(`${API_BASE}/api/subcategories`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-admin-token': ADMIN_PASSWORD },
+      body: JSON.stringify({ category, name }),
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error || 'No se pudo crear la subcategoría')
+    setSubcategories(current => [...current, data])
+    return data
+  }, [])
+
+  const deleteSubcategory = useCallback(async (id) => {
+    const res = await fetch(`${API_BASE}/api/subcategories/${id}`, {
+      method: 'DELETE',
+      headers: { 'x-admin-token': ADMIN_PASSWORD },
+    })
+    if (!res.ok && res.status !== 204) {
+      const data = await res.json().catch(() => ({}))
+      throw new Error(data.error || 'No se pudo eliminar la subcategoría')
+    }
+    setSubcategories(current => current.filter(s => s.id !== id))
+  }, [])
+
+  const fetchProductTypes = useCallback(async () => {
+    const res = await fetch(`${API_BASE}/api/product-types`)
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error || 'No se pudieron cargar los tipos de producto')
+    setProductTypes(data)
+    return data
+  }, [])
+
+  const createProductType = useCallback(async (category, subcategory, name) => {
+    const res = await fetch(`${API_BASE}/api/product-types`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-admin-token': ADMIN_PASSWORD },
+      body: JSON.stringify({ category, subcategory, name }),
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error || 'No se pudo crear el tipo de producto')
+    setProductTypes(current => [...current, data])
+    return data
+  }, [])
+
+  const deleteProductType = useCallback(async (id) => {
+    const res = await fetch(`${API_BASE}/api/product-types/${id}`, {
+      method: 'DELETE',
+      headers: { 'x-admin-token': ADMIN_PASSWORD },
+    })
+    if (!res.ok && res.status !== 204) {
+      const data = await res.json().catch(() => ({}))
+      throw new Error(data.error || 'No se pudo eliminar el tipo de producto')
+    }
+    setProductTypes(current => current.filter(t => t.id !== id))
+  }, [])
+
+  useEffect(() => {
+    fetchSubcategories().catch(() => {})
+    fetchProductTypes().catch(() => {})
+  }, [fetchSubcategories, fetchProductTypes])
+
+  // Árbol de categorías "en vivo": el estático de categoryTree.js + lo que el
+  // admin haya agregado. Lo usan el mega-menú, /products y el panel de admin.
+  const categoryTree = useMemo(
+    () => buildCategoryTree(subcategories, productTypes),
+    [subcategories, productTypes]
+  )
+
   useEffect(() => {
     if (isAdmin) {
       fetchCurrencySettings().catch(() => {})
@@ -605,6 +689,9 @@ export function AdminProvider({ children }) {
       importResult, importLoading, importError,
       currencySettings, fetchCurrencySettings, updateCurrencySettings,
       supplierSettings, fetchSupplierSettings, updateSupplierCurrency,
+      subcategories, fetchSubcategories, createSubcategory, deleteSubcategory,
+      productTypes, fetchProductTypes, createProductType, deleteProductType,
+      categoryTree,
       fetchInventory, fetchInventoryItem, createInventoryItem, updateInventoryItem, deleteInventoryItem,
       fetchInventorySelectionIds, applyInventoryBatch,
       adjustInventoryStocks, uploadInventoryFile, uploadProductImage,
