@@ -1,8 +1,7 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAdmin } from '../../context/AdminContext'
-import { CATEGORY_NAV_LABEL } from '../../data/products'
-import { getSubcategoryOptions, getProductTypeOptions } from '../../data/categoryTree'
+import { getCategoryValue, getSubcategoryOptions, getProductTypeOptions } from '../../data/categoryTree'
 import FenixLogo from '../../assets/FenixLogo'
 import OverviewDashboard from './OverviewDashboard'
 
@@ -29,7 +28,6 @@ const C = {
 }
 const ADMIN_FONT = "var(--font-sans)"
 
-const CATS = Object.keys(CATEGORY_NAV_LABEL)
 
 const fmt = n =>
   new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(n)
@@ -436,6 +434,7 @@ function ProductModal({ product, onSave, onClose, publishOnSave = false }) {
   const valid = (!isNew || form.codigo.trim()) && (!willBePublished || (form.name.trim() && form.price && Number(form.price) > 0))
   const subOptions = getSubcategoryOptions(form.category, categoryTree).map(node => node.label)
   const typeOptions = getProductTypeOptions(form.category, form.subcategory, categoryTree).map(node => node.label)
+  const categoryOptions = categoryTree.map(node => ({ value: getCategoryValue(node), label: node.label }))
   const usdArsRate = Number(currencySettings.usdArsRate) || 1510
 
   const setColor = (idx, key, value) => setForm(f => ({
@@ -604,7 +603,7 @@ function ProductModal({ product, onSave, onClose, publishOnSave = false }) {
               style={inp}
             />
             <datalist id="category-options">
-              {CATS.map(c => <option key={c} value={c} />)}
+              {categoryOptions.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
             </datalist>
           </div>
 
@@ -860,20 +859,28 @@ const MONTH_NAMES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','A
 const PENDING_DELIVERY_STATUSES = ['paid', 'preparing', 'shipped']
 
 function OverviewTab({ products }) {
-  const { orders, fetchOrders, updateOrderStatus } = useAdmin()
+  const { orders, fetchOrders, updateOrderStatus, categoryTree } = useAdmin()
   const [selectedOrder, setSelectedOrder] = useState(null)
+  const [statusToast, setStatusToast] = useState(null)
 
   useEffect(() => {
     fetchOrders({ limit: 200 })
   }, [fetchOrders])
 
+  useEffect(() => {
+    if (!statusToast) return undefined
+    const timeout = setTimeout(() => setStatusToast(null), 3800)
+    return () => clearTimeout(timeout)
+  }, [statusToast])
+
   const inStock    = products.filter(p => p.inStock).length
   const outOfStock = products.length - inStock
   const withOffer  = products.filter(p => p.originalPrice).length
 
-  const byCat = CATS.map(cat => {
+  const byCat = categoryTree.map(node => {
+    const cat = getCategoryValue(node)
     const items = products.filter(p => p.category === cat)
-    return { cat, count: items.length, inStock: items.filter(p => p.inStock).length }
+    return { cat, label: node.label, count: items.length, inStock: items.filter(p => p.inStock).length }
   })
 
   const lowStock = products.filter(p => p.stock !== undefined && p.stock <= 5 && p.inStock)
@@ -902,8 +909,18 @@ function OverviewTab({ products }) {
     .sort((a, b) => new Date(a.pickup_date) - new Date(b.pickup_date))
 
   async function handleStatusChange(id, status) {
-    await updateOrderStatus(id, status)
-    fetchOrders({ limit: 200 })
+    const order = orders.find(item => item.id === id)
+    try {
+      await updateOrderStatus(id, status)
+      fetchOrders({ limit: 200 })
+      setStatusToast({
+        message: `Pedido #${order?.order_number || id}: estado cambiado a ${STATUS_LABEL[status] || status}`,
+        tone: 'success', id: Date.now(),
+      })
+    } catch (error) {
+      setStatusToast({ message: error.message || 'No se pudo actualizar el estado del pedido', tone: 'error', id: Date.now() })
+      throw error
+    }
   }
 
   const StatCard = ({ label, value, accent }) => (
@@ -919,6 +936,19 @@ function OverviewTab({ products }) {
 
   return (
     <div>
+      {statusToast && (
+        <div role="status" aria-live="polite" style={{
+          position: 'fixed', top: 18, right: 20, zIndex: 3200,
+          maxWidth: 'min(410px, calc(100vw - 40px))',
+          background: statusToast.tone === 'error' ? '#991b1b' : '#166534', color: '#fff',
+          borderRadius: 9, padding: '11px 14px', boxShadow: '0 12px 30px rgba(15,23,42,.28)',
+          display: 'flex', alignItems: 'center', gap: 12,
+          fontSize: 12.5, fontWeight: 700, animation: 'fnx-notice-in .2s ease-out both',
+        }}>
+          <span style={{ flex: 1 }}>{statusToast.message}</span>
+          <button type="button" aria-label="Cerrar notificación" onClick={() => setStatusToast(null)} style={{ border: 0, background: '#fff', color: '#111827', borderRadius: 5, width: 23, height: 23, cursor: 'pointer', fontWeight: 900 }}>×</button>
+        </div>
+      )}
       {/* ── Ventas del mes ── */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginBottom: 28 }}>
         {/* Total recaudado */}
@@ -1067,13 +1097,13 @@ function OverviewTab({ products }) {
 
       <h3 style={sectionTitle}>Productos por categoría</h3>
       <div style={{ background: C.white, borderRadius: 10, border: `1px solid ${C.border}`, overflow: 'hidden' }}>
-        {byCat.map(({ cat, count, inStock }, i) => (
+        {byCat.map(({ cat, label, count, inStock }, i) => (
           <div key={cat} style={{
             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
             padding: '14px 20px',
             borderBottom: i < byCat.length - 1 ? `1px solid ${C.hairline}` : 'none',
           }}>
-            <span style={{ fontSize: 14, color: C.ink }}>{cat}</span>
+            <span style={{ fontSize: 14, color: C.ink }}>{label}</span>
             <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
               <span style={{ fontSize: 13, color: C.text3 }}>{count} productos</span>
               <span style={{
@@ -1127,7 +1157,8 @@ function OverviewTab({ products }) {
 
 // ── StoreTab ──────────────────────────────────────────────────────────────────
 function StoreTab({ products, onUpdate, onDelete }) {
-  const { fetchInventoryItem } = useAdmin()
+  const { fetchInventoryItem, categoryTree } = useAdmin()
+  const categoryOptions = categoryTree.map(node => ({ value: getCategoryValue(node), label: node.label }))
   const [search, setSearch]     = useState('')
   const [catFilter, setCat]     = useState('Todas')
   const [editProduct, setEdit]  = useState(null)
@@ -1206,20 +1237,20 @@ function StoreTab({ products, onUpdate, onDelete }) {
           style={{ ...inp, flex: 1, minWidth: 180 }}
         />
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          {['Todas', ...CATS].map(c => (
+          {[{ value: 'Todas', label: 'Todas' }, ...categoryOptions].map(c => (
             <button
-              key={c}
-              onClick={() => setCat(c)}
+              key={c.value}
+              onClick={() => setCat(c.value)}
               style={{
                 padding: '6px 14px', borderRadius: 20, border: 'none', cursor: 'pointer',
                 fontSize: 11, fontFamily: 'inherit', fontWeight: 600,
                 letterSpacing: '0.04em',
-                background: catFilter === c ? C.red : C.hairline,
-                color: catFilter === c ? '#fff' : C.text2,
+                background: catFilter === c.value ? C.red : C.hairline,
+                color: catFilter === c.value ? '#fff' : C.text2,
                 transition: 'all 0.15s',
               }}
             >
-              {c === 'Todas' ? 'Todas' : CATEGORY_NAV_LABEL[c]}
+              {c.label}
             </button>
           ))}
         </div>
@@ -1344,38 +1375,61 @@ function StoreTab({ products, onUpdate, onDelete }) {
 // `categoryTree` en AdminContext y `buildCategoryTree` en data/categoryTree.js).
 function CategoriesTab() {
   const {
-    categoryTree, subcategories, productTypes,
-    createSubcategory, deleteSubcategory, createProductType, deleteProductType,
+    categoryTree,
+    createSubcategory, updateSubcategory, deleteSubcategory,
+    createProductType, updateProductType, deleteProductType,
+    categoryCustomizations, saveCategoryCustomization,
   } = useAdmin()
 
-  // ── Nueva subcategoría ──
-  const [subCategory, setSubCategory] = useState(CATS[0])
+  const categoryOptions = categoryTree.map(node => ({ value: getCategoryValue(node), label: node.label }))
+  const [subCategory, setSubCategory] = useState(categoryOptions[0]?.value || '')
   const [subName, setSubName]         = useState('')
   const [savingSub, setSavingSub]     = useState(false)
-  const [subError, setSubError]       = useState('')
+  const [typeCategory, setTypeCategory] = useState(categoryOptions[0]?.value || '')
+  const [typeSubcategory, setTypeSubcategory] = useState('')
+  const [typeName, setTypeName] = useState('')
+  const [savingType, setSavingType] = useState(false)
+  const [nameDrafts, setNameDrafts] = useState({})
+  const [savingEdit, setSavingEdit] = useState('')
+  const [toast, setToast] = useState(null)
+  const [openCategory, setOpenCategory] = useState(
+    categoryTree[0]?._taxonomy?.category || getCategoryValue(categoryTree[0]) || ''
+  )
+
+  const notify = (message, tone = 'success') => setToast({ message, tone, id: Date.now() })
+
+  useEffect(() => {
+    if (!toast) return undefined
+    const timeout = setTimeout(() => setToast(null), 3800)
+    return () => clearTimeout(timeout)
+  }, [toast])
+
+  useEffect(() => {
+    const values = categoryOptions.map(option => option.value)
+    if (!values.includes(subCategory)) setSubCategory(values[0] || '')
+    if (!values.includes(typeCategory)) setTypeCategory(values[0] || '')
+  }, [categoryTree]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    const identities = categoryTree.map(node => node._taxonomy?.category || getCategoryValue(node))
+    if (openCategory && !identities.includes(openCategory)) setOpenCategory(identities[0] || '')
+  }, [categoryTree, openCategory])
 
   const handleAddSub = async (e) => {
     e.preventDefault()
     const trimmed = subName.trim()
     if (!trimmed) return
-    setSubError('')
     setSavingSub(true)
     try {
       await createSubcategory(subCategory, trimmed)
       setSubName('')
+      notify(`Subcategoría “${trimmed}” creada`)
     } catch (err) {
-      setSubError(err.message)
+      notify(err.message, 'error')
     } finally {
       setSavingSub(false)
     }
   }
-
-  // ── Nuevo tipo / clasificación ──
-  const [typeCategory, setTypeCategory]       = useState(CATS[0])
-  const [typeSubcategory, setTypeSubcategory] = useState('')
-  const [typeName, setTypeName]               = useState('')
-  const [savingType, setSavingType]           = useState(false)
-  const [typeError, setTypeError]             = useState('')
 
   const typeSubcategoryOptions = getSubcategoryOptions(typeCategory, categoryTree).map(node => node.label)
 
@@ -1390,184 +1444,242 @@ function CategoriesTab() {
     e.preventDefault()
     const trimmed = typeName.trim()
     if (!trimmed || !typeSubcategory) return
-    setTypeError('')
     setSavingType(true)
     try {
       await createProductType(typeCategory, typeSubcategory, trimmed)
       setTypeName('')
+      notify(`Tipo “${trimmed}” creado`)
     } catch (err) {
-      setTypeError(err.message)
+      notify(err.message, 'error')
     } finally {
       setSavingType(false)
     }
   }
 
-  // ── Árbol completo, para ver y borrar lo agregado ──
-  const [treeError, setTreeError] = useState('')
-  const customSubcategoryId = (cat, name) => subcategories.find(s => s.category === cat && s.name === name)?.id
-  const customTypeId = (cat, sub, name) => productTypes.find(t => t.category === cat && t.subcategory === sub && t.name === name)?.id
+  const nodeKey = node => JSON.stringify(node._taxonomy)
 
-  const handleDeleteSub = async (id) => {
-    setTreeError('')
+  const handleSaveEdit = async (event, node) => {
+    event?.preventDefault()
+    event?.stopPropagation()
+    const key = nodeKey(node)
+    const name = (nameDrafts[key] ?? node.label).trim()
+    if (!name || name === node.label) {
+      setNameDrafts(current => {
+        const next = { ...current }
+        delete next[key]
+        return next
+      })
+      return
+    }
+    const normalizedName = name.toLocaleLowerCase('es')
+    const meta = node._taxonomy
+    let siblings = []
+    if (meta.level === 'category') siblings = categoryTree
+    else if (meta.level === 'subcategory') siblings = categoryTree.find(category => category.children?.includes(node))?.children || []
+    else siblings = categoryTree.flatMap(category => category.children || []).find(subcategory => subcategory.children?.includes(node))?.children || []
+    if (siblings.some(sibling => sibling !== node && sibling.label.toLocaleLowerCase('es') === normalizedName)) {
+      notify('Ya existe otro elemento con ese nombre en el mismo nivel', 'error')
+      return
+    }
+    setSavingEdit(key)
     try {
-      await deleteSubcategory(id)
+      if (meta.source === 'custom' && meta.level === 'subcategory') await updateSubcategory(meta.id, name)
+      else if (meta.source === 'custom' && meta.level === 'type') await updateProductType(meta.id, name)
+      else await saveCategoryCustomization({ ...meta, source: undefined, label: name, hidden: false })
+      setNameDrafts(current => {
+        const next = { ...current }
+        delete next[key]
+        return next
+      })
+      notify(`Nombre cambiado a “${name}”`)
     } catch (err) {
-      setTreeError(err.message)
+      notify(err.message, 'error')
+    } finally {
+      setSavingEdit('')
     }
   }
 
-  const handleDeleteType = async (id) => {
-    setTreeError('')
+  const handleDelete = async (event, node) => {
+    event?.preventDefault()
+    event?.stopPropagation()
+    if (!window.confirm(`¿Borrar “${node.label}” de las categorías? Los productos no se borrarán.`)) return
     try {
-      await deleteProductType(id)
+      const meta = node._taxonomy
+      if (meta.source === 'custom' && meta.level === 'subcategory') await deleteSubcategory(meta.id)
+      else if (meta.source === 'custom' && meta.level === 'type') await deleteProductType(meta.id)
+      else await saveCategoryCustomization({ ...meta, source: undefined, hidden: true })
+      notify(`“${node.label}” fue eliminado`)
     } catch (err) {
-      setTreeError(err.message)
+      notify(err.message, 'error')
     }
   }
+
+  const restoreCustomization = async item => {
+    try {
+      await saveCategoryCustomization({
+        level: item.level, category: item.category,
+        subcategory: item.subcategory, name: item.name, hidden: false,
+      })
+      notify(`“${item.label || item.name || item.category}” fue restaurado`)
+    } catch (err) {
+      notify(err.message, 'error')
+    }
+  }
+
+  const actionButton = (background, color) => ({
+    border: 'none', borderRadius: 6, background, color, cursor: 'pointer',
+    fontSize: 11.5, fontWeight: 700, padding: '6px 9px', lineHeight: 1,
+  })
+
+  const renderName = (node, compact = false) => {
+    const key = nodeKey(node)
+    const value = nameDrafts[key] ?? node.label
+    const changed = value.trim() !== node.label && Boolean(value.trim())
+    return (
+      <form
+        onSubmit={event => handleSaveEdit(event, node)}
+        onClick={event => event.stopPropagation()}
+        style={{ display: 'inline-flex', alignItems: 'center', gap: 4, flex: compact ? '0 1 auto' : 1, minWidth: 0 }}
+      >
+        <input
+          aria-label={`Editar ${node.label}`}
+          title="Escribí para cambiar el nombre y presioná Enter para guardar"
+          value={value}
+          size={compact ? Math.max(5, Math.min(value.length + 1, 30)) : undefined}
+          onChange={event => setNameDrafts(current => ({ ...current, [key]: event.target.value }))}
+          onKeyDown={event => {
+            if (event.key === 'Escape') {
+              setNameDrafts(current => {
+                const next = { ...current }
+                delete next[key]
+                return next
+              })
+              event.currentTarget.blur()
+            }
+          }}
+          onFocus={event => { event.currentTarget.style.borderBottomColor = '#64748b' }}
+          onBlur={event => { event.currentTarget.style.borderBottomColor = 'transparent' }}
+          style={{
+            minWidth: compact ? 50 : 120, width: compact ? 'auto' : '100%', maxWidth: compact ? 280 : 520,
+            border: 'none', borderBottom: '1px solid transparent', borderRadius: 0,
+            outline: 'none', background: 'transparent', color: C.ink,
+            padding: compact ? '2px 1px' : '3px 2px', font: 'inherit',
+            fontSize: compact ? 12 : 13, fontWeight: 700,
+          }}
+        />
+        {changed && (
+          <button
+            type="submit"
+            disabled={savingEdit === key}
+            title="Guardar nombre"
+            aria-label={`Guardar ${value}`}
+            style={{
+              border: 'none', borderRadius: 5, background: '#166534', color: '#fff',
+              width: 22, height: 22, padding: 0, cursor: 'pointer', fontSize: 13,
+              fontWeight: 900, lineHeight: 1, flexShrink: 0,
+            }}
+          >
+            {savingEdit === key ? '…' : '✓'}
+          </button>
+        )}
+      </form>
+    )
+  }
+
+  const renderActions = node => (
+    <button
+      type="button"
+      onClick={event => handleDelete(event, node)}
+      title={`Eliminar ${node.label}`}
+      aria-label={`Eliminar ${node.label}`}
+      style={{
+        border: 'none', background: 'transparent', color: '#dc2626', cursor: 'pointer',
+        width: 22, height: 22, padding: 0, fontSize: 17, fontWeight: 900,
+        lineHeight: 1, flexShrink: 0,
+      }}
+    >
+      ×
+    </button>
+  )
+
+  const hiddenItems = categoryCustomizations.filter(item => item.hidden)
 
   return (
-    <div>
-      <h3 style={sectionTitle}>Nueva subcategoría</h3>
-      <div style={{
-        background: C.white, borderRadius: 10, border: `1px solid ${C.border}`,
-        padding: '20px 24px', marginBottom: 28,
-      }}>
-        <p style={{ fontSize: 13, color: C.text3, margin: '0 0 16px' }}>
-          Agregá una subcategoría dentro de una categoría existente (ej. "Ventiladores de Techo" dentro de Herramientas). Va a aparecer en el menú "Categoría" del header y en los filtros de /products.
-        </p>
-        <form onSubmit={handleAddSub} style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-            <label style={lbl}>Categoría</label>
-            <select value={subCategory} onChange={e => setSubCategory(e.target.value)} style={{ ...inp, width: 220 }}>
-              {CATS.map(c => <option key={c} value={c}>{CATEGORY_NAV_LABEL[c]}</option>)}
-            </select>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 5, flex: 1, minWidth: 220 }}>
-            <label style={lbl}>Nombre de la subcategoría</label>
-            <input value={subName} onChange={e => setSubName(e.target.value)} placeholder="ej: Ventiladores de Techo" style={inp} />
-          </div>
-          <button
-            type="submit"
-            disabled={savingSub || !subName.trim()}
-            style={{
-              ...solidBtn,
-              background: !subName.trim() ? '#ddd' : C.red,
-              color: !subName.trim() ? '#aaa' : '#fff',
-              cursor: savingSub || !subName.trim() ? 'not-allowed' : 'pointer',
-            }}
-          >
-            {savingSub ? 'Agregando...' : 'Agregar'}
-          </button>
-        </form>
-        {subError && <p style={{ fontSize: 12, color: C.red, margin: '10px 0 0' }}>{subError}</p>}
-      </div>
+    <div style={{ maxWidth: 1320 }}>
+      {toast && (
+        <div role="status" aria-live="polite" style={{
+          position: 'fixed', top: 18, right: 20, zIndex: 2500, maxWidth: 'min(390px, calc(100vw - 40px))',
+          background: toast.tone === 'error' ? '#991b1b' : '#166534', color: '#fff',
+          borderRadius: 9, padding: '11px 14px', boxShadow: '0 12px 30px rgba(15,23,42,.28)',
+          display: 'flex', alignItems: 'center', gap: 12, fontSize: 12.5, fontWeight: 700,
+          animation: 'fnx-notice-in .2s ease-out both',
+        }}>
+          <span style={{ flex: 1 }}>{toast.message}</span>
+          <button type="button" aria-label="Cerrar notificación" onClick={() => setToast(null)} style={{ border: 0, background: '#fff', color: '#111827', borderRadius: 5, width: 23, height: 23, cursor: 'pointer', fontWeight: 900 }}>×</button>
+        </div>
+      )}
 
-      <h3 style={sectionTitle}>Nuevo tipo / clasificación</h3>
-      <div style={{
-        background: C.white, borderRadius: 10, border: `1px solid ${C.border}`,
-        padding: '20px 24px', marginBottom: 28,
-      }}>
-        <p style={{ fontSize: 13, color: C.text3, margin: '0 0 16px' }}>
-          Es el tercer nivel, dentro de una subcategoría (ej. "Unipolares" dentro de "Cables Normalizados"). Podés usar una subcategoría de fábrica o una que hayas creado arriba.
-        </p>
-        <form onSubmit={handleAddType} style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-            <label style={lbl}>Categoría</label>
-            <select value={typeCategory} onChange={e => setTypeCategory(e.target.value)} style={{ ...inp, width: 220 }}>
-              {CATS.map(c => <option key={c} value={c}>{CATEGORY_NAV_LABEL[c]}</option>)}
-            </select>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-            <label style={lbl}>Subcategoría</label>
-            <select
-              value={typeSubcategory}
-              onChange={e => setTypeSubcategory(e.target.value)}
-              disabled={!typeSubcategoryOptions.length}
-              style={{ ...inp, width: 220 }}
-            >
-              {typeSubcategoryOptions.length === 0 && <option value="">Sin subcategorías</option>}
-              {typeSubcategoryOptions.map(s => <option key={s} value={s}>{s}</option>)}
-            </select>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 5, flex: 1, minWidth: 200 }}>
-            <label style={lbl}>Nombre del tipo</label>
-            <input value={typeName} onChange={e => setTypeName(e.target.value)} placeholder="ej: Unipolares" style={inp} />
-          </div>
-          <button
-            type="submit"
-            disabled={savingType || !typeName.trim() || !typeSubcategory}
-            style={{
-              ...solidBtn,
-              background: !typeName.trim() || !typeSubcategory ? '#ddd' : C.red,
-              color: !typeName.trim() || !typeSubcategory ? '#aaa' : '#fff',
-              cursor: savingType || !typeName.trim() || !typeSubcategory ? 'not-allowed' : 'pointer',
-            }}
-          >
-            {savingType ? 'Agregando...' : 'Agregar'}
-          </button>
-        </form>
-        {typeError && <p style={{ fontSize: 12, color: C.red, margin: '10px 0 0' }}>{typeError}</p>}
-      </div>
+      <details style={{ background: C.white, border: `1px solid ${C.border}`, borderRadius: 10, marginBottom: 16 }}>
+        <summary style={{ padding: '13px 16px', cursor: 'pointer', fontWeight: 700, fontSize: 13.5 }}>Agregar subcategoría o tipo</summary>
+        <div style={{ borderTop: `1px solid ${C.hairline}`, padding: 14, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(390px, 1fr))', gap: 14 }}>
+          <form onSubmit={handleAddSub} style={{ border: `1px solid ${C.hairline}`, borderRadius: 8, padding: 12 }}>
+            <strong style={{ display: 'block', fontSize: 13, marginBottom: 10 }}>Nueva subcategoría</strong>
+            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(140px, .65fr) minmax(180px, 1fr) auto', gap: 8 }}>
+              <select value={subCategory} onChange={e => setSubCategory(e.target.value)} style={inp}>{categoryOptions.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}</select>
+              <input value={subName} onChange={e => setSubName(e.target.value)} placeholder="Nombre" style={inp} />
+              <button type="submit" disabled={savingSub || !subName.trim()} style={{ ...solidBtn, background: subName.trim() ? C.red : '#9ca3af' }}>{savingSub ? '...' : 'Agregar'}</button>
+            </div>
+          </form>
+          <form onSubmit={handleAddType} style={{ border: `1px solid ${C.hairline}`, borderRadius: 8, padding: 12 }}>
+            <strong style={{ display: 'block', fontSize: 13, marginBottom: 10 }}>Nuevo tipo / clasificación</strong>
+            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(120px, .55fr) minmax(140px, .7fr) minmax(150px, 1fr) auto', gap: 8 }}>
+              <select value={typeCategory} onChange={e => setTypeCategory(e.target.value)} style={inp}>{categoryOptions.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}</select>
+              <select value={typeSubcategory} onChange={e => setTypeSubcategory(e.target.value)} style={inp}>{typeSubcategoryOptions.map(s => <option key={s} value={s}>{s}</option>)}</select>
+              <input value={typeName} onChange={e => setTypeName(e.target.value)} placeholder="Nombre" style={inp} />
+              <button type="submit" disabled={savingType || !typeName.trim() || !typeSubcategory} style={{ ...solidBtn, background: typeName.trim() && typeSubcategory ? C.red : '#9ca3af' }}>{savingType ? '...' : 'Agregar'}</button>
+            </div>
+          </form>
+        </div>
+      </details>
 
-      <h3 style={{ ...sectionTitle, margin: 0 }}>Árbol de categorías</h3>
-      <p style={{ fontSize: 12.5, color: C.muted, margin: '4px 0 14px' }}>
-        Así se ve en la tienda: el menú "Categoría" del header y los filtros de /products usan esta misma estructura. Lo gris es de fábrica; lo ámbar lo agregaste vos y se puede borrar.
-      </p>
-      {treeError && <p style={{ fontSize: 12, color: C.red, margin: '0 0 10px' }}>{treeError}</p>}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-        {CATS.map(cat => {
-          const subNodes = getSubcategoryOptions(cat, categoryTree)
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', marginBottom: 10 }}>
+        <div><h3 style={{ ...sectionTitle, margin: 0 }}>Árbol de categorías</h3><p style={{ fontSize: 12, color: C.muted, margin: '3px 0 0' }}>Escribí directamente sobre un nombre; guardalo con Enter o con el tilde que aparecerá.</p></div>
+        {hiddenItems.length > 0 && <details style={{ position: 'relative' }}><summary style={{ cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>Eliminados ({hiddenItems.length})</summary><div style={{ position: 'absolute', right: 0, top: 28, zIndex: 20, width: 320, background: '#fff', border: `1px solid ${C.border}`, borderRadius: 8, boxShadow: '0 12px 28px rgba(15,23,42,.18)', padding: 8 }}>{hiddenItems.map(item => <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 7, borderBottom: `1px solid ${C.hairline}` }}><span style={{ flex: 1, fontSize: 12 }}>{item.label || item.name || item.category}</span><button type="button" onClick={() => restoreCustomization(item)} style={actionButton('#1f2937', '#fff')}>Restaurar</button></div>)}</div></details>}
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {categoryTree.map(catNode => {
+          const cat = getCategoryValue(catNode)
+          const categoryIdentity = catNode._taxonomy?.category || cat
+          const subNodes = catNode.children || []
           return (
-            <div key={cat} style={{ background: C.white, borderRadius: 10, border: `1px solid ${C.border}`, padding: '16px 20px' }}>
-              <div style={{ fontSize: 14, fontWeight: 600, color: C.ink, marginBottom: 10 }}>{CATEGORY_NAV_LABEL[cat]}</div>
-              {subNodes.length === 0 ? (
-                <span style={{ fontSize: 12, color: C.muted }}>Sin subcategorías todavía.</span>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <details key={categoryIdentity} open={openCategory === categoryIdentity} style={{ background: C.white, borderRadius: 9, border: `1px solid ${C.border}` }}>
+              <summary
+                onClick={event => {
+                  if (event.target.closest('input, button, form')) return
+                  event.preventDefault()
+                  setOpenCategory(current => current === categoryIdentity ? '' : categoryIdentity)
+                }}
+                style={{ padding: '11px 13px', cursor: 'pointer' }}
+              >
+                <span style={{ display: 'inline-flex', width: 'calc(100% - 18px)', alignItems: 'center', justifyContent: 'space-between', gap: 10, verticalAlign: 'middle' }}>
+                  {renderName(catNode)}{renderActions(catNode)}
+                </span>
+              </summary>
+              <div style={{ borderTop: `1px solid ${C.hairline}`, padding: '8px 10px 10px' }}>
+                {subNodes.length === 0 ? <span style={{ fontSize: 12, color: C.muted }}>Sin subcategorías.</span> : <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                   {subNodes.map(subNode => {
-                    const subId = customSubcategoryId(cat, subNode.label)
                     const typeNodes = subNode.children || []
                     return (
-                      <div key={subNode.label} style={{ border: `1px solid ${C.hairline}`, borderRadius: 8, padding: '10px 12px' }}>
+                      <div key={`${subNode._taxonomy?.source}-${subNode._taxonomy?.id || subNode._taxonomy?.name}`} style={{ border: `1px solid ${C.hairline}`, borderRadius: 7, padding: '7px 9px' }}>
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                          <span style={{
-                            fontSize: 12.5, fontWeight: 600,
-                            color: subId ? C.amberDark : C.text2,
-                          }}>
-                            {subNode.label}
-                          </span>
-                          {subId && (
-                            <button
-                              onClick={() => handleDeleteSub(subId)}
-                              title="Eliminar subcategoría"
-                              style={{ border: 'none', background: 'transparent', color: C.amberDark, cursor: 'pointer', fontSize: 11.5 }}
-                            >
-                              Eliminar ✕
-                            </button>
-                          )}
+                          {renderName(subNode)}{renderActions(subNode)}
                         </div>
                         {typeNodes.length > 0 && (
-                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 7 }}>
                             {typeNodes.map(typeNode => {
-                              const typeId = customTypeId(cat, subNode.label, typeNode.label)
                               return (
-                                <span
-                                  key={typeNode.label}
-                                  style={{
-                                    ...pill(typeId ? C.amberLight : C.hairline, typeId ? C.amberDark : C.text3),
-                                    display: 'inline-flex', alignItems: 'center', gap: 6,
-                                  }}
-                                >
-                                  {typeNode.label}
-                                  {typeId && (
-                                    <button
-                                      onClick={() => handleDeleteType(typeId)}
-                                      title="Eliminar tipo"
-                                      style={{ border: 'none', background: 'transparent', color: C.amberDark, cursor: 'pointer', fontSize: 12, lineHeight: 1, padding: 0 }}
-                                    >
-                                      ✕
-                                    </button>
-                                  )}
+                                <span key={`${typeNode._taxonomy?.source}-${typeNode._taxonomy?.id || `${typeNode._taxonomy?.subcategory}-${typeNode._taxonomy?.name}`}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: '#e5e7eb', color: '#111827', borderRadius: 7, padding: '4px 5px 4px 9px' }}>
+                                  {renderName(typeNode, true)}{renderActions(typeNode)}
                                 </span>
                               )
                             })}
@@ -1576,9 +1688,9 @@ function CategoriesTab() {
                       </div>
                     )
                   })}
-                </div>
-              )}
-            </div>
+                </div>}
+              </div>
+            </details>
           )
         })}
       </div>
@@ -2320,6 +2432,17 @@ function OrdersTab() {
   const [selectedOrder, setSelectedOrder] = useState(null)
   const [updatingOrderIds, setUpdatingOrderIds] = useState(() => new Set())
   const [quickStatusError, setQuickStatusError] = useState('')
+  const [statusToast, setStatusToast] = useState(null)
+
+  const notifyStatus = (message, tone = 'success') => {
+    setStatusToast({ message, tone, id: Date.now() })
+  }
+
+  useEffect(() => {
+    if (!statusToast) return undefined
+    const timeout = setTimeout(() => setStatusToast(null), 3800)
+    return () => clearTimeout(timeout)
+  }, [statusToast])
 
   useEffect(() => {
     fetchOrders({ limit: 500 })
@@ -2360,8 +2483,15 @@ function OrdersTab() {
   [orders])
 
   async function handleStatusChange(id, status) {
-    await updateOrderStatus(id, status)
-    fetchOrders({ limit: 500 })
+    const order = orders.find(item => item.id === id)
+    try {
+      await updateOrderStatus(id, status)
+      fetchOrders({ limit: 500 })
+      notifyStatus(`Pedido #${order?.order_number || id}: estado cambiado a ${STATUS_LABEL[status] || status}`)
+    } catch (error) {
+      notifyStatus(error.message || 'No se pudo actualizar el estado del pedido', 'error')
+      throw error
+    }
   }
 
   async function handleQuickStatusChange(order, status) {
@@ -2375,8 +2505,10 @@ function OrdersTab() {
     setUpdatingOrderIds((current) => new Set(current).add(order.id))
     try {
       await updateOrderStatus(order.id, status)
+      notifyStatus(`Pedido #${order.order_number}: estado cambiado a ${STATUS_LABEL[status] || status}`)
     } catch (error) {
       setQuickStatusError(error.message || 'No se pudo actualizar el estado del pedido.')
+      notifyStatus(error.message || 'No se pudo actualizar el estado del pedido', 'error')
     } finally {
       setUpdatingOrderIds((current) => {
         const next = new Set(current)
@@ -2388,6 +2520,26 @@ function OrdersTab() {
 
   return (
     <div>
+      {statusToast && (
+        <div role="status" aria-live="polite" style={{
+          position: 'fixed', top: 18, right: 20, zIndex: 3200,
+          maxWidth: 'min(410px, calc(100vw - 40px))',
+          background: statusToast.tone === 'error' ? '#991b1b' : '#166534', color: '#fff',
+          borderRadius: 9, padding: '11px 14px', boxShadow: '0 12px 30px rgba(15,23,42,.28)',
+          display: 'flex', alignItems: 'center', gap: 12,
+          fontSize: 12.5, fontWeight: 700, animation: 'fnx-notice-in .2s ease-out both',
+        }}>
+          <span style={{ flex: 1 }}>{statusToast.message}</span>
+          <button
+            type="button"
+            aria-label="Cerrar notificación"
+            onClick={() => setStatusToast(null)}
+            style={{ border: 0, background: '#fff', color: '#111827', borderRadius: 5, width: 23, height: 23, cursor: 'pointer', fontWeight: 900 }}
+          >
+            ×
+          </button>
+        </div>
+      )}
       <div className="adm-work-queues">
         <OperationalOrdersSection
           title="Pedidos a enviar"
@@ -4049,6 +4201,7 @@ function SupplierToolbar({ supplierNames, settings, inventory, selectedSupplier,
 
 function CleosProductEditor({ product, onChange, importId, onUploadImage }) {
   const { categoryTree } = useAdmin()
+  const categoryOptions = categoryTree.map(node => ({ value: getCategoryValue(node), label: node.label }))
   const set = (changes) => onChange({ ...product, ...changes })
   const selectedImage = product.removeImage
     ? null
@@ -4230,7 +4383,7 @@ function CleosProductEditor({ product, onChange, importId, onUploadImage }) {
               style={{ ...inp, marginTop: 4, padding: '7px 8px', fontSize: 12 }}
             >
               <option value="">Sin categoría</option>
-              {CATS.map(category => <option key={category} value={category}>{category}</option>)}
+              {categoryOptions.map(category => <option key={category.value} value={category.value}>{category.label}</option>)}
             </select>
           </label>
           <label style={{ fontSize: 11.5, color: C.text3 }}>
@@ -4269,6 +4422,7 @@ function CleosProductEditor({ product, onChange, importId, onUploadImage }) {
 
 function CleosReviewModal({ parsed, onConfirm, onClose, onUploadImage }) {
   const { categoryTree } = useAdmin()
+  const categoryOptions = categoryTree.map(node => ({ value: getCategoryValue(node), label: node.label }))
   const [products, setProducts] = useState(() => parsed.products.map((product, index) => ({
     ...product,
     key: `${product.code}-${index}`,
@@ -4388,7 +4542,7 @@ function CleosReviewModal({ parsed, onConfirm, onClose, onUploadImage }) {
               style={{ ...inp, width: 190, padding: '7px 8px', fontSize: 11.5 }}
             >
               <option value="">Categoría para aceptados...</option>
-              {CATS.map(category => <option key={category} value={category}>{category}</option>)}
+              {categoryOptions.map(category => <option key={category.value} value={category.value}>{category.label}</option>)}
             </select>
             <select
               value={bulkSubcategory}
@@ -4460,7 +4614,12 @@ function CatalogProductPicker({ row, supplier, onChange }) {
   const [results, setResults] = useState([])
   const [loading, setLoading] = useState(false)
   const [codeError, setCodeError] = useState('')
+  const [mergeDraft, setMergeDraft] = useState(null)
+  const [deleteConfirmId, setDeleteConfirmId] = useState(null)
+  const [replaceDetectedOnChoose, setReplaceDetectedOnChoose] = useState(false)
   const selectedProducts = row.selectedProducts || []
+  const pendingMerges = row.pendingMerges || []
+  const pendingDeletes = row.pendingDeletes || []
 
   const normalizeCode = value => String(value || '')
     .normalize('NFD')
@@ -4477,6 +4636,25 @@ function CatalogProductPicker({ row, supplier, onChange }) {
     .filter(value => /[A-Za-z]/.test(value) && /\d/.test(value))
     .filter(value => /^[A-Za-z0-9][A-Za-z0-9 ./_()+-]*$/.test(value))
   )].slice(0, 8)
+  const recommendedCode = String(row.detectedCode || nearbyCodeCandidates[0] || '').trim()
+
+  const openProductSearch = () => {
+    setCodeError('')
+    setResults([])
+    setQuery(recommendedCode)
+    setReplaceDetectedOnChoose(false)
+    setLoading(recommendedCode.length >= 2)
+    setOpen(true)
+  }
+
+  const closeProductSearch = () => {
+    setOpen(false)
+    setQuery('')
+    setResults([])
+    setLoading(false)
+    setCodeError('')
+    setReplaceDetectedOnChoose(false)
+  }
 
   useEffect(() => {
     if (!open || query.trim().length < 2) {
@@ -4496,20 +4674,23 @@ function CatalogProductPicker({ row, supplier, onChange }) {
     return () => { active = false; clearTimeout(timer) }
   }, [open, query, searchProducts, supplier])
 
-  const choose = (product, selectedCode = query.trim() || row.detectedCode) => {
+  const choose = (product, selectedCode = query.trim() || row.detectedCode, replaceDetectedCode = false) => {
     const selectedProduct = {
       id: product.id,
       codigo: product.codigo,
       name: product.name || null,
       descripcion: product.descripcion || null,
       image_url: product.image_url || null,
+      medida: product.medida || null,
     }
     const nextProducts = selectedProducts.some(selected => selected.id === product.id)
       ? selectedProducts
       : [...selectedProducts, selectedProduct]
     onChange({
       ...row,
-      detectedCode: selectedCode || product.codigo,
+      detectedCode: replaceDetectedCode
+        ? (selectedCode || product.codigo)
+        : (row.detectedCode || selectedCode || product.codigo),
       selectedProducts: nextProducts,
       accepted: Boolean(nextProducts.length && row.selectedImageKey),
     })
@@ -4517,6 +4698,7 @@ function CatalogProductPicker({ row, supplier, onChange }) {
     setQuery('')
     setResults([])
     setCodeError('')
+    setReplaceDetectedOnChoose(false)
   }
 
   const removeProduct = (productId) => {
@@ -4528,6 +4710,117 @@ function CatalogProductPicker({ row, supplier, onChange }) {
     })
   }
 
+  const variantGuess = (product, variantType) => {
+    if (variantType === 'size') return product?.medida || ''
+    return inferPriceColor(product?.codigo, product?.descripcion || product?.name).name || ''
+  }
+
+  const suggestedBaseCode = (leftCode, rightCode) => {
+    const left = String(leftCode || '').trim().toUpperCase()
+    const right = String(rightCode || '').trim().toUpperCase()
+    let index = 0
+    while (index < left.length && index < right.length && left[index] === right[index]) index++
+    const common = left.slice(0, index).replace(/[-_/\s]+$/, '')
+    return common.length >= 3 ? common : left
+  }
+
+  const startMerge = (source) => {
+    const target = selectedProducts.find(product => product.id !== source.id)
+    if (!target) return
+    const sourceColor = inferPriceColor(source.codigo, source.descripcion || source.name)
+    const targetColor = inferPriceColor(target.codigo, target.descripcion || target.name)
+    setMergeDraft({
+      sourceProductId: source.id,
+      targetProductId: target.id,
+      baseCode: suggestedBaseCode(target.codigo, source.codigo),
+      variantType: 'color',
+      targetValue: targetColor.name || '',
+      sourceValue: sourceColor.name || '',
+      targetHex: targetColor.hex || '#CCCCCC',
+      sourceHex: sourceColor.hex || '#CCCCCC',
+    })
+    setDeleteConfirmId(null)
+  }
+
+  const changeMergeType = (variantType) => {
+    if (!mergeDraft) return
+    const source = selectedProducts.find(product => product.id === mergeDraft.sourceProductId)
+    const target = selectedProducts.find(product => product.id === mergeDraft.targetProductId)
+    setMergeDraft({
+      ...mergeDraft,
+      variantType,
+      targetValue: variantGuess(target, variantType),
+      sourceValue: variantGuess(source, variantType),
+    })
+  }
+
+  const changeMergeTarget = (targetProductId) => {
+    const target = selectedProducts.find(product => product.id === targetProductId)
+    const source = selectedProducts.find(product => product.id === mergeDraft?.sourceProductId)
+    const guessedColor = inferPriceColor(target?.codigo, target?.descripcion || target?.name)
+    setMergeDraft(current => ({
+      ...current,
+      targetProductId,
+      baseCode: suggestedBaseCode(target?.codigo, source?.codigo),
+      targetValue: variantGuess(target, current.variantType),
+      targetHex: guessedColor.hex || '#CCCCCC',
+    }))
+  }
+
+  const saveMerge = () => {
+    if (!mergeDraft?.baseCode.trim() || !mergeDraft?.targetValue.trim() || !mergeDraft?.sourceValue.trim()) return
+    const source = selectedProducts.find(product => product.id === mergeDraft.sourceProductId)
+    const target = selectedProducts.find(product => product.id === mergeDraft.targetProductId)
+    if (!source || !target || source.id === target.id) return
+    const merge = {
+      ...mergeDraft,
+      baseCode: mergeDraft.baseCode.trim().toUpperCase(),
+      targetValue: mergeDraft.targetValue.trim(),
+      sourceValue: mergeDraft.sourceValue.trim(),
+      targetCode: target.codigo,
+      sourceCode: source.codigo,
+      sourceProduct: source,
+    }
+    const nextProducts = selectedProducts.filter(product => product.id !== source.id)
+    onChange({
+      ...row,
+      selectedProducts: nextProducts,
+      pendingMerges: [...pendingMerges, merge],
+      accepted: Boolean(nextProducts.length && row.selectedImageKey),
+    })
+    setMergeDraft(null)
+  }
+
+  const queueDelete = (product) => {
+    const nextProducts = selectedProducts.filter(selected => selected.id !== product.id)
+    onChange({
+      ...row,
+      selectedProducts: nextProducts,
+      pendingDeletes: [...pendingDeletes, { productId: product.id, product }],
+      accepted: Boolean(nextProducts.length && row.selectedImageKey && row.accepted),
+    })
+    setDeleteConfirmId(null)
+    setMergeDraft(null)
+  }
+
+  const undoMerge = (index) => {
+    const merge = pendingMerges[index]
+    onChange({
+      ...row,
+      selectedProducts: merge?.sourceProduct ? [...selectedProducts, merge.sourceProduct] : selectedProducts,
+      pendingMerges: pendingMerges.filter((_, mergeIndex) => mergeIndex !== index),
+    })
+  }
+
+  const undoDelete = (index) => {
+    const deletion = pendingDeletes[index]
+    onChange({
+      ...row,
+      selectedProducts: deletion?.product ? [...selectedProducts, deletion.product] : selectedProducts,
+      pendingDeletes: pendingDeletes.filter((_, deleteIndex) => deleteIndex !== index),
+    })
+  }
+
   const useNearbyCode = async (code) => {
     setLoading(true)
     setCodeError('')
@@ -4536,12 +4829,13 @@ function CatalogProductPicker({ row, supplier, onChange }) {
         .filter(product => product.supplier === supplier)
       const exact = found.find(product => normalizeCode(product.codigo) === normalizeCode(code))
       if (exact) {
-        choose(exact, code)
+        choose(exact, code, true)
         return
       }
       setOpen(true)
       setQuery(code)
       setResults(found)
+      setReplaceDetectedOnChoose(true)
       setCodeError(found.length
         ? `No hubo coincidencia exacta para ${code}. Elegí el producto correcto.`
         : `No se encontró el código ${code} dentro de ${supplier}.`)
@@ -4555,26 +4849,111 @@ function CatalogProductPicker({ row, supplier, onChange }) {
       <div>
         <div style={{ display: 'grid', gap: 7 }}>
           {selectedProducts.length ? selectedProducts.map(product => (
-            <div key={product.id} style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '7px 9px', borderRadius: 7, background: C.greenLight, color: C.green, fontSize: 11.5 }}>
+            <div key={product.id} style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '7px 9px', border: `1px solid ${C.dark}`, borderRadius: 7, background: C.dark, color: C.white, fontSize: 11.5 }}>
               <span style={{ flex: 1, minWidth: 0 }}>
                 <strong>{product.codigo}</strong> — {product.name || product.descripcion || 'Sin descripción'}
               </span>
+              {selectedProducts.length > 1 && (
+                <button
+                  type="button"
+                  onClick={() => startMerge(product)}
+                  title={`Unir ${product.codigo} dentro de otro producto seleccionado`}
+                  style={{ ...outlineBtn, padding: '3px 7px', fontSize: 9.5, color: C.dark, borderColor: C.white, background: C.white }}
+                >
+                  Unir
+                </button>
+              )}
+              {deleteConfirmId === product.id ? (
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                  <button type="button" onClick={() => queueDelete(product)} style={{ ...outlineBtn, padding: '3px 7px', fontSize: 9.5, color: C.white, borderColor: C.red, background: C.red }}>Sí, eliminar</button>
+                  <button type="button" onClick={() => setDeleteConfirmId(null)} style={{ ...outlineBtn, padding: '3px 7px', fontSize: 9.5, color: C.dark, borderColor: C.white, background: C.white }}>No</button>
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => { setDeleteConfirmId(product.id); setMergeDraft(null) }}
+                  title={`Eliminar ${product.codigo} al confirmar`}
+                  style={{ border: `1px solid ${C.red}`, borderRadius: 5, background: C.red, color: C.white, cursor: 'pointer', fontSize: 9.5, padding: '3px 7px' }}
+                >
+                  Eliminar
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => removeProduct(product.id)}
                 aria-label={`Quitar ${product.codigo}`}
                 title="Quitar producto"
-                style={{ border: 0, background: 'transparent', color: C.green, cursor: 'pointer', fontSize: 16, lineHeight: 1, padding: '0 2px' }}
+                style={{ border: `1px solid ${C.white}`, borderRadius: 5, background: C.white, color: C.dark, cursor: 'pointer', fontSize: 14, lineHeight: 1, padding: '2px 5px' }}
               >
                 ×
               </button>
             </div>
           )) : (
-            <span style={pill(C.redLight, C.red)}>Sin producto asociado</span>
+            <span style={pill(C.red, C.white)}>Sin producto asociado</span>
           )}
-          <button type="button" onClick={() => setOpen(true)} style={{ ...outlineBtn, justifySelf: 'start', padding: '5px 9px', fontSize: 10.5 }}>
+          <button type="button" onClick={openProductSearch} style={{ ...outlineBtn, justifySelf: 'start', padding: '5px 9px', fontSize: 10.5 }}>
             {selectedProducts.length ? 'Agregar otro producto' : 'Buscar producto'}
           </button>
+          {mergeDraft && (
+            <div style={{ padding: 11, border: `1px solid ${C.dark}`, borderRadius: 8, background: C.dark, color: C.white, boxShadow: '0 6px 18px rgba(17, 24, 39, 0.18)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 8 }}>
+                <strong style={{ fontSize: 11.5, color: C.white }}>Crear un producto base con variantes</strong>
+                <button type="button" onClick={() => setMergeDraft(null)} style={{ border: `1px solid ${C.white}`, borderRadius: 5, background: C.white, cursor: 'pointer', color: C.dark, lineHeight: 1, padding: '3px 6px' }}>×</button>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '145px minmax(0, 1fr)', gap: 7, alignItems: 'center' }}>
+                <label style={{ fontSize: 10.5, color: '#E5E7EB' }}>Tomar datos generales de</label>
+                <select
+                  value={mergeDraft.targetProductId}
+                  onChange={event => changeMergeTarget(event.target.value)}
+                  title="Define de qué producto se conservan el nombre, descripción, categoría e información general. Los dos códigos originales serán variantes."
+                  style={{ ...inp, padding: '6px 7px', fontSize: 11 }}
+                >
+                  {selectedProducts.filter(product => product.id !== mergeDraft.sourceProductId).map(product => (
+                    <option key={product.id} value={product.id}>{product.codigo}</option>
+                  ))}
+                </select>
+                <label style={{ fontSize: 10.5, color: '#E5E7EB' }}>Código del producto unificado</label>
+                <input
+                  value={mergeDraft.baseCode}
+                  maxLength={64}
+                  onChange={event => setMergeDraft(current => ({ ...current, baseCode: event.target.value.toUpperCase() }))}
+                  placeholder="Ej: FE-AP-121"
+                  style={{ ...inp, padding: '6px 7px', fontSize: 11 }}
+                />
+                <label style={{ fontSize: 10.5, color: '#E5E7EB' }}>Tipo de variantes</label>
+                <div style={{ display: 'flex', gap: 5 }}>
+                  <button type="button" onClick={() => changeMergeType('color')} style={{ ...outlineBtn, padding: '4px 8px', fontSize: 10, borderColor: mergeDraft.variantType === 'color' ? C.red : C.white, background: mergeDraft.variantType === 'color' ? C.red : C.white, color: mergeDraft.variantType === 'color' ? C.white : C.dark }}>Colores</button>
+                  <button type="button" onClick={() => changeMergeType('size')} style={{ ...outlineBtn, padding: '4px 8px', fontSize: 10, borderColor: mergeDraft.variantType === 'size' ? C.red : C.white, background: mergeDraft.variantType === 'size' ? C.red : C.white, color: mergeDraft.variantType === 'size' ? C.white : C.dark }}>Medidas</button>
+                </div>
+                <label style={{ fontSize: 10.5, color: '#E5E7EB' }}>Valor de {selectedProducts.find(product => product.id === mergeDraft.targetProductId)?.codigo}</label>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  {mergeDraft.variantType === 'color' && <input type="color" value={mergeDraft.targetHex} onChange={event => setMergeDraft(current => ({ ...current, targetHex: event.target.value }))} style={{ width: 34, height: 31, padding: 1, border: `1px solid ${C.border}`, borderRadius: 5 }} />}
+                  <input value={mergeDraft.targetValue} onChange={event => setMergeDraft(current => ({ ...current, targetValue: event.target.value }))} placeholder={mergeDraft.variantType === 'color' ? 'Ej: Blanco' : 'Ej: 10 cm'} style={{ ...inp, padding: '6px 7px', fontSize: 11, flex: 1 }} />
+                </div>
+                <label style={{ fontSize: 10.5, color: '#E5E7EB' }}>Valor de {selectedProducts.find(product => product.id === mergeDraft.sourceProductId)?.codigo}</label>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  {mergeDraft.variantType === 'color' && <input type="color" value={mergeDraft.sourceHex} onChange={event => setMergeDraft(current => ({ ...current, sourceHex: event.target.value }))} style={{ width: 34, height: 31, padding: 1, border: `1px solid ${C.border}`, borderRadius: 5 }} />}
+                  <input value={mergeDraft.sourceValue} onChange={event => setMergeDraft(current => ({ ...current, sourceValue: event.target.value }))} placeholder={mergeDraft.variantType === 'color' ? 'Ej: Negro' : 'Ej: 20 cm'} style={{ ...inp, padding: '6px 7px', fontSize: 11, flex: 1 }} />
+                </div>
+              </div>
+              <p style={{ fontSize: 10, lineHeight: 1.4, color: '#D1D5DB', margin: '8px 0' }}>
+                Se creará el producto base <strong style={{ color: C.white }}>{mergeDraft.baseCode || 'código pendiente'}</strong>. Tanto {selectedProducts.find(product => product.id === mergeDraft.targetProductId)?.codigo} como {selectedProducts.find(product => product.id === mergeDraft.sourceProductId)?.codigo} quedarán dentro como variantes con sus códigos y precios propios.
+              </p>
+              <button type="button" disabled={!mergeDraft.baseCode.trim() || !mergeDraft.targetValue.trim() || !mergeDraft.sourceValue.trim()} onClick={saveMerge} style={{ ...solidBtn, padding: '6px 10px', fontSize: 10.5, background: C.red, color: C.white }}>Preparar unión</button>
+            </div>
+          )}
+          {pendingMerges.map((merge, index) => (
+            <div key={`${merge.sourceProductId}-${index}`} style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '7px 9px', border: `1px solid ${C.dark}`, borderRadius: 7, background: '#374151', color: C.white, fontSize: 10.5 }}>
+              <span style={{ flex: 1 }}><strong>{merge.targetCode}</strong> y <strong>{merge.sourceCode}</strong> quedarán como variantes del producto base <strong>{merge.baseCode}</strong>.</span>
+              <button type="button" onClick={() => undoMerge(index)} style={{ ...outlineBtn, padding: '3px 7px', fontSize: 9.5, background: C.white, color: C.dark, borderColor: C.white }}>Deshacer</button>
+            </div>
+          ))}
+          {pendingDeletes.map((deletion, index) => (
+            <div key={`${deletion.productId}-${index}`} style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '7px 9px', border: `1px solid ${C.red}`, borderRadius: 7, background: C.red, color: C.white, fontSize: 10.5 }}>
+              <span style={{ flex: 1 }}><strong>{deletion.product?.codigo}</strong> se eliminará al confirmar.</span>
+              <button type="button" onClick={() => undoDelete(index)} style={{ ...outlineBtn, padding: '3px 7px', fontSize: 9.5, color: C.dark, borderColor: C.white, background: C.white }}>Deshacer</button>
+            </div>
+          ))}
         </div>
         {!!nearbyCodeCandidates.length && (
           <div style={{ marginTop: 11 }}>
@@ -4615,16 +4994,21 @@ function CatalogProductPicker({ row, supplier, onChange }) {
           placeholder={`Buscar dentro de ${supplier}...`}
           style={{ ...inp, padding: '6px 8px', fontSize: 11.5, flex: 1 }}
         />
-        <button type="button" onClick={() => setOpen(false)} style={{ ...outlineBtn, padding: '5px 9px', fontSize: 10.5 }}>Cancelar</button>
+        <button type="button" onClick={closeProductSearch} style={{ ...outlineBtn, padding: '5px 9px', fontSize: 10.5 }}>Cancelar</button>
       </div>
       <div style={{ display: 'grid', gap: 3, marginTop: results.length ? 7 : 0 }}>
+        {recommendedCode && normalizeCode(query) === normalizeCode(recommendedCode) && (
+          <span style={{ fontSize: 10.5, fontWeight: 700, color: C.ink, padding: '4px 2px' }}>
+            Recomendados según el código leído: {recommendedCode}
+          </span>
+        )}
         {codeError && <span style={{ fontSize: 10.5, color: C.amberDark, padding: '4px 2px' }}>{codeError}</span>}
         {results.map(product => (
           <button
             type="button"
             key={product.id}
             disabled={selectedProducts.some(selected => selected.id === product.id)}
-            onClick={() => choose(product, query.trim())}
+            onClick={() => choose(product, query.trim(), replaceDetectedOnChoose)}
             style={{ border: 0, background: C.paper, borderRadius: 5, padding: '7px 8px', textAlign: 'left', cursor: selectedProducts.some(selected => selected.id === product.id) ? 'default' : 'pointer', color: C.text2, fontSize: 11.5, opacity: selectedProducts.some(selected => selected.id === product.id) ? 0.55 : 1 }}
           >
             <strong>{product.codigo}</strong> — {product.name || product.descripcion || 'Sin descripción'}
@@ -4774,6 +5158,8 @@ function CatalogImagesReviewModal({ parsed, onConfirm, onClose, onUploadImage })
       selectedProducts: draftEntry ? draftEntry.selectedProducts : (row.match ? [row.match] : []),
       selectedImageKey: draftEntry ? draftEntry.selectedImageKey : row.selectedImageKey,
       accepted: draftEntry ? draftEntry.accepted : Boolean(row.match && row.selectedImageKey),
+      pendingMerges: draftEntry?.pendingMerges || [],
+      pendingDeletes: draftEntry?.pendingDeletes || [],
     }
   }))
   const [draftNotice, setDraftNotice] = useState(() => Boolean(draftInfo?.entries && Object.keys(draftInfo.entries).length))
@@ -4785,10 +5171,17 @@ function CatalogImagesReviewModal({ parsed, onConfirm, onClose, onUploadImage })
   const [scrollTarget, setScrollTarget] = useState(null)
   const rowRefs = useRef({})
   const accepted = rows.filter(row => row.accepted && row.selectedProducts.length && row.selectedImageKey)
+  const pendingMerges = rows.flatMap(row => row.pendingMerges || [])
+  const pendingDeletes = rows.flatMap(row => row.pendingDeletes || [])
+  const removedProductIds = new Set([
+    ...pendingMerges.map(merge => merge.sourceProductId),
+    ...pendingDeletes.map(deletion => deletion.productId),
+  ])
   const acceptedAssociations = accepted.flatMap(row => row.selectedProducts.map(product => ({
     productId: product.id,
     selectedImageKey: row.selectedImageKey,
-  })))
+  }))).filter(action => !removedProductIds.has(action.productId))
+  const changeCount = acceptedAssociations.length + pendingMerges.length + pendingDeletes.length
   const visibleRows = rows.filter(row => {
     const needle = query.trim().toLowerCase()
     if (!needle) return true
@@ -4804,8 +5197,14 @@ function CatalogImagesReviewModal({ parsed, onConfirm, onClose, onUploadImage })
     const timeout = setTimeout(() => {
       const entries = {}
       rows.forEach(row => {
-        if (row.accepted || row.selectedProducts.length) {
-          entries[row.key] = { selectedProducts: row.selectedProducts, selectedImageKey: row.selectedImageKey, accepted: row.accepted }
+        if (row.accepted || row.selectedProducts.length || row.pendingMerges?.length || row.pendingDeletes?.length) {
+          entries[row.key] = {
+            selectedProducts: row.selectedProducts,
+            selectedImageKey: row.selectedImageKey,
+            accepted: row.accepted,
+            pendingMerges: row.pendingMerges || [],
+            pendingDeletes: row.pendingDeletes || [],
+          }
         }
       })
       try {
@@ -4824,6 +5223,8 @@ function CatalogImagesReviewModal({ parsed, onConfirm, onClose, onUploadImage })
       key: `${row.page}-${row.detectedCode || 'image'}-${index}`,
       selectedProducts: row.match ? [row.match] : [],
       accepted: Boolean(row.match && row.selectedImageKey),
+      pendingMerges: [],
+      pendingDeletes: [],
     })))
     setDraftNotice(false)
   }
@@ -4847,8 +5248,8 @@ function CatalogImagesReviewModal({ parsed, onConfirm, onClose, onUploadImage })
   const handleConfirm = async () => {
     setError('')
     setDuplicates([])
-    if (!acceptedAssociations.length) {
-      setError('Seleccioná al menos una asociación válida.')
+    if (!acceptedAssociations.length && !pendingMerges.length && !pendingDeletes.length) {
+      setError('Seleccioná al menos una imagen, unión o eliminación válida.')
       return
     }
     const productIds = acceptedAssociations.map(action => action.productId)
@@ -4870,7 +5271,7 @@ function CatalogImagesReviewModal({ parsed, onConfirm, onClose, onUploadImage })
     }
     setSubmitting(true)
     try {
-      await onConfirm(parsed.importId, parsed.supplier, acceptedAssociations)
+      await onConfirm(parsed.importId, parsed.supplier, acceptedAssociations, pendingMerges, pendingDeletes)
       try { localStorage.removeItem(catalogDraftKey(parsed.supplier)) } catch { /* ignore */ }
       onClose()
     } catch (confirmError) {
@@ -4888,7 +5289,7 @@ function CatalogImagesReviewModal({ parsed, onConfirm, onClose, onUploadImage })
             <div>
               <h2 style={{ fontFamily: ADMIN_FONT, fontSize: 21, color: C.ink, margin: 0, fontWeight: 500 }}>Revisar imágenes de {parsed.supplier}</h2>
               <p style={{ fontSize: 11.5, color: C.muted, margin: '6px 0 0' }}>
-                Se extrajeron propuestas de {parsed.pageCount} páginas. Nada se modifica hasta confirmar; sólo se reemplazará la imagen de los productos seleccionados.
+                Se extrajeron propuestas de {parsed.pageCount} páginas. Nada se modifica hasta confirmar; también podés unir variantes o eliminar productos duplicados.
                 {' '}Tu progreso se guarda automáticamente en este navegador por si se cierra la pestaña.
               </p>
             </div>
@@ -4906,6 +5307,8 @@ function CatalogImagesReviewModal({ parsed, onConfirm, onClose, onUploadImage })
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 14, flexWrap: 'wrap' }}>
             <input value={query} onChange={event => setQuery(event.target.value)} placeholder="Buscar código, producto o texto del PDF..." style={{ ...inp, padding: '7px 9px', fontSize: 11.5, flex: '1 1 280px', maxWidth: 430 }} />
             <span style={pill(C.greenLight, C.green)}>{acceptedAssociations.length} productos listos para aplicar</span>
+            {!!pendingMerges.length && <span style={pill(C.dark, C.white)}>{pendingMerges.length} uniones preparadas</span>}
+            {!!pendingDeletes.length && <span style={pill(C.red, C.white)}>{pendingDeletes.length} eliminaciones preparadas</span>}
             <span style={pill('#EEF2FF', '#4338CA')}>{rows.filter(row => row.selectedProducts.length).length} imágenes asociadas</span>
             {!!rows.filter(row => !row.selectedProducts.length).length && <span style={pill(C.amberLight, C.amberDark)}>{rows.filter(row => !row.selectedProducts.length).length} para revisar</span>}
           </div>
@@ -4957,12 +5360,12 @@ function CatalogImagesReviewModal({ parsed, onConfirm, onClose, onUploadImage })
                   )}
                 </div>
               )
-              : <span style={{ color: C.muted, fontSize: 11.5 }}>Se actualizarán {acceptedAssociations.length} productos con {accepted.length} imágenes seleccionadas.</span>}
+              : <span style={{ color: C.muted, fontSize: 11.5 }}>Se aplicarán {acceptedAssociations.length} imágenes, {pendingMerges.length} uniones y {pendingDeletes.length} eliminaciones.</span>}
           </div>
           <div style={{ display: 'flex', gap: 9 }}>
             <button type="button" onClick={onClose} disabled={submitting} style={outlineBtn}>Cancelar</button>
-            <button type="button" onClick={handleConfirm} disabled={submitting || !acceptedAssociations.length} style={{ ...solidBtn, background: acceptedAssociations.length ? C.red : '#ddd', color: acceptedAssociations.length ? '#fff' : '#aaa', cursor: acceptedAssociations.length && !submitting ? 'pointer' : 'not-allowed' }}>
-              {submitting ? 'Guardando...' : `Confirmar productos (${acceptedAssociations.length})`}
+            <button type="button" onClick={handleConfirm} disabled={submitting || !changeCount} style={{ ...solidBtn, background: changeCount ? C.red : '#ddd', color: changeCount ? '#fff' : '#aaa', cursor: changeCount && !submitting ? 'pointer' : 'not-allowed' }}>
+              {submitting ? 'Guardando...' : `Confirmar cambios (${changeCount})`}
             </button>
           </div>
         </div>
@@ -5053,7 +5456,11 @@ function UnifiedProductsTab() {
   }, [inventoryFilters, fetchInventory])
 
   useEffect(() => {
-    if (importResult) setShowResult(true)
+    if (!importResult) return undefined
+    setShowResult(true)
+    if (importResult.fileType !== 'catalog-images') return undefined
+    const timeout = setTimeout(() => setShowResult(false), 6000)
+    return () => clearTimeout(timeout)
   }, [importResult])
 
   useEffect(() => {
@@ -5155,8 +5562,8 @@ function UnifiedProductsTab() {
     }
   }
 
-  async function handleCatalogImagesConfirm(importId, supplier, actions) {
-    await applyCatalogImages(importId, supplier, actions)
+  async function handleCatalogImagesConfirm(importId, supplier, actions, merges, deletes) {
+    await applyCatalogImages(importId, supplier, actions, merges, deletes)
     await fetchCatalog()
     setPage(1)
     fetchInventory({ ...inventoryFilters, page: 1 })
@@ -5397,9 +5804,9 @@ function UnifiedProductsTab() {
         {/* Importaciones temporalmente ocultas: stock general, ventas del local y compras a proveedor. */}
         <ImportUploadCard
           label="Precios proveedor"
-          hint="Subí varios Excel o una carpeta completa. El nombre de cada archivo se usa como proveedor y los productos se crean sin publicar."
+          hint="Subí varios Excel o una carpeta completa. Los productos nuevos se crean sin publicar y los códigos ya unidos actualizan su color o medida."
           disabled={importLoading || priceParsing}
-          busyLabel={priceParsing ? 'Creando productos...' : 'Importando...'}
+          busyLabel={priceParsing ? 'Procesando precios...' : 'Importando...'}
           onFiles={handlePriceFilesUpload}
           multiple
           allowDirectory
@@ -5463,17 +5870,39 @@ function UnifiedProductsTab() {
       )}
 
       {showResult && importResult && (
-        <div style={{ background: C.greenLight, border: `1px solid ${C.green}`, borderRadius: 8, padding: '14px 18px', marginBottom: 20 }}>
+        <div
+          role="status"
+          aria-live="polite"
+          style={importResult.fileType === 'catalog-images'
+            ? {
+                position: 'fixed', top: 20, left: '50%', zIndex: 2200,
+                width: 'min(720px, calc(100vw - 32px))', boxSizing: 'border-box',
+                transform: 'translateX(-50%)', padding: '14px 16px', margin: 0,
+                background: '#166534', color: C.white, border: '1px solid #14532D', borderRadius: 9,
+                boxShadow: '0 14px 38px rgba(17, 24, 39, 0.28)',
+                animation: 'fnx-notice-in .22s ease-out both',
+              }
+            : { background: C.greenLight, border: `1px solid ${C.green}`, borderRadius: 8, padding: '14px 18px', marginBottom: 20 }}
+        >
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-            <span style={{ fontSize: 13, fontWeight: 600, color: C.green }}>Importación completa</span>
-            <button onClick={() => setShowResult(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.text3, fontSize: 14 }}>✕</button>
+            <span style={{ fontSize: 13, fontWeight: 700, color: importResult.fileType === 'catalog-images' ? C.white : C.green }}>Importación completa</span>
+            <button
+              type="button"
+              onClick={() => setShowResult(false)}
+              aria-label="Cerrar notificación"
+              style={importResult.fileType === 'catalog-images'
+                ? { width: 25, height: 25, padding: 0, border: '1px solid #fff', borderRadius: 5, background: C.white, color: C.dark, cursor: 'pointer', fontSize: 13 }
+                : { background: 'none', border: 'none', cursor: 'pointer', color: C.text3, fontSize: 14 }}
+            >✕</button>
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             {importResult.totalFiles !== undefined && <span style={pill('#EEF2FF', '#4338CA')}>{importResult.processedFiles} de {importResult.totalFiles} archivos procesados</span>}
             {importResult.totalRows !== undefined && <span style={pill('#F3F4F6', C.text3)}>{importResult.totalRows} filas leídas</span>}
             {importResult.created !== undefined && <span style={pill(C.greenLight, C.green)}>{importResult.created} creados</span>}
-            {importResult.updated !== undefined && <span style={pill(C.amberLight, C.amberDark)}>{importResult.updated} actualizados</span>}
-            {importResult.imagesSaved !== undefined && <span style={pill('#EEF2FF', '#4338CA')}>{importResult.imagesSaved} imágenes guardadas</span>}
+            {importResult.updated !== undefined && <span style={pill(importResult.fileType === 'catalog-images' ? C.white : C.amberLight, importResult.fileType === 'catalog-images' ? C.dark : C.amberDark)}>{importResult.updated} actualizados</span>}
+            {importResult.imagesSaved !== undefined && <span style={pill(importResult.fileType === 'catalog-images' ? C.white : '#EEF2FF', importResult.fileType === 'catalog-images' ? C.dark : '#4338CA')}>{importResult.imagesSaved} imágenes guardadas</span>}
+            {!!importResult.merged && <span style={pill(C.dark, C.white)}>{importResult.merged} productos unidos</span>}
+            {!!importResult.deleted && <span style={pill(C.red, C.white)}>{importResult.deleted} productos eliminados</span>}
             {!!importResult.imagesRemoved && <span style={pill(C.redLight, C.red)}>{importResult.imagesRemoved} imágenes eliminadas</span>}
             {!!importResult.skipped && <span style={pill('#F3F4F6', C.text3)}>{importResult.skipped} omitidos</span>}
           </div>

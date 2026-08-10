@@ -74,6 +74,7 @@ export function AdminProvider({ children }) {
   const [supplierSettings, setSupplierSettings]  = useState([])
   const [subcategories, setSubcategories]        = useState([])
   const [productTypes, setProductTypes]          = useState([])
+  const [categoryCustomizations, setCategoryCustomizations] = useState([])
 
   // ── fetchCatalog — trae el catálogo público publicado (sin auth) ─────────
   const fetchCatalog = useCallback(async () => {
@@ -402,7 +403,30 @@ export function AdminProvider({ children }) {
       throw new Error(data.error || 'No se pudo eliminar la subcategoría')
     }
     setSubcategories(current => current.filter(s => s.id !== id))
-  }, [])
+    setProductTypes(current => current.filter(t => {
+      const deleted = subcategories.find(s => s.id === id)
+      return !deleted || t.category !== deleted.category || t.subcategory !== deleted.name
+    }))
+  }, [subcategories])
+
+  const updateSubcategory = useCallback(async (id, name) => {
+    const res = await fetch(`${API_BASE}/api/subcategories/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', 'x-admin-token': ADMIN_PASSWORD },
+      body: JSON.stringify({ name }),
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error || 'No se pudo editar la subcategoria')
+    const previous = subcategories.find(item => item.id === id)
+    setSubcategories(current => current.map(item => item.id === id ? data : item))
+    if (previous) setProductTypes(current => current.map(item => (
+      item.category === previous.category && item.subcategory === previous.name
+        ? { ...item, subcategory: data.name }
+        : item
+    )))
+    await fetchCatalog()
+    return data
+  }, [subcategories, fetchCatalog])
 
   const fetchProductTypes = useCallback(async () => {
     const res = await fetch(`${API_BASE}/api/product-types`)
@@ -436,10 +460,54 @@ export function AdminProvider({ children }) {
     setProductTypes(current => current.filter(t => t.id !== id))
   }, [])
 
+  const updateProductType = useCallback(async (id, name) => {
+    const res = await fetch(`${API_BASE}/api/product-types/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', 'x-admin-token': ADMIN_PASSWORD },
+      body: JSON.stringify({ name }),
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error || 'No se pudo editar el tipo')
+    setProductTypes(current => current.map(item => item.id === id ? data : item))
+    await fetchCatalog()
+    return data
+  }, [fetchCatalog])
+
+  const fetchCategoryCustomizations = useCallback(async () => {
+    const res = await fetch(`${API_BASE}/api/category-customizations`)
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error || 'No se pudieron cargar los cambios de categorias')
+    setCategoryCustomizations(data)
+    return data
+  }, [])
+
+  const saveCategoryCustomization = useCallback(async (change) => {
+    const res = await fetch(`${API_BASE}/api/category-customizations`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'x-admin-token': ADMIN_PASSWORD },
+      body: JSON.stringify(change),
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error || 'No se pudo modificar la categoria')
+    setCategoryCustomizations(current => {
+      const index = current.findIndex(item => (
+        item.level === data.level && item.category === data.category &&
+        item.subcategory === data.subcategory && item.name === data.name
+      ))
+      if (index < 0) return [...current, data]
+      return current.map((item, itemIndex) => itemIndex === index ? data : item)
+    })
+    if (change.label != null) {
+      await Promise.all([fetchCatalog(), fetchSubcategories(), fetchProductTypes()])
+    }
+    return data
+  }, [fetchCatalog, fetchSubcategories, fetchProductTypes])
+
   useEffect(() => {
     fetchSubcategories().catch(() => {})
     fetchProductTypes().catch(() => {})
-  }, [fetchSubcategories, fetchProductTypes])
+    fetchCategoryCustomizations().catch(() => {})
+  }, [fetchSubcategories, fetchProductTypes, fetchCategoryCustomizations])
 
   // Si esta pestaña quedó abierta desde antes (ej. el header en una pestaña,
   // el admin en otra) y se cargó una subcategoría/tipo nuevo en otro lado, al
@@ -449,16 +517,17 @@ export function AdminProvider({ children }) {
     const onFocus = () => {
       fetchSubcategories().catch(() => {})
       fetchProductTypes().catch(() => {})
+      fetchCategoryCustomizations().catch(() => {})
     }
     window.addEventListener('focus', onFocus)
     return () => window.removeEventListener('focus', onFocus)
-  }, [fetchSubcategories, fetchProductTypes])
+  }, [fetchSubcategories, fetchProductTypes, fetchCategoryCustomizations])
 
   // Árbol de categorías "en vivo": el estático de categoryTree.js + lo que el
   // admin haya agregado. Lo usan el mega-menú, /products y el panel de admin.
   const categoryTree = useMemo(
-    () => buildCategoryTree(subcategories, productTypes),
-    [subcategories, productTypes]
+    () => buildCategoryTree(subcategories, productTypes, categoryCustomizations),
+    [subcategories, productTypes, categoryCustomizations]
   )
 
   useEffect(() => {
@@ -671,14 +740,14 @@ export function AdminProvider({ children }) {
     return data
   }, [])
 
-  const applyCatalogImages = useCallback(async (importId, supplier, actions) => {
+  const applyCatalogImages = useCallback(async (importId, supplier, actions, merges = [], deletes = []) => {
     setImportLoading(true)
     setImportError(null)
     try {
       const res = await fetch(`${API_BASE}/api/products/import/catalog-images/apply`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-admin-token': ADMIN_PASSWORD },
-        body: JSON.stringify({ importId, supplier, actions }),
+        body: JSON.stringify({ importId, supplier, actions, merges, deletes }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'No se pudieron guardar las imágenes')
@@ -703,8 +772,9 @@ export function AdminProvider({ children }) {
       importResult, importLoading, importError,
       currencySettings, fetchCurrencySettings, updateCurrencySettings,
       supplierSettings, fetchSupplierSettings, updateSupplierCurrency,
-      subcategories, fetchSubcategories, createSubcategory, deleteSubcategory,
-      productTypes, fetchProductTypes, createProductType, deleteProductType,
+      subcategories, fetchSubcategories, createSubcategory, updateSubcategory, deleteSubcategory,
+      productTypes, fetchProductTypes, createProductType, updateProductType, deleteProductType,
+      categoryCustomizations, saveCategoryCustomization,
       categoryTree,
       fetchInventory, fetchInventoryItem, createInventoryItem, updateInventoryItem, deleteInventoryItem,
       fetchInventorySelectionIds, applyInventoryBatch,

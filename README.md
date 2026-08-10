@@ -463,8 +463,10 @@ Las planillas se procesan en memoria con un límite de 15 MB y los PDF con un l�
 
 La tarjeta “Precios proveedor” permite seleccionar varios archivos o una carpeta
 completa. Admite XLS/XLSX, detecta las columnas por sus encabezados, usa el nombre
-del archivo sin extensión como proveedor y crea solamente productos nuevos con
-`published = false`. Los códigos que ya existen no se modifican. Si el nombre del
+del archivo sin extensión como proveedor y crea los productos nuevos con
+`published = false`. Los códigos que ya existen no se modifican, salvo aquellos
+que tengan una asociación confirmada con una variante: esos actualizan el color
+o medida correspondiente sin volver a crear un producto separado. Si el nombre del
 archivo contiene “DOLARES”, “DÓLARES” o “USD”, los importes se convierten a ARS con
 la cotización administrativa vigente y también se conserva el costo original USD.
 La moneda puede corregirse luego desde la tarjeta “Proveedor y moneda”. Esa
@@ -521,9 +523,20 @@ reutiliza su extractor específico; para el resto aplica una lectura genérica q
 busca códigos de productos de ese proveedor y relaciona cada uno con la imagen
 más cercana en la página. La revisión muestra la foto propuesta, el producto de
 destino y su imagen actual. Las asociaciones incorrectas pueden buscarse y
-corregirse manualmente dentro del mismo proveedor. Nada cambia hasta confirmar y
-la confirmación sólo reemplaza `image_url`: no modifica precios, stock, textos ni
-el estado de publicación. Las fotos o asociaciones no seleccionadas se omiten.
+corregirse manualmente dentro del mismo proveedor. Nada cambia hasta confirmar y,
+si no se prepara una unión o eliminación, la confirmación sólo reemplaza
+`image_url`: no modifica precios, stock, textos ni el estado de publicación. Las
+fotos o asociaciones no seleccionadas se omiten.
+Durante esa misma revisión se pueden seleccionar dos productos y preparar una
+unión rápida como variantes de color o medida. Se elige cuál queda y se completa
+el código base final y el valor de ambos; el producto absorbido se elimina al
+confirmar, pero los códigos originales, el stock y los precios individuales
+(ARS y USD) se conservan en la variante. Las
+asociaciones de la lista de precios se trasladan al producto principal para que
+las cargas futuras continúen actualizando el color o la medida correctos. También
+se puede preparar la eliminación directa de un producto duplicado y deshacerla
+antes de confirmar. Imágenes, uniones y eliminaciones se aplican juntas dentro de
+la misma transacción.
 
 ## Envíos
 

@@ -256,10 +256,14 @@ CREATE TABLE IF NOT EXISTS supplier_product_mappings (
   product_id       UUID         NOT NULL REFERENCES products(id) ON DELETE CASCADE,
   color_name       VARCHAR(100),
   color_hex        VARCHAR(7),
+  size_label       VARCHAR(100),
   created_at       TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
   updated_at       TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
   UNIQUE (supplier, source_code_key)
 );
+
+ALTER TABLE supplier_product_mappings
+  ADD COLUMN IF NOT EXISTS size_label VARCHAR(100);
 
 CREATE INDEX IF NOT EXISTS idx_supplier_product_mappings_product
   ON supplier_product_mappings(product_id);
@@ -406,4 +410,20 @@ CREATE TABLE IF NOT EXISTS product_types (
   name        VARCHAR(150) NOT NULL,
   created_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
   UNIQUE (category, subcategory, name)
+);
+
+-- Cambios hechos desde el administrador sobre los nodos que vienen incluidos
+-- en el arbol de categorias del frontend. La clave conserva la ruta original,
+-- de modo que un nodo pueda renombrarse varias veces, ocultarse y restaurarse.
+CREATE TABLE IF NOT EXISTS category_tree_customizations (
+  id          UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+  level       VARCHAR(20)  NOT NULL CHECK (level IN ('category', 'subcategory', 'type')),
+  category    VARCHAR(100) NOT NULL,
+  subcategory VARCHAR(150) NOT NULL DEFAULT '',
+  name        VARCHAR(150) NOT NULL DEFAULT '',
+  label       VARCHAR(150),
+  hidden      BOOLEAN      NOT NULL DEFAULT FALSE,
+  created_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+  updated_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+  UNIQUE (level, category, subcategory, name)
 );

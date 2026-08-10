@@ -226,19 +226,79 @@ function addFilterLinks(nodes, inheritedTo) {
 
 export const CATEGORY_TREE = addFilterLinks(RAW_CATEGORY_TREE)
 
-function categoryValue(node) {
+export function getCategoryValue(node) {
   const query = node?.to?.split('?')[1] || ''
   return new URLSearchParams(query).get('category')
+}
+
+function customization(customizations, level, category, subcategory = '', name = '') {
+  return customizations.find(item => (
+    item.level === level && item.category === category &&
+    (item.subcategory || '') === subcategory && (item.name || '') === name
+  ))
+}
+
+function taxonomyLink(category, subcategory = '', type = '', originalTo = '') {
+  const params = new URLSearchParams(originalTo.split('?')[1] || '')
+  params.set('category', category)
+  if (subcategory) params.set('sub', subcategory)
+  else params.delete('sub')
+  if (type) {
+    const typeKey = params.has('ctype') ? 'ctype' : 'type'
+    params.delete('ctype')
+    params.delete('type')
+    params.set(typeKey, type)
+  }
+  return `/products?${params.toString()}`
 }
 
 // Agrega al árbol estático las subcategorías y tipos que el admin cargó a
 // mano (tablas `subcategories`/`product_types`, ver AdminContext). Se usa
 // tanto en el mega-menú del header como en los filtros de /products y el
 // panel de admin, para que lo agregado se vea reflejado en todos lados.
-export function buildCategoryTree(customSubcategories = [], customProductTypes = []) {
-  return CATEGORY_TREE.map((catNode) => {
-    const category = categoryValue(catNode)
-    const existingChildren = catNode.children || []
+export function buildCategoryTree(customSubcategories = [], customProductTypes = [], customizations = []) {
+  return CATEGORY_TREE.flatMap((sourceCatNode) => {
+    const sourceCategory = getCategoryValue(sourceCatNode)
+    const categoryChange = customization(customizations, 'category', sourceCategory)
+    if (categoryChange?.hidden) return []
+    const category = categoryChange?.label || sourceCategory
+    const catNode = {
+      ...sourceCatNode,
+      label: categoryChange?.label || sourceCatNode.label,
+      to: taxonomyLink(category),
+      _taxonomy: { source: 'factory', level: 'category', category: sourceCategory, subcategory: '', name: '' },
+    }
+    const existingChildren = (sourceCatNode.children || []).flatMap((sourceSubNode) => {
+      const sourceSubcategory = sourceSubNode.label
+      const subChange = customization(customizations, 'subcategory', sourceCategory, '', sourceSubcategory)
+      if (subChange?.hidden) return []
+      const subcategory = subChange?.label || sourceSubcategory
+      const children = (sourceSubNode.children || []).flatMap((sourceTypeNode) => {
+        const sourceType = sourceTypeNode.label
+        const typeChange = customization(customizations, 'type', sourceCategory, sourceSubcategory, sourceType)
+        if (typeChange?.hidden) return []
+        const type = typeChange?.label || sourceType
+        return [{
+          ...sourceTypeNode,
+          label: type,
+          to: taxonomyLink(category, subcategory, type, sourceTypeNode.to || sourceSubNode.to),
+          _taxonomy: {
+            source: 'factory', level: 'type', category: sourceCategory,
+            subcategory: sourceSubcategory, name: sourceType,
+          },
+        }]
+      })
+      return [{
+        ...sourceSubNode,
+        label: subcategory,
+        to: taxonomyLink(category, subcategory, '', sourceSubNode.to),
+        children: children.length ? children : undefined,
+        _taxonomy: {
+          source: 'factory', level: 'subcategory', category: sourceCategory,
+          subcategory: '', name: sourceSubcategory,
+        },
+      }]
+    })
     const existingLabels = existingChildren.map((node) => node.label)
 
     const childrenWithExtraTypes = existingChildren.map((subNode) => {
@@ -249,7 +309,11 @@ export function buildCategoryTree(customSubcategories = [], customProductTypes =
       const existingTypeLabels = (subNode.children || []).map((node) => node.label)
       const newLeaves = extraTypes
         .filter((t) => !existingTypeLabels.includes(t.name))
-        .map((t) => ({ label: t.name, to: addParam(subNode.to, 'type', t.name) }))
+        .map((t) => ({
+          label: t.name,
+          to: addParam(subNode.to, 'type', t.name),
+          _taxonomy: { source: 'custom', level: 'type', id: t.id },
+        }))
       return newLeaves.length ? { ...subNode, children: [...(subNode.children || []), ...newLeaves] } : subNode
     })
 
@@ -260,15 +324,25 @@ export function buildCategoryTree(customSubcategories = [], customProductTypes =
         const types = customProductTypes
           .filter((t) => t.category === category && t.subcategory === s.name)
           .map((t) => ({ label: t.name, to: addParam(subTo, 'type', t.name) }))
-        return { label: s.name, to: subTo, children: types.length ? types : undefined }
+        return {
+          label: s.name,
+          to: subTo,
+          children: types.length ? types.map(t => ({
+            ...t,
+            _taxonomy: { source: 'custom', level: 'type', id: customProductTypes.find(item => (
+              item.category === category && item.subcategory === s.name && item.name === t.label
+            ))?.id },
+          })) : undefined,
+          _taxonomy: { source: 'custom', level: 'subcategory', id: s.id },
+        }
       })
 
-    return { ...catNode, children: [...childrenWithExtraTypes, ...newSubcategories] }
+    return [{ ...catNode, children: [...childrenWithExtraTypes, ...newSubcategories] }]
   })
 }
 
 export function getCategoryNode(category, tree = CATEGORY_TREE) {
-  return tree.find((node) => categoryValue(node) === category) || null
+  return tree.find((node) => getCategoryValue(node) === category) || null
 }
 
 export function getSubcategoryOptions(category, tree = CATEGORY_TREE) {

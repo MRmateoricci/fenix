@@ -38,6 +38,43 @@ router.post('/', requireAdmin, async (req, res) => {
   }
 })
 
+router.patch('/:id', requireAdmin, async (req, res) => {
+  const name = String(req.body?.name || '').trim()
+  if (!name) return res.status(400).json({ error: 'El nombre es requerido' })
+  if (name.length > 150) return res.status(400).json({ error: 'Nombre demasiado largo' })
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+    const { rows: current } = await client.query(
+      'SELECT category, subcategory, name FROM product_types WHERE id = $1 FOR UPDATE',
+      [req.params.id]
+    )
+    if (!current.length) {
+      await client.query('ROLLBACK')
+      return res.status(404).json({ error: 'Tipo no encontrado' })
+    }
+    const previous = current[0]
+    const { rows } = await client.query(
+      'UPDATE product_types SET name = $1 WHERE id = $2 RETURNING id, category, subcategory, name, created_at',
+      [name, req.params.id]
+    )
+    await client.query(
+      `UPDATE products SET product_type = $1
+       WHERE category = $2 AND subcategory = $3 AND product_type = $4`,
+      [name, previous.category, previous.subcategory, previous.name]
+    )
+    await client.query('COMMIT')
+    res.json(rows[0])
+  } catch (err) {
+    await client.query('ROLLBACK')
+    if (err.code === '23505') return res.status(409).json({ error: 'Ese tipo ya existe en esta subcategoria' })
+    console.error('[PATCH /api/product-types/:id]', err)
+    res.status(500).json({ error: 'No se pudo editar el tipo' })
+  } finally {
+    client.release()
+  }
+})
+
 router.delete('/:id', requireAdmin, async (req, res) => {
   try {
     await pool.query('DELETE FROM product_types WHERE id = $1', [req.params.id])

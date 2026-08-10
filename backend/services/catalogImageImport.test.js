@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { matchKnownProductsOnPage } from './catalogImageImport.js'
+import { buildMergedVariantOptions, matchKnownProductsOnPage } from './catalogImageImport.js'
 
 test('asocia códigos conocidos aunque el PDF cambie espacios y guiones', () => {
   const products = [
@@ -30,4 +30,45 @@ test('no inventa asociaciones con números o textos que no son códigos cargados
     [{ id: 'one', codigo: '403' }]
   )
   assert.equal(matches.length, 0)
+})
+
+test('une dos productos como colores y conserva los precios de cada codigo', () => {
+  const target = {
+    codigo: 'AP-105B/T', color_options: [], size_options: [], variant_stock: {}, image_url: '/blanco.png',
+    precio_costo: 100, precio_venta: 150, precio_iva: 181.5,
+    precio_costo_usd: 1, precio_venta_usd: 1.5, precio_iva_usd: 1.815,
+  }
+  const source = {
+    codigo: 'AP-105N/T', color_options: [], size_options: [], variant_stock: {}, image_url: '/negro.png',
+    precio_costo: 120, precio_venta: 180, precio_iva: 217.8,
+    precio_costo_usd: 1.2, precio_venta_usd: 1.8, precio_iva_usd: 2.178,
+  }
+
+  const merged = buildMergedVariantOptions(target, source, {
+    variantType: 'color', baseCode: 'AP-105', targetValue: 'Blanco', sourceValue: 'Negro',
+    targetHex: '#FFFFFF', sourceHex: '#111111',
+  })
+
+  assert.deepEqual(merged.colorOptions.map(color => ({ name: color.name, code: color.supplierCode, price: color.price })), [
+    { name: 'Blanco', code: 'AP-105B/T', price: 150 },
+    { name: 'Negro', code: 'AP-105N/T', price: 180 },
+  ])
+  assert.equal(merged.prices.precioVenta, 150)
+  assert.equal(merged.baseCode, 'AP-105')
+  assert.equal(merged.sizeOptions.length, 0)
+})
+
+test('une dos productos como medidas y rechaza nombres repetidos', () => {
+  const target = { codigo: 'T-10', color_options: [], size_options: [], variant_stock: {}, precio_venta: 100 }
+  const source = { codigo: 'T-20', color_options: [], size_options: [], variant_stock: {}, precio_venta: 200 }
+  const merged = buildMergedVariantOptions(target, source, {
+    variantType: 'size', baseCode: 'T', targetValue: '10 cm', sourceValue: '20 cm',
+  })
+  assert.deepEqual(merged.sizeOptions.map(size => ({ label: size.label, code: size.supplierCode, price: size.price })), [
+    { label: '10 cm', code: 'T-10', price: 100 },
+    { label: '20 cm', code: 'T-20', price: 200 },
+  ])
+  assert.throws(() => buildMergedVariantOptions(target, source, {
+    variantType: 'size', baseCode: 'T', targetValue: '10 cm', sourceValue: '10 CM',
+  }), /diferentes/)
 })

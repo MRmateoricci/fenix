@@ -28,6 +28,7 @@ function publicProduct(product) {
     name: product.name || null,
     descripcion: product.descripcion || null,
     image_url: product.image_url || null,
+    medida: product.medida || null,
   }
 }
 
@@ -326,8 +327,208 @@ function sanitizeImageKey(value) {
   return /^(?:page-\d+-\d+\.png|custom-[0-9a-f-]{36}\.(?:jpe?g|png|webp|gif))$/i.test(key) ? key : null
 }
 
-export async function applyCatalogImages(client, importId, supplier, rawActions, publicUploadsBase = '/uploads') {
-  if (!Array.isArray(rawActions) || !rawActions.length || rawActions.length > MAX_PREVIEW_ROWS) {
+function supplierCodeKey(value) {
+  return String(value || '').trim().toUpperCase().replace(/\s+/g, '')
+}
+
+function numericOrNull(value) {
+  if (value == null || value === '') return null
+  const number = Number(value)
+  return Number.isFinite(number) ? number : null
+}
+
+function variantPriceSnapshot(product, variantType, label, hex = '#CCCCCC') {
+  const common = {
+    supplierCode: product.codigo,
+    price: numericOrNull(product.precio_venta),
+    priceCost: numericOrNull(product.precio_costo),
+    priceWithTax: numericOrNull(product.precio_iva),
+    priceUsd: numericOrNull(product.precio_venta_usd),
+    priceCostUsd: numericOrNull(product.precio_costo_usd),
+    priceWithTaxUsd: numericOrNull(product.precio_iva_usd),
+  }
+  return variantType === 'color'
+    ? { name: label, hex, image: product.image_url || '', ...common }
+    : { label, ...common }
+}
+
+function minimumVariantValue(options, key, fallback) {
+  const values = options
+    .map(option => numericOrNull(option?.[key]))
+    .filter(value => value != null)
+  return values.length ? Math.min(...values) : numericOrNull(fallback)
+}
+
+export function buildMergedVariantOptions(target, source, rawMerge) {
+  const variantType = rawMerge?.variantType === 'size' ? 'size' : 'color'
+  const rawBaseCode = String(rawMerge?.baseCode || '').trim().toUpperCase()
+  if (!rawBaseCode || rawBaseCode.length > 64) throw new Error('Completa un codigo base valido para el producto unido')
+  const baseCode = rawBaseCode
+  const targetValue = String(rawMerge?.targetValue || '').trim().slice(0, 100)
+  const sourceValue = String(rawMerge?.sourceValue || '').trim().slice(0, 100)
+  if (!targetValue || !sourceValue) throw new Error('Completa el valor de la variante para ambos productos')
+  if (targetValue.localeCompare(sourceValue, 'es-AR', { sensitivity: 'base' }) === 0) {
+    throw new Error('Las dos variantes deben tener valores diferentes')
+  }
+
+  const targetColors = Array.isArray(target.color_options) ? target.color_options : []
+  const targetSizes = Array.isArray(target.size_options) ? target.size_options : []
+  const sourceColors = Array.isArray(source.color_options) ? source.color_options : []
+  const sourceSizes = Array.isArray(source.size_options) ? source.size_options : []
+  const targetStock = target.variant_stock && typeof target.variant_stock === 'object' ? Object.keys(target.variant_stock) : []
+  const sourceStock = source.variant_stock && typeof source.variant_stock === 'object' ? Object.keys(source.variant_stock) : []
+  if (sourceColors.length || sourceSizes.length || targetStock.length || sourceStock.length) {
+    throw new Error(`El producto ${source.codigo} ya tiene variantes o stock por variante; edita esa union desde el producto para no perder datos`)
+  }
+  if ((variantType === 'color' && targetSizes.length) || (variantType === 'size' && targetColors.length)) {
+    throw new Error(`El producto ${target.codigo} ya usa otro tipo de variante; esta union necesita revision manual`)
+  }
+
+  const targetHex = /^#[0-9a-f]{6}$/i.test(String(rawMerge?.targetHex || ''))
+    ? String(rawMerge.targetHex).toUpperCase()
+    : '#CCCCCC'
+  const sourceHex = /^#[0-9a-f]{6}$/i.test(String(rawMerge?.sourceHex || ''))
+    ? String(rawMerge.sourceHex).toUpperCase()
+    : '#CCCCCC'
+  const currentOptions = variantType === 'color' ? targetColors : targetSizes
+  const labelKey = variantType === 'color' ? 'name' : 'label'
+  if (currentOptions.some(option => String(option?.[labelKey] || '').localeCompare(sourceValue, 'es-AR', { sensitivity: 'base' }) === 0)) {
+    throw new Error(`La variante ${sourceValue} ya existe en ${target.codigo}`)
+  }
+
+  const options = [...currentOptions]
+  if (!options.length) options.push(variantPriceSnapshot(target, variantType, targetValue, targetHex))
+  options.push(variantPriceSnapshot(source, variantType, sourceValue, sourceHex))
+  return {
+    variantType,
+    baseCode,
+    targetValue,
+    sourceValue,
+    targetHex,
+    sourceHex,
+    colorOptions: variantType === 'color' ? options : targetColors,
+    sizeOptions: variantType === 'size' ? options : targetSizes,
+    prices: {
+      precioCosto: minimumVariantValue(options, 'priceCost', target.precio_costo),
+      precioVenta: minimumVariantValue(options, 'price', target.precio_venta),
+      precioIva: minimumVariantValue(options, 'priceWithTax', target.precio_iva),
+      precioCostoUsd: minimumVariantValue(options, 'priceCostUsd', target.precio_costo_usd),
+      precioVentaUsd: minimumVariantValue(options, 'priceUsd', target.precio_venta_usd),
+      precioIvaUsd: minimumVariantValue(options, 'priceWithTaxUsd', target.precio_iva_usd),
+    },
+  }
+}
+
+async function preserveProductRelations(client, sourceId, targetId) {
+  await client.query(
+    `INSERT INTO favorites (user_id, product_id, created_at)
+     SELECT user_id, $2, created_at FROM favorites WHERE product_id = $1
+     ON CONFLICT (user_id, product_id) DO NOTHING`,
+    [sourceId, targetId]
+  )
+  await client.query('DELETE FROM favorites WHERE product_id = $1', [sourceId])
+  await client.query(
+    `INSERT INTO reviews (user_id, product_id, rating, comment, created_at, updated_at)
+     SELECT user_id, $2, rating, comment, created_at, updated_at FROM reviews WHERE product_id = $1
+     ON CONFLICT (user_id, product_id) DO NOTHING`,
+    [sourceId, targetId]
+  )
+  await client.query('DELETE FROM reviews WHERE product_id = $1', [sourceId])
+  await client.query('UPDATE stock_alerts SET product_id = $2 WHERE product_id = $1', [sourceId, targetId])
+}
+
+async function mergeCatalogProduct(client, supplier, rawMerge) {
+  const targetId = String(rawMerge?.targetProductId || '')
+  const sourceId = String(rawMerge?.sourceProductId || '')
+  if (!/^[0-9a-f-]{36}$/i.test(targetId) || !/^[0-9a-f-]{36}$/i.test(sourceId) || targetId === sourceId) {
+    throw new Error('La union de productos no es valida')
+  }
+  const { rows } = await client.query(
+    `SELECT * FROM products WHERE id = ANY($1::uuid[]) AND supplier = $2 FOR UPDATE`,
+    [[targetId, sourceId], supplier]
+  )
+  const target = rows.find(product => product.id === targetId)
+  const source = rows.find(product => product.id === sourceId)
+  if (!target || !source) throw new Error('Uno de los productos a unir ya no existe o pertenece a otro proveedor')
+
+  const merged = buildMergedVariantOptions(target, source, rawMerge)
+  const codeConflict = await client.query(
+    `SELECT codigo FROM products WHERE codigo = $1 AND id <> $2 LIMIT 1 FOR UPDATE`,
+    [merged.baseCode, targetId]
+  )
+  if (codeConflict.rows[0]) {
+    throw new Error(`El codigo base ${merged.baseCode} ya pertenece a otro producto`)
+  }
+  await client.query(
+    `UPDATE products
+     SET color_options = $1::jsonb, size_options = $2::jsonb,
+         precio_costo = $3, precio_venta = $4, precio_iva = $5,
+         precio_costo_usd = $6, precio_venta_usd = $7, precio_iva_usd = $8,
+         stock = COALESCE(stock, 0) + $9,
+         name = COALESCE(NULLIF(name, ''), NULLIF($10, '')),
+         descripcion = COALESCE(NULLIF(descripcion, ''), NULLIF($11, '')),
+         description_larga = COALESCE(NULLIF(description_larga, ''), NULLIF($12, '')),
+         image_url = COALESCE(NULLIF(image_url, ''), NULLIF($13, '')),
+         published = published OR $14,
+         codigo = $16,
+         updated_at = NOW()
+     WHERE id = $15`,
+    [
+      JSON.stringify(merged.colorOptions), JSON.stringify(merged.sizeOptions),
+      merged.prices.precioCosto, merged.prices.precioVenta, merged.prices.precioIva,
+      merged.prices.precioCostoUsd, merged.prices.precioVentaUsd, merged.prices.precioIvaUsd,
+      Number(source.stock) || 0, source.name, source.descripcion, source.description_larga,
+      source.image_url, Boolean(source.published), targetId, merged.baseCode,
+    ]
+  )
+
+  const mappingValues = merged.variantType === 'color'
+    ? { targetColor: merged.targetValue, targetHex: merged.targetHex, sourceColor: merged.sourceValue, sourceHex: merged.sourceHex, targetSize: null, sourceSize: null }
+    : { targetColor: null, targetHex: null, sourceColor: null, sourceHex: null, targetSize: merged.targetValue, sourceSize: merged.sourceValue }
+  await client.query(
+    `UPDATE supplier_product_mappings
+     SET product_id = $2, color_name = $3, color_hex = $4, size_label = $5, updated_at = NOW()
+     WHERE product_id = $1`,
+    [sourceId, targetId, mappingValues.sourceColor, mappingValues.sourceHex, mappingValues.sourceSize]
+  )
+  await client.query(
+    `UPDATE supplier_product_mappings
+     SET color_name = COALESCE(color_name, $2), color_hex = COALESCE(color_hex, $3),
+         size_label = COALESCE(size_label, $4), updated_at = NOW()
+     WHERE product_id = $1 AND supplier = $5`,
+    [targetId, mappingValues.targetColor, mappingValues.targetHex, mappingValues.targetSize, supplier]
+  )
+  await client.query(
+    `INSERT INTO supplier_product_mappings
+       (supplier, source_code, source_code_key, product_id, color_name, color_hex, size_label)
+     VALUES ($1, $2, $3, $4, $5, $6, $7), ($1, $8, $9, $4, $10, $11, $12)
+     ON CONFLICT (supplier, source_code_key) DO UPDATE
+     SET product_id = EXCLUDED.product_id, color_name = EXCLUDED.color_name,
+         color_hex = EXCLUDED.color_hex, size_label = EXCLUDED.size_label, updated_at = NOW()`,
+    [
+      supplier, target.codigo, supplierCodeKey(target.codigo), targetId,
+      mappingValues.targetColor, mappingValues.targetHex, mappingValues.targetSize,
+      source.codigo, supplierCodeKey(source.codigo), mappingValues.sourceColor,
+      mappingValues.sourceHex, mappingValues.sourceSize,
+    ]
+  )
+  await preserveProductRelations(client, sourceId, targetId)
+  await client.query('DELETE FROM products WHERE id = $1', [sourceId])
+  return { targetId, sourceId, baseCode: merged.baseCode }
+}
+
+export async function applyCatalogImages(
+  client,
+  importId,
+  supplier,
+  rawActions = [],
+  rawMerges = [],
+  rawDeletes = [],
+  publicUploadsBase = '/uploads'
+) {
+  if (!Array.isArray(rawActions) || !Array.isArray(rawMerges) || !Array.isArray(rawDeletes) ||
+      rawActions.length > MAX_PREVIEW_ROWS || rawMerges.length > MAX_PREVIEW_ROWS || rawDeletes.length > MAX_PREVIEW_ROWS ||
+      (!rawActions.length && !rawMerges.length && !rawDeletes.length)) {
     throw new Error('No hay asociaciones de imágenes válidas para aplicar')
   }
   const previewDir = getCleosPreviewDir(importId)
@@ -337,6 +538,35 @@ export async function applyCatalogImages(client, importId, supplier, rawActions,
   const writtenFiles = []
   let imagesSaved = 0
   try {
+    const deleteIds = [...new Set(rawDeletes.map(item => String(item?.productId || item || '')))]
+    if (deleteIds.some(id => !/^[0-9a-f-]{36}$/i.test(id))) throw new Error('Hay un producto invalido para eliminar')
+    const mergeProductIds = new Set(rawMerges.flatMap(merge => [
+      String(merge?.sourceProductId || ''),
+      String(merge?.targetProductId || ''),
+    ]))
+    if (deleteIds.some(id => mergeProductIds.has(id))) {
+      throw new Error('Un producto no puede unirse y eliminarse en la misma confirmacion')
+    }
+    if (deleteIds.some(id => rawActions.some(action => String(action.productId) === id))) {
+      throw new Error('Un producto eliminado no puede recibir una imagen')
+    }
+
+    const mergeSources = new Set()
+    for (const rawMerge of rawMerges) {
+      const sourceId = String(rawMerge?.sourceProductId || '')
+      if (mergeSources.has(sourceId)) throw new Error('Un producto no puede unirse mas de una vez')
+      mergeSources.add(sourceId)
+      await mergeCatalogProduct(client, supplier, rawMerge)
+    }
+
+    if (deleteIds.length) {
+      const deleted = await client.query(
+        `DELETE FROM products WHERE id = ANY($1::uuid[]) AND supplier = $2 RETURNING id`,
+        [deleteIds, supplier]
+      )
+      if (deleted.rowCount !== deleteIds.length) throw new Error('Uno de los productos a eliminar ya no existe o pertenece a otro proveedor')
+    }
+
     for (const rawAction of rawActions) {
       const productId = String(rawAction.productId || '')
       const selectedImageKey = sanitizeImageKey(rawAction.selectedImageKey)
@@ -362,7 +592,14 @@ export async function applyCatalogImages(client, importId, supplier, rawActions,
       await client.query('UPDATE products SET image_url = $1 WHERE id = $2', [imageUrl, productId])
       imagesSaved++
     }
-    return { imagesSaved, updated: imagesSaved, writtenFiles, previewDir }
+    return {
+      imagesSaved,
+      updated: imagesSaved,
+      merged: rawMerges.length,
+      deleted: deleteIds.length,
+      writtenFiles,
+      previewDir,
+    }
   } catch (error) {
     await Promise.all(writtenFiles.map(file => unlink(file).catch(() => {})))
     throw error

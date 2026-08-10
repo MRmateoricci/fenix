@@ -67,7 +67,18 @@ export function mapRow(r) {
     })),
     sizes: (r.size_options || []).map(size => ({
       ...size,
-      price: size.price == null || size.price === '' ? null : Number(size.price),
+      price: sourceIsUsd && size.priceUsd != null
+        ? Math.round(Number(size.priceUsd) * usdArsRate * 100) / 100
+        : size.price == null || size.price === '' ? null : Number(size.price),
+      priceCost: sourceIsUsd && size.priceCostUsd != null
+        ? Math.round(Number(size.priceCostUsd) * usdArsRate * 100) / 100
+        : size.priceCost == null ? null : Number(size.priceCost),
+      priceWithTax: sourceIsUsd && size.priceWithTaxUsd != null
+        ? Math.round(Number(size.priceWithTaxUsd) * usdArsRate * 100) / 100
+        : size.priceWithTax == null ? null : Number(size.priceWithTax),
+      priceUsd: size.priceUsd == null ? null : Number(size.priceUsd),
+      priceCostUsd: size.priceCostUsd == null ? null : Number(size.priceCostUsd),
+      priceWithTaxUsd: size.priceWithTaxUsd == null ? null : Number(size.priceWithTaxUsd),
     })),
     variantStock: r.variant_stock || {},
     published: true,

@@ -446,7 +446,8 @@ router.get('/mine/:id', requireAuth, async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 router.get('/', requireAdmin, async (req, res) => {
   try {
-    const { status, search, page = 1, limit = 50 } = req.query
+    const { status, search, page = 1, limit = 50, all = 'false' } = req.query
+    const fetchAll = all === 'true'
     const offset = (Number(page) - 1) * Number(limit)
 
     const conditions = []
@@ -467,16 +468,19 @@ router.get('/', requireAdmin, async (req, res) => {
 
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''
 
+    const pagination = fetchAll ? '' : `LIMIT $${idx} OFFSET $${idx + 1}`
+    const dataParams = fetchAll ? params : [...params, Number(limit), offset]
+
     const [data, countResult] = await Promise.all([
       pool.query(
         `SELECT id, order_number, status, customer_name, customer_email, customer_phone,
                 delivery_type, address, city, postal_code, total_amount, shipping_cost, shipping_service,
                 payment_method, pickup_date, estimated_delivery_date, items,
-                created_at, paid_at, mp_payment_id
+                created_at, updated_at, paid_at, mp_payment_id
          FROM orders ${where}
          ORDER BY created_at DESC
-         LIMIT $${idx} OFFSET $${idx + 1}`,
-        [...params, Number(limit), offset]
+         ${pagination}`,
+        dataParams
       ),
       pool.query(`SELECT COUNT(*) FROM orders ${where}`, params),
     ])
@@ -485,7 +489,7 @@ router.get('/', requireAdmin, async (req, res) => {
       orders: data.rows,
       total:  Number(countResult.rows[0].count),
       page:   Number(page),
-      limit:  Number(limit),
+      limit:  fetchAll ? data.rows.length : Number(limit),
     })
   } catch (err) {
     console.error('[GET /api/orders]', err)
@@ -530,7 +534,10 @@ router.patch('/:id/status', requireAdmin, async (req, res) => {
     const { rows } = await pool.query(
       `UPDATE orders
        SET status  = $1,
-           paid_at = CASE WHEN $3 = 'paid' AND paid_at IS NULL THEN NOW() ELSE paid_at END
+           paid_at = CASE
+             WHEN $3 IN ('paid', 'preparing', 'shipped', 'delivered') AND paid_at IS NULL THEN NOW()
+             ELSE paid_at
+           END
        WHERE id = $2 RETURNING *`,
       [status, req.params.id, status]
     )

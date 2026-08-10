@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
-import { categories, CATEGORY_NAV_LABEL } from '../data/products'
-import { getSubcategoryOptions, getProductTypeOptions } from '../data/categoryTree'
+import { CATEGORY_NAV_LABEL } from '../data/products'
+import { getCategoryValue, getSubcategoryOptions, getProductTypeOptions } from '../data/categoryTree'
 import { useAdmin } from '../context/AdminContext'
 import ProductCard from '../components/ProductCard'
 import PageSEO from '../components/SEO'
@@ -123,14 +123,17 @@ function useFilterParams(priceMax) {
 }
 
 // ─── Breadcrumb + title ────────────────────────────────────────────────────────
-function CatalogHeader({ filters }) {
+function CatalogHeader({ filters, categoryTree }) {
   const navigate = useNavigate()
   // Derive labels from active filters
   const activeCategory = filters.selectedCategories[0] || null
-  const catLabel  = activeCategory ? CATEGORY_NAV_LABEL[activeCategory] : null
+  const categoryNode = activeCategory ? categoryTree.find(node => getCategoryValue(node) === activeCategory) : null
+  const catLabel  = categoryNode?.label || (activeCategory ? CATEGORY_NAV_LABEL[activeCategory] : null)
   const subLabel  = filters.sub || null
   const pageTitle = subLabel || catLabel || 'Catálogo'
-  const headerImg = activeCategory ? CATEGORY_IMAGE[activeCategory] : null
+  const headerImg = activeCategory
+    ? CATEGORY_IMAGE[categoryNode?._taxonomy?.category || activeCategory]
+    : null
 
   return (
     <div style={{ position: 'relative', padding: '96px 0 32px', borderBottom: `1px solid ${T.hairline}`, marginBottom: 36 }}>
@@ -260,7 +263,7 @@ export default function Products() {
       <div style={{ maxWidth: 1320, margin: '0 auto', padding: '0 40px 80px' }}>
 
         {/* ── Header ─────────────────────────────────────────────────────── */}
-        <CatalogHeader filters={filters} />
+        <CatalogHeader filters={filters} categoryTree={categoryTree} />
 
         {/* ── Category tabs ───────────────────────────────────────────────── */}
         <CategoryTabs filters={filters} />
@@ -373,13 +376,14 @@ export default function Products() {
 
 // ─── Category tabs ─────────────────────────────────────────────────────────────
 function CategoryTabs({ filters }) {
+  const { categoryTree } = useAdmin()
   const activeCategory = filters.sub
     ? filters.selectedCategories[0] || null
     : filters.selectedCategories.length === 1 ? filters.selectedCategories[0] : null
 
   const tabs = [
     { label: 'Todos', value: null },
-    ...Object.entries(CATEGORY_NAV_LABEL).map(([value, label]) => ({ label, value })),
+    ...categoryTree.map(node => ({ label: node.label, value: getCategoryValue(node) })),
   ]
 
   return (
@@ -604,6 +608,8 @@ function MobileFilterDrawer({ open, onClose, filters, products }) {
 
 // ─── Filter Panel ──────────────────────────────────────────────────────────────
 function FilterPanel({ filters, products }) {
+  const { categoryTree } = useAdmin()
+  const categoryOptions = categoryTree.map(node => ({ value: getCategoryValue(node), label: node.label }))
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
       {filters.hasActiveFilters && (
@@ -630,12 +636,12 @@ function FilterPanel({ filters, products }) {
           Categoría
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {categories.map(cat => {
-            const checked = filters.selectedCategories.includes(cat)
+          {categoryOptions.map(cat => {
+            const checked = filters.selectedCategories.includes(cat.value)
             return (
-              <label key={cat} style={{ display: 'flex', alignItems: 'center', gap: 11, cursor: 'pointer' }}>
+              <label key={cat.value} style={{ display: 'flex', alignItems: 'center', gap: 11, cursor: 'pointer' }}>
                 <div
-                  onClick={() => filters.toggleCategory(cat)}
+                  onClick={() => filters.toggleCategory(cat.value)}
                   style={{
                     width: 15, height: 15, borderRadius: 2, flexShrink: 0,
                     border: `1.5px solid ${checked ? T.ink : T.hairlineStrong}`,
@@ -650,12 +656,12 @@ function FilterPanel({ filters, products }) {
                     </svg>
                   )}
                 </div>
-                <input type="checkbox" checked={checked} onChange={() => filters.toggleCategory(cat)} style={{ display: 'none' }} />
+                <input type="checkbox" checked={checked} onChange={() => filters.toggleCategory(cat.value)} style={{ display: 'none' }} />
                 <span style={{ fontFamily: "var(--font-sans)", fontSize: 13.5, color: checked ? T.ink : T.muted, transition: 'color .15s' }}>
-                  {cat}
+                  {cat.label}
                 </span>
                 <span style={{ fontFamily: "var(--font-sans)", fontSize: 11, color: T.muted2, marginLeft: 'auto' }}>
-                  {products.filter(p => p.category === cat).length}
+                  {products.filter(p => p.category === cat.value).length}
                 </span>
               </label>
             )

@@ -24,8 +24,10 @@ test('el catálogo convierte proveedores USD a ARS, incluidas sus variantes', ()
     precio_venta: 33220,
     precio_venta_usd: 22,
     color_options: [{ name: 'Blanco', price: 15100, priceUsd: 10 }],
+    size_options: [{ label: '20 cm', price: 18120, priceUsd: 12 }],
   }))
 
   assert.equal(mapped.price, 33220)
   assert.equal(mapped.colors[0].price, 15100)
+  assert.equal(mapped.sizes[0].price, 18120)
 })

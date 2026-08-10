@@ -13,7 +13,9 @@ import reviewsRouter from './routes/reviews.js'
 import productsRouter from './routes/products.js'
 import subcategoriesRouter from './routes/subcategories.js'
 import productTypesRouter from './routes/productTypes.js'
+import categoryCustomizationsRouter from './routes/categoryCustomizations.js'
 import catalogRouter  from './routes/catalog.js'
+import googleReviewsRouter from './routes/googleReviews.js'
 import shippingRouter from './routes/shipping.js'
 import newsletterRouter from './routes/newsletter.js'
 import { uploadsDir } from './config/uploads.js'
@@ -61,7 +63,9 @@ app.use('/api/reviews', reviewsRouter)
 app.use('/api/products', productsRouter)
 app.use('/api/subcategories', subcategoriesRouter)
 app.use('/api/product-types', productTypesRouter)
+app.use('/api/category-customizations', categoryCustomizationsRouter)
 app.use('/api/catalog',  catalogRouter)
+app.use('/api/google-reviews', googleReviewsRouter)
 app.use('/api/shipping', shippingRouter)
 app.use('/api/newsletter', newsletterRouter)
 

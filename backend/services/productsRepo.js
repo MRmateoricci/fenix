@@ -74,12 +74,14 @@ export async function upsertPriceRows(client, rows) {
   return { created, updated }
 }
 
-// Alta masiva de listas de proveedores. Este flujo solo crea borradores: nunca
-// modifica un producto que ya existe y nunca publica un artículo automáticamente.
+// Alta masiva de listas de proveedores. Crea borradores para códigos nuevos y
+// actualiza las variantes que ya tienen una asociación confirmada; nunca publica
+// un artículo automáticamente ni rompe una familia unificada.
 export async function createSupplierPriceDrafts(client, files, usdArsRate) {
   const seenCodes = new Set()
   const fileResults = []
   let created = 0
+  let updated = 0
   let skipped = 0
 
   for (const file of files) {
@@ -87,7 +89,7 @@ export async function createSupplierPriceDrafts(client, files, usdArsRate) {
     let duplicateRows = 0
 
     for (const row of file.rows) {
-      const codeKey = String(row.codigo || '').trim().toUpperCase()
+      const codeKey = priceCodeKey(row.codigo)
       if (seenCodes.has(codeKey)) {
         duplicateRows++
         continue
@@ -97,8 +99,35 @@ export async function createSupplierPriceDrafts(client, files, usdArsRate) {
     }
 
     let fileCreated = 0
+    let fileUpdated = 0
     const existingCodes = []
-    for (const batch of chunk(uniqueRows)) {
+    const sourceKeys = uniqueRows.map(row => priceCodeKey(row.codigo)).filter(Boolean)
+    const savedMappings = sourceKeys.length
+      ? await client.query(
+        `SELECT source_code_key, product_id
+         FROM supplier_product_mappings
+         WHERE supplier = $1 AND source_code_key = ANY($2::text[])`,
+        [file.supplier, sourceKeys]
+      )
+      : { rows: [] }
+    const mappedByCode = new Map(savedMappings.rows.map(mapping => [mapping.source_code_key, mapping]))
+    const mappedRows = uniqueRows.filter(row => mappedByCode.has(priceCodeKey(row.codigo)))
+    const unmappedRows = uniqueRows.filter(row => !mappedByCode.has(priceCodeKey(row.codigo)))
+
+    if (mappedRows.length) {
+      const mappedResult = await applyPriceUpdates(client, mappedRows.map(row => ({
+        type: 'update',
+        productId: mappedByCode.get(priceCodeKey(row.codigo)).product_id,
+        sourceCode: row.codigo,
+        currency: file.currency,
+        precioCosto: row.precio_costo,
+        precioVenta: row.precio_venta,
+        precioIva: row.precio_iva,
+      })), usdArsRate, file.supplier)
+      fileUpdated += mappedResult.updated
+    }
+
+    for (const batch of chunk(unmappedRows)) {
       const params = []
       for (const row of batch) {
         const currency = file.currency === 'USD' ? 'USD' : 'ARS'
@@ -142,6 +171,7 @@ export async function createSupplierPriceDrafts(client, files, usdArsRate) {
 
     const fileSkipped = Number(file.skipped || 0) + duplicateRows + existingCodes.length
     created += fileCreated
+    updated += fileUpdated
     skipped += fileSkipped
     fileResults.push({
       fileName: file.fileName,
@@ -149,6 +179,7 @@ export async function createSupplierPriceDrafts(client, files, usdArsRate) {
       currency: file.currency,
       totalRows: file.totalRows,
       created: fileCreated,
+      updated: fileUpdated,
       skipped: fileSkipped,
       invalidRows: Number(file.skipped || 0),
       duplicateRows,
@@ -157,7 +188,7 @@ export async function createSupplierPriceDrafts(client, files, usdArsRate) {
     })
   }
 
-  return { created, skipped, files: fileResults }
+  return { created, updated, skipped, files: fileResults }
 }
 
 // La lista de precios se revisa antes de tocar la base. Este paso busca primero
@@ -349,8 +380,32 @@ export async function applyPriceUpdates(client, actions, usdArsRate, supplier = 
   let created = 0
   let updated = 0
   const confirmedMappings = []
+  const savedVariantMappings = new Map()
+
+  if (supplier) {
+    const sourceKeys = actions
+      .map(action => priceCodeKey(action.sourceCode))
+      .filter(Boolean)
+    if (sourceKeys.length) {
+      const { rows } = await client.query(
+        `SELECT source_code_key, color_name, color_hex, size_label
+         FROM supplier_product_mappings
+         WHERE supplier = $1 AND source_code_key = ANY($2::text[])`,
+        [supplier, sourceKeys]
+      )
+      rows.forEach(mapping => savedVariantMappings.set(mapping.source_code_key, mapping))
+    }
+  }
 
   for (const action of actions) {
+    const savedVariant = savedVariantMappings.get(priceCodeKey(action.sourceCode))
+    const colorVariant = action.colorVariant || (savedVariant?.color_name ? {
+      name: savedVariant.color_name,
+      hex: savedVariant.color_hex || '#CCCCCC',
+    } : null)
+    const sizeVariant = action.sizeVariant || (savedVariant?.size_label ? {
+      label: savedVariant.size_label,
+    } : null)
     let mappedProductId = action.productId || null
     const currency = action.currency === 'USD' ? 'USD' : 'ARS'
     const convertToArs = (value) => value == null
@@ -383,7 +438,7 @@ export async function applyPriceUpdates(client, actions, usdArsRate, supplier = 
       )
       mappedProductId = rows[0]?.id || null
       created++
-    } else if (action.colorVariant) {
+    } else if (colorVariant) {
       const { rows } = await client.query(
         `SELECT color_options, precio_costo, precio_venta, precio_iva,
                 precio_costo_usd, precio_venta_usd, precio_iva_usd
@@ -393,13 +448,13 @@ export async function applyPriceUpdates(client, actions, usdArsRate, supplier = 
       const product = rows[0]
       const currentColors = Array.isArray(product?.color_options) ? product.color_options : []
       const colorIndex = currentColors.findIndex(color =>
-        String(color?.name || '').localeCompare(action.colorVariant.name, 'es-AR', { sensitivity: 'base' }) === 0
+        String(color?.name || '').localeCompare(colorVariant.name, 'es-AR', { sensitivity: 'base' }) === 0
       )
       const previousColor = colorIndex >= 0 ? currentColors[colorIndex] : {}
       const color = {
         ...previousColor,
-        name: action.colorVariant.name,
-        hex: action.colorVariant.hex,
+        name: colorVariant.name,
+        hex: colorVariant.hex,
         image: previousColor.image || '',
         supplierCode: action.sourceCode || previousColor.supplierCode || null,
         price: saleArs ?? previousColor.price ?? (product?.precio_venta == null ? null : Number(product.precio_venta)),
@@ -448,6 +503,61 @@ export async function applyPriceUpdates(client, actions, usdArsRate, supplier = 
         ]
       )
       updated += rowCount
+    } else if (sizeVariant) {
+      const { rows } = await client.query(
+        `SELECT size_options, precio_costo, precio_venta, precio_iva,
+                precio_costo_usd, precio_venta_usd, precio_iva_usd
+         FROM products WHERE id = $1`,
+        [action.productId]
+      )
+      const product = rows[0]
+      const currentSizes = Array.isArray(product?.size_options) ? product.size_options : []
+      const sizeIndex = currentSizes.findIndex(size =>
+        String(size?.label || '').localeCompare(sizeVariant.label, 'es-AR', { sensitivity: 'base' }) === 0
+      )
+      const previousSize = sizeIndex >= 0 ? currentSizes[sizeIndex] : {}
+      const size = {
+        ...previousSize,
+        label: sizeVariant.label,
+        supplierCode: action.sourceCode || previousSize.supplierCode || null,
+        price: saleArs ?? previousSize.price ?? (product?.precio_venta == null ? null : Number(product.precio_venta)),
+        priceCost: costArs ?? previousSize.priceCost ?? (product?.precio_costo == null ? null : Number(product.precio_costo)),
+        priceWithTax: taxArs ?? previousSize.priceWithTax ?? (product?.precio_iva == null ? null : Number(product.precio_iva)),
+        priceUsd: saleUsd ?? previousSize.priceUsd ?? null,
+        priceCostUsd: costUsd ?? previousSize.priceCostUsd ?? null,
+        priceWithTaxUsd: taxUsd ?? previousSize.priceWithTaxUsd ?? null,
+      }
+      const nextSizes = [...currentSizes]
+      if (sizeIndex >= 0) nextSizes[sizeIndex] = size
+      else nextSizes.push(size)
+
+      const minimumSizeValue = (key, fallback) => {
+        const values = nextSizes
+          .map(item => item?.[key])
+          .filter(value => value != null && Number.isFinite(Number(value)))
+          .map(Number)
+        return values.length ? Math.min(...values) : fallback == null ? null : Number(fallback)
+      }
+      const { rowCount } = await client.query(
+        `UPDATE products
+         SET size_options = $1::jsonb,
+             precio_costo = $2, precio_venta = $3, precio_iva = $4,
+             precio_costo_usd = $5, precio_venta_usd = $6, precio_iva_usd = $7,
+             price_currency = $8, price_exchange_rate = $9,
+             price_updated_at = NOW(), updated_at = NOW()
+         WHERE id = $10`,
+        [
+          JSON.stringify(nextSizes),
+          minimumSizeValue('priceCost', product?.precio_costo),
+          minimumSizeValue('price', product?.precio_venta),
+          minimumSizeValue('priceWithTax', product?.precio_iva),
+          minimumSizeValue('priceCostUsd', product?.precio_costo_usd),
+          minimumSizeValue('priceUsd', product?.precio_venta_usd),
+          minimumSizeValue('priceWithTaxUsd', product?.precio_iva_usd),
+          currency, usdArsRate, action.productId,
+        ]
+      )
+      updated += rowCount
     } else {
       const { rowCount } = await client.query(
         `UPDATE products
@@ -472,8 +582,9 @@ export async function applyPriceUpdates(client, actions, usdArsRate, supplier = 
         sourceCode: action.sourceCode,
         sourceCodeKey: priceCodeKey(action.sourceCode),
         productId: mappedProductId,
-        colorName: action.colorVariant?.name || null,
-        colorHex: action.colorVariant?.hex || null,
+        colorName: colorVariant?.name || null,
+        colorHex: colorVariant?.hex || null,
+        sizeLabel: sizeVariant?.label || null,
       })
     }
   }
@@ -482,19 +593,20 @@ export async function applyPriceUpdates(client, actions, usdArsRate, supplier = 
   if (uniqueMappings.length) {
     await client.query(
       `INSERT INTO supplier_product_mappings (
-         supplier, source_code, source_code_key, product_id, color_name, color_hex
+         supplier, source_code, source_code_key, product_id, color_name, color_hex, size_label
        )
        SELECT $2, mapping.source_code, mapping.source_code_key,
-              mapping.product_id::uuid, mapping.color_name, mapping.color_hex
+              mapping.product_id::uuid, mapping.color_name, mapping.color_hex, mapping.size_label
        FROM jsonb_to_recordset($1::jsonb) AS mapping(
          source_code text, source_code_key text, product_id text,
-         color_name text, color_hex text
+         color_name text, color_hex text, size_label text
        )
        ON CONFLICT (supplier, source_code_key) DO UPDATE
        SET source_code = EXCLUDED.source_code,
            product_id = EXCLUDED.product_id,
            color_name = EXCLUDED.color_name,
            color_hex = EXCLUDED.color_hex,
+           size_label = EXCLUDED.size_label,
            updated_at = NOW()`,
       [JSON.stringify(uniqueMappings.map(mapping => ({
         source_code: mapping.sourceCode,
@@ -502,6 +614,7 @@ export async function applyPriceUpdates(client, actions, usdArsRate, supplier = 
         product_id: mapping.productId,
         color_name: mapping.colorName,
         color_hex: mapping.colorHex,
+        size_label: mapping.sizeLabel,
       }))), supplier]
     )
   }

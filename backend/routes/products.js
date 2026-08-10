@@ -76,7 +76,7 @@ function priceCurrencyFromFilename(filename) {
     : 'ARS'
 }
 
-function convertedColorOptions(products, currency, usdArsRate) {
+function convertedVariantOptions(products, currency, usdArsRate) {
   return products.map(product => {
     const wasUsd = product.price_currency === 'USD'
     const previousRate = Number(product.price_exchange_rate) || usdArsRate
@@ -98,6 +98,20 @@ function convertedColorOptions(products, currency, usdArsRate) {
         const tax = convert(color, 'priceWithTax', 'priceWithTaxUsd')
         return {
           ...color,
+          price: sale.ars,
+          priceUsd: sale.usd,
+          priceCost: cost.ars,
+          priceCostUsd: cost.usd,
+          priceWithTax: tax.ars,
+          priceWithTaxUsd: tax.usd,
+        }
+      }),
+      sizes: (product.size_options || []).map(size => {
+        const sale = convert(size, 'price', 'priceUsd')
+        const cost = convert(size, 'priceCost', 'priceCostUsd')
+        const tax = convert(size, 'priceWithTax', 'priceWithTaxUsd')
+        return {
+          ...size,
           price: sale.ars,
           priceUsd: sale.usd,
           priceCost: cost.ars,
@@ -284,12 +298,13 @@ router.patch('/currency-settings', async (req, res) => {
     const current = await client.query('SELECT usd_ars_rate FROM store_settings WHERE id = 1 FOR UPDATE')
     const previousRate = Number(current.rows[0]?.usd_ars_rate || 1510)
     const colorProducts = await client.query(
-      `SELECT id, color_options, price_currency, price_exchange_rate
+      `SELECT id, color_options, size_options, price_currency, price_exchange_rate
        FROM products
-       WHERE price_currency = 'USD' AND jsonb_array_length(color_options) > 0
+       WHERE price_currency = 'USD'
+         AND (jsonb_array_length(color_options) > 0 OR jsonb_array_length(size_options) > 0)
        FOR UPDATE`
     )
-    const convertedColors = convertedColorOptions(colorProducts.rows, 'USD', usdArsRate)
+    const convertedColors = convertedVariantOptions(colorProducts.rows, 'USD', usdArsRate)
     await client.query(
       `UPDATE products
        SET precio_costo_usd = COALESCE(precio_costo_usd, precio_costo / COALESCE(NULLIF(price_exchange_rate, 0), $2)),
@@ -306,7 +321,10 @@ router.patch('/currency-settings', async (req, res) => {
       [usdArsRate, previousRate]
     )
     for (const product of convertedColors) {
-      await client.query('UPDATE products SET color_options = $1::jsonb WHERE id = $2', [JSON.stringify(product.colors), product.id])
+      await client.query(
+        'UPDATE products SET color_options = $1::jsonb, size_options = $2::jsonb WHERE id = $3',
+        [JSON.stringify(product.colors), JSON.stringify(product.sizes), product.id]
+      )
     }
     const { rows } = await client.query(
       `INSERT INTO store_settings (id, usd_ars_rate, updated_at)
@@ -367,14 +385,15 @@ router.patch('/supplier-settings/:supplier', async (req, res) => {
     const settings = await client.query('SELECT usd_ars_rate FROM store_settings WHERE id = 1')
     const usdArsRate = Number(settings.rows[0]?.usd_ars_rate || 1510)
     const colorProducts = await client.query(
-      `SELECT id, color_options, price_currency, price_exchange_rate
+      `SELECT id, color_options, size_options, price_currency, price_exchange_rate
        FROM products
-       WHERE supplier = $1 AND jsonb_array_length(color_options) > 0
+       WHERE supplier = $1
+         AND (jsonb_array_length(color_options) > 0 OR jsonb_array_length(size_options) > 0)
        FOR UPDATE`,
       [supplier]
     )
 
-    const convertedColors = convertedColorOptions(colorProducts.rows, currency, usdArsRate)
+    const convertedColors = convertedVariantOptions(colorProducts.rows, currency, usdArsRate)
     const update = currency === 'USD'
       ? await client.query(
         `UPDATE products
@@ -402,7 +421,10 @@ router.patch('/supplier-settings/:supplier', async (req, res) => {
       )
 
     for (const product of convertedColors) {
-      await client.query('UPDATE products SET color_options = $1::jsonb WHERE id = $2', [JSON.stringify(product.colors), product.id])
+      await client.query(
+        'UPDATE products SET color_options = $1::jsonb, size_options = $2::jsonb WHERE id = $3',
+        [JSON.stringify(product.colors), JSON.stringify(product.sizes), product.id]
+      )
     }
     await client.query(
       `INSERT INTO supplier_price_settings (supplier, currency, updated_at)
@@ -1009,6 +1031,26 @@ router.post('/import/prices/apply', async (req, res) => {
     }
   }
 
+  const mappedSourceCodes = normalized
+    .filter(action => action.type === 'update' && action.sourceCode)
+    .map(action => String(action.sourceCode).trim().toUpperCase().replace(/\s+/g, ''))
+  if (mappedSourceCodes.length) {
+    const { rows: savedVariants } = await pool.query(
+      `SELECT source_code_key, color_name, color_hex, size_label
+       FROM supplier_product_mappings
+       WHERE supplier = $1 AND source_code_key = ANY($2::text[])`,
+      [supplier, mappedSourceCodes]
+    )
+    const bySourceCode = new Map(savedVariants.map(mapping => [mapping.source_code_key, mapping]))
+    normalized.forEach(action => {
+      if (action.type !== 'update' || action.colorVariant) return
+      const key = String(action.sourceCode || '').trim().toUpperCase().replace(/\s+/g, '')
+      const saved = bySourceCode.get(key)
+      if (saved?.color_name) action.colorVariant = { name: saved.color_name, hex: saved.color_hex || '#CCCCCC' }
+      if (saved?.size_label) action.sizeVariant = { label: saved.size_label }
+    })
+  }
+
   const assignmentsByProduct = new Map()
   for (const action of normalized.filter(item => item.type === 'update')) {
     if (!assignmentsByProduct.has(action.productId)) assignmentsByProduct.set(action.productId, [])
@@ -1016,9 +1058,13 @@ router.post('/import/prices/apply', async (req, res) => {
   }
   for (const group of assignmentsByProduct.values()) {
     if (group.length <= 1) continue
-    const colors = group.map(action => action.colorVariant?.name.toLocaleLowerCase('es-AR'))
-    if (group.some(action => !action.colorVariant) || new Set(colors).size !== group.length) {
-      return res.status(400).json({ error: 'Las filas asignadas al mismo producto deben tener colores diferentes' })
+    const variants = group.map(action => action.colorVariant
+      ? `color:${action.colorVariant.name.toLocaleLowerCase('es-AR')}`
+      : action.sizeVariant
+        ? `size:${action.sizeVariant.label.toLocaleLowerCase('es-AR')}`
+        : null)
+    if (variants.some(value => !value) || new Set(variants).size !== group.length) {
+      return res.status(400).json({ error: 'Las filas asignadas al mismo producto deben tener variantes diferentes' })
     }
   }
 
@@ -1201,7 +1247,7 @@ router.post('/import/catalog-images/parse', uploadPdf.single('file'), async (req
 
   try {
     const { rows: products } = await pool.query(
-      `SELECT id, codigo, name, descripcion, image_url
+      `SELECT id, codigo, name, descripcion, image_url, medida
        FROM products
        WHERE supplier = $1
        ORDER BY codigo`,
@@ -1230,14 +1276,14 @@ router.post('/import/catalog-images/image', uploadCleosImage.single('file'), asy
 
 router.post('/import/catalog-images/apply', async (req, res) => {
   const supplier = normalizePriceSupplier(req.body.supplier)
-  const { importId, actions } = req.body
+  const { importId, actions, merges, deletes } = req.body
   if (!supplier) return res.status(400).json({ error: 'El proveedor de la revisión no es válido' })
 
   const client = await pool.connect()
   let applied = null
   try {
     await client.query('BEGIN')
-    applied = await applyCatalogImages(client, importId, supplier, actions)
+    applied = await applyCatalogImages(client, importId, supplier, actions, merges, deletes)
     await client.query('COMMIT')
     await discardCleosPreview(applied.previewDir).catch(cleanupError => {
       console.warn('[Catalog images preview cleanup]', cleanupError.message)
@@ -1247,6 +1293,8 @@ router.post('/import/catalog-images/apply', async (req, res) => {
       supplier,
       updated: applied.updated,
       imagesSaved: applied.imagesSaved,
+      merged: applied.merged,
+      deleted: applied.deleted,
     })
   } catch (err) {
     await client.query('ROLLBACK')

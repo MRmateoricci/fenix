@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useAdmin } from '../../context/AdminContext'
 
 const C = {
@@ -10,6 +10,7 @@ const C = {
 
 const MONTHS = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre']
 const ACTIVE_STATUSES = ['paid', 'preparing', 'shipped']
+const PAID_STATUSES = [...ACTIVE_STATUSES, 'delivered']
 const STATUS_LABEL = {
   pending_payment: 'Pago pendiente', reserved: 'Reservado', paid: 'Pagado',
   preparing: 'Preparando', shipped: 'En camino', delivered: 'Entregado',
@@ -35,10 +36,26 @@ const fmtShortDate = (date) => new Date(date).toLocaleDateString('es-AR', {
   day: '2-digit', month: 'short',
 })
 
-function sameMonth(date, reference) {
+function inPeriod(date, mode, year, month) {
   if (!date) return false
+  if (mode === 'all') return true
   const parsed = new Date(date)
-  return parsed.getFullYear() === reference.getFullYear() && parsed.getMonth() === reference.getMonth()
+  if (Number.isNaN(parsed.getTime()) || parsed.getFullYear() !== year) return false
+  return mode === 'year' || parsed.getMonth() === month
+}
+
+function getSaleDate(order) {
+  if (order.paid_at) return order.paid_at
+  return PAID_STATUSES.includes(order.status) ? (order.updated_at || order.created_at) : null
+}
+
+function getPreviousPeriod(mode, year, month) {
+  if (mode === 'month') {
+    const previous = new Date(year, month - 1, 1)
+    return { year: previous.getFullYear(), month: previous.getMonth() }
+  }
+  if (mode === 'year') return { year: year - 1, month }
+  return null
 }
 
 function percentageChange(current, previous) {
@@ -116,18 +133,35 @@ function StatusBadge({ status }) {
 
 export default function OverviewDashboard({ products, onNavigate }) {
   const { orders, fetchOrders } = useAdmin()
+  const [currentDate] = useState(() => new Date())
+  const [periodMode, setPeriodMode] = useState('month')
+  const [selectedYear, setSelectedYear] = useState(currentDate.getFullYear())
+  const [selectedMonth, setSelectedMonth] = useState(currentDate.getMonth())
 
-  useEffect(() => { fetchOrders({ limit: 500 }) }, [fetchOrders])
+  useEffect(() => { fetchOrders({ all: true }) }, [fetchOrders])
+
+  const availableYears = useMemo(() => {
+    const years = new Set([currentDate.getFullYear()])
+    orders.forEach((order) => {
+      ;[order.created_at, getSaleDate(order)].forEach((date) => {
+        if (!date) return
+        const year = new Date(date).getFullYear()
+        if (Number.isFinite(year)) years.add(year)
+      })
+    })
+    return [...years].sort((a, b) => b - a)
+  }, [orders, currentDate])
 
   const data = useMemo(() => {
-    const now = new Date()
-    const previousMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1)
-    const monthSales = orders.filter((order) => sameMonth(order.paid_at, now))
-    const previousSales = orders.filter((order) => sameMonth(order.paid_at, previousMonth))
-    const monthOrders = orders.filter((order) => sameMonth(order.created_at, now))
-    const revenue = monthSales.reduce((sum, order) => sum + Number(order.total_amount || 0), 0)
+    const previousPeriod = getPreviousPeriod(periodMode, selectedYear, selectedMonth)
+    const periodSales = orders.filter((order) => inPeriod(getSaleDate(order), periodMode, selectedYear, selectedMonth))
+    const previousSales = previousPeriod
+      ? orders.filter((order) => inPeriod(getSaleDate(order), periodMode, previousPeriod.year, previousPeriod.month))
+      : []
+    const periodOrders = orders.filter((order) => inPeriod(order.created_at, periodMode, selectedYear, selectedMonth))
+    const revenue = periodSales.reduce((sum, order) => sum + Number(order.total_amount || 0), 0)
     const previousRevenue = previousSales.reduce((sum, order) => sum + Number(order.total_amount || 0), 0)
-    const averageTicket = monthSales.length ? revenue / monthSales.length : 0
+    const averageTicket = periodSales.length ? revenue / periodSales.length : 0
     const previousAverage = previousSales.length ? previousRevenue / previousSales.length : 0
     const ordersToShip = orders.filter((order) =>
       order.delivery_type === 'delivery' && ACTIVE_STATUSES.includes(order.status)
@@ -138,15 +172,37 @@ export default function OverviewDashboard({ products, onNavigate }) {
     )
     const lowStock = products.filter((product) => product.inStock && product.stock != null && product.stock <= 5)
     const outOfStock = products.filter((product) => !product.inStock)
-    const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()
-    const dailyRevenue = Array.from({ length: daysInMonth }, () => 0)
-
-    monthSales.forEach((order) => {
-      dailyRevenue[new Date(order.paid_at).getDate() - 1] += Number(order.total_amount || 0)
-    })
+    let chartValues
+    let chartLabels
+    if (periodMode === 'month') {
+      const daysInMonth = new Date(selectedYear, selectedMonth + 1, 0).getDate()
+      chartValues = Array.from({ length: daysInMonth }, () => 0)
+      periodSales.forEach((order) => {
+        chartValues[new Date(getSaleDate(order)).getDate() - 1] += Number(order.total_amount || 0)
+      })
+      chartLabels = ['Día 1', 'Día 8', 'Día 15', 'Día 22', 'Fin de mes']
+    } else if (periodMode === 'year') {
+      chartValues = Array.from({ length: 12 }, () => 0)
+      periodSales.forEach((order) => {
+        chartValues[new Date(getSaleDate(order)).getMonth()] += Number(order.total_amount || 0)
+      })
+      chartLabels = ['Ene', 'Mar', 'May', 'Jul', 'Sep', 'Nov', 'Dic']
+    } else {
+      const firstYear = Math.min(...availableYears)
+      chartValues = availableYears.slice().sort((a, b) => a - b).map((year) =>
+        periodSales
+          .filter((order) => new Date(getSaleDate(order)).getFullYear() === year)
+          .reduce((sum, order) => sum + Number(order.total_amount || 0), 0)
+      )
+      chartLabels = availableYears.slice().sort((a, b) => a - b).map(String)
+      if (!chartValues.length) {
+        chartValues = [0]
+        chartLabels = [String(firstYear)]
+      }
+    }
 
     const categoryMap = new Map()
-    monthSales.forEach((order) => {
+    periodSales.forEach((order) => {
       ;(order.items || []).forEach((item) => {
         const category = item.category || 'Sin categoría'
         categoryMap.set(category, (categoryMap.get(category) || 0) + (Number(item.price) || 0) * (Number(item.quantity) || 0))
@@ -154,30 +210,30 @@ export default function OverviewDashboard({ products, onNavigate }) {
     })
 
     const statusGroups = [
-      { label: 'Entregados', color: C.green, count: monthOrders.filter((order) => order.status === 'delivered').length },
-      { label: 'En preparación', color: C.blue, count: monthOrders.filter((order) => ACTIVE_STATUSES.includes(order.status)).length },
-      { label: 'Pendientes', color: C.amber, count: monthOrders.filter((order) => ['pending_payment', 'reserved'].includes(order.status)).length },
-      { label: 'Cancelados', color: C.red, count: monthOrders.filter((order) => ['cancelled', 'payment_failed', 'expired'].includes(order.status)).length },
+      { label: 'Entregados', color: C.green, count: periodOrders.filter((order) => order.status === 'delivered').length },
+      { label: 'En preparación', color: C.blue, count: periodOrders.filter((order) => ACTIVE_STATUSES.includes(order.status)).length },
+      { label: 'Pendientes', color: C.amber, count: periodOrders.filter((order) => ['pending_payment', 'reserved'].includes(order.status)).length },
+      { label: 'Cancelados', color: C.red, count: periodOrders.filter((order) => ['cancelled', 'payment_failed', 'expired'].includes(order.status)).length },
     ]
 
     return {
-      now, monthSales, monthOrders, revenue, averageTicket, ordersToShip, pickupsToManage,
-      lowStock, outOfStock, dailyRevenue, statusGroups,
+      periodSales, periodOrders, revenue, averageTicket, ordersToShip, pickupsToManage,
+      lowStock, outOfStock, chartValues, chartLabels, statusGroups,
       revenueTrend: percentageChange(revenue, previousRevenue),
-      ordersTrend: percentageChange(monthSales.length, previousSales.length),
+      ordersTrend: percentageChange(periodSales.length, previousSales.length),
       ticketTrend: percentageChange(averageTicket, previousAverage),
-      topProducts: computeTopProducts(monthSales),
+      topProducts: computeTopProducts(periodSales),
       categorySales: [...categoryMap.entries()].map(([category, amount]) => ({ category, amount })).sort((a, b) => b.amount - a.amount).slice(0, 5),
-      recentOrders: [...orders].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 6),
+      recentOrders: [...periodOrders].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 6),
     }
-  }, [orders, products])
+  }, [orders, products, periodMode, selectedYear, selectedMonth, availableYears])
 
   const chartWidth = 900
   const chartHeight = 230
   const chartPad = 18
-  const maxDaily = Math.max(...data.dailyRevenue, 1)
-  const chartPoints = data.dailyRevenue.map((value, index) => ({
-    x: chartPad + (index / Math.max(data.dailyRevenue.length - 1, 1)) * (chartWidth - chartPad * 2),
+  const maxDaily = Math.max(...data.chartValues, 1)
+  const chartPoints = data.chartValues.map((value, index) => ({
+    x: chartPad + (index / Math.max(data.chartValues.length - 1, 1)) * (chartWidth - chartPad * 2),
     y: chartHeight - chartPad - (value / maxDaily) * (chartHeight - chartPad * 2),
   }))
   const linePath = chartPoints.map((point, index) => `${index ? 'L' : 'M'} ${point.x} ${point.y}`).join(' ')
@@ -192,22 +248,53 @@ export default function OverviewDashboard({ products, onNavigate }) {
       }).join(', ')})`
     : `conic-gradient(${C.hairline} 0deg 360deg)`
   const maxCategory = Math.max(...data.categorySales.map((item) => item.amount), 1)
-  const monthLabel = `${MONTHS[data.now.getMonth()]} ${data.now.getFullYear()}`
+  const periodLabel = periodMode === 'month'
+    ? `${MONTHS[selectedMonth]} ${selectedYear}`
+    : periodMode === 'year' ? `Año ${selectedYear}` : 'Todo el tiempo'
+  const comparisonDetail = periodMode === 'all' ? 'Acumulado histórico' : 'Sin comparación anterior'
+  const salesChartSubtitle = periodMode === 'month'
+    ? `Facturación diaria de ${periodLabel}`
+    : periodMode === 'year' ? `Facturación mensual de ${selectedYear}` : 'Facturación anual histórica'
 
   return (
     <div className="adm-overview">
       <div className="adm-overview-intro">
         <div>
           <p>Rendimiento de la tienda</p>
-          <h2>{monthLabel}</h2>
+          <h2>{periodLabel}</h2>
         </div>
-        <span>Datos actualizados con los últimos pedidos registrados</span>
+        <div className="adm-period-controls" aria-label="Período del resumen">
+          <label>
+            <span>Período</span>
+            <select value={periodMode} onChange={(event) => setPeriodMode(event.target.value)}>
+              <option value="month">Mes</option>
+              <option value="year">Año</option>
+              <option value="all">Todo el tiempo</option>
+            </select>
+          </label>
+          {periodMode === 'month' && (
+            <label>
+              <span>Mes</span>
+              <select value={selectedMonth} onChange={(event) => setSelectedMonth(Number(event.target.value))}>
+                {MONTHS.map((month, index) => <option value={index} key={month}>{month}</option>)}
+              </select>
+            </label>
+          )}
+          {periodMode !== 'all' && (
+            <label>
+              <span>Año</span>
+              <select value={selectedYear} onChange={(event) => setSelectedYear(Number(event.target.value))}>
+                {availableYears.map((year) => <option value={year} key={year}>{year}</option>)}
+              </select>
+            </label>
+          )}
+        </div>
       </div>
 
       <div className="adm-metric-grid">
-        <MetricCard label="Facturación del mes" value={fmt(data.revenue)} trend={data.revenueTrend} detail="Sin comparación anterior" type="revenue" tone={C.red} />
-        <MetricCard label="Pedidos pagados" value={data.monthSales.length} trend={data.ordersTrend} detail="Pedidos confirmados este mes" type="orders" tone={C.green} />
-        <MetricCard label="Ticket promedio" value={fmt(data.averageTicket)} trend={data.ticketTrend} detail="Promedio por pedido pagado" type="ticket" tone={C.amber} />
+        <MetricCard label="Facturación del período" value={fmt(data.revenue)} trend={periodMode === 'all' ? null : data.revenueTrend} detail={comparisonDetail} type="revenue" tone={C.red} />
+        <MetricCard label="Pedidos pagados" value={data.periodSales.length} trend={periodMode === 'all' ? null : data.ordersTrend} detail={periodMode === 'all' ? comparisonDetail : 'Pedidos confirmados en el período'} type="orders" tone={C.green} />
+        <MetricCard label="Ticket promedio" value={fmt(data.averageTicket)} trend={periodMode === 'all' ? null : data.ticketTrend} detail={periodMode === 'all' ? comparisonDetail : 'Promedio por pedido pagado'} type="ticket" tone={C.amber} />
         <MetricCard
           label="Requieren gestión"
           value={data.ordersToShip.length + data.pickupsToManage.length}
@@ -219,18 +306,18 @@ export default function OverviewDashboard({ products, onNavigate }) {
       </div>
 
       <div className="adm-overview-grid adm-overview-grid--wide">
-        <Panel title="Evolución de ventas" subtitle={`Facturación diaria de ${monthLabel}`} action={<span className="adm-panel-summary">Pico: {fmt(maxDaily === 1 ? 0 : maxDaily)}</span>}>
+        <Panel title="Evolución de ventas" subtitle={salesChartSubtitle} action={<span className="adm-panel-summary">Pico: {fmt(maxDaily === 1 ? 0 : maxDaily)}</span>}>
           <div className="adm-sales-chart">
-            <svg viewBox={`0 0 ${chartWidth} ${chartHeight}`} preserveAspectRatio="none" role="img" aria-label="Facturación diaria del mes">
+            <svg viewBox={`0 0 ${chartWidth} ${chartHeight}`} preserveAspectRatio="none" role="img" aria-label={salesChartSubtitle}>
               {[0.25, 0.5, 0.75, 1].map((part) => <line key={part} x1={chartPad} x2={chartWidth - chartPad} y1={chartHeight - chartPad - part * (chartHeight - chartPad * 2)} y2={chartHeight - chartPad - part * (chartHeight - chartPad * 2)} />)}
               <path d={areaPath} className="adm-chart-area" />
               <path d={linePath} className="adm-chart-line" />
             </svg>
-            <div className="adm-chart-labels"><span>Día 1</span><span>Día 8</span><span>Día 15</span><span>Día 22</span><span>Fin de mes</span></div>
+            <div className="adm-chart-labels">{data.chartLabels.map((label) => <span key={label}>{label}</span>)}</div>
           </div>
         </Panel>
 
-        <Panel title="Estado de pedidos" subtitle="Pedidos creados durante el mes">
+        <Panel title="Estado de pedidos" subtitle={`Pedidos creados en ${periodLabel.toLowerCase()}`}>
           <div className="adm-status-layout">
             <div className="adm-donut" style={{ background: donutGradient }}><div><strong>{statusTotal}</strong><span>pedidos</span></div></div>
             <div className="adm-status-list">
@@ -243,7 +330,7 @@ export default function OverviewDashboard({ products, onNavigate }) {
       </div>
 
       <div className="adm-overview-grid adm-overview-grid--wide">
-        <Panel title="Productos más vendidos" subtitle="Ranking por unidades vendidas este mes" action={<button className="adm-link-btn" onClick={() => onNavigate('products')}>Ver productos →</button>}>
+        <Panel title="Productos más vendidos" subtitle="Ranking por unidades vendidas en el período" action={<button className="adm-link-btn" onClick={() => onNavigate('products')}>Ver productos →</button>}>
           {data.topProducts.length ? (
             <div className="adm-top-products">
               <div className="adm-table-head"><span>#</span><span>Producto</span><span>Vendidos</span><span>Facturación</span></div>
@@ -253,10 +340,10 @@ export default function OverviewDashboard({ products, onNavigate }) {
                 </div>
               ))}
             </div>
-          ) : <EmptyState text="Todavía no hay ventas pagadas este mes." />}
+          ) : <EmptyState text="No hay ventas pagadas en el período seleccionado." />}
         </Panel>
 
-        <Panel title="Ventas por categoría" subtitle="Facturación de productos del mes">
+        <Panel title="Ventas por categoría" subtitle="Facturación de productos del período">
           {data.categorySales.length ? (
             <div className="adm-category-bars">
               {data.categorySales.map((item) => (
@@ -297,7 +384,10 @@ export default function OverviewDashboard({ products, onNavigate }) {
         .adm-overview-intro { display:flex; justify-content:space-between; align-items:flex-end; gap:16px; margin:-8px 0 18px; }
         .adm-overview-intro p { margin:0 0 3px; color:${C.text3}; font-size:11px; text-transform:uppercase; letter-spacing:.09em; font-weight:600; }
         .adm-overview-intro h2 { margin:0; font:500 21px/1.15 var(--font-sans); }
-        .adm-overview-intro > span { color:${C.muted}; font-size:11px; }
+        .adm-period-controls { display:flex; align-items:flex-end; justify-content:flex-end; gap:8px; flex-wrap:wrap; }
+        .adm-period-controls label { display:flex; flex-direction:column; gap:4px; color:${C.muted}; font-size:9px; text-transform:uppercase; letter-spacing:.06em; font-weight:600; }
+        .adm-period-controls select { min-width:112px; height:34px; padding:0 30px 0 10px; color:${C.text2}; background:${C.white}; border:1px solid ${C.border}; border-radius:7px; font-size:11px; font-weight:500; text-transform:none; letter-spacing:0; outline:none; }
+        .adm-period-controls select:focus { border-color:${C.red}; box-shadow:0 0 0 2px ${C.redLight}; }
         .adm-metric-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin-bottom:14px; }
         .adm-metric-card,.adm-overview-panel { background:${C.white}; border:1px solid ${C.border}; border-radius:10px; box-shadow:0 3px 14px rgba(15,23,42,.04); }
         .adm-metric-card { min-height:124px; padding:16px; position:relative; overflow:hidden; display:block; width:100%; color:inherit; text-align:left; font-family:inherit; appearance:none; }
@@ -329,7 +419,7 @@ export default function OverviewDashboard({ products, onNavigate }) {
         .adm-sales-chart line { stroke:${C.hairline}; stroke-width:1; stroke-dasharray:4 5; }
         .adm-chart-line { fill:none; stroke:${C.red}; stroke-width:3; vector-effect:non-scaling-stroke; stroke-linecap:round; stroke-linejoin:round; }
         .adm-chart-area { fill:rgba(204,0,0,.07); }
-        .adm-chart-labels { display:flex; justify-content:space-between; color:${C.muted}; font-size:10px; padding:5px 10px 0; }
+        .adm-chart-labels { display:flex; justify-content:space-between; gap:8px; color:${C.muted}; font-size:10px; padding:5px 10px 0; }
         .adm-status-layout { min-height:230px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:18px; }
         .adm-donut { width:128px; height:128px; border-radius:50%; display:grid; place-items:center; position:relative; }
         .adm-donut:after { content:''; position:absolute; inset:23px; background:${C.white}; border-radius:50%; }
@@ -371,7 +461,7 @@ export default function OverviewDashboard({ products, onNavigate }) {
         .adm-attention-item b { color:${C.muted}; font-size:14px; }
         .adm-empty { min-height:110px; display:grid; place-items:center; color:${C.muted}; font-size:11px; text-align:center; }
         @media (max-width:1200px) { .adm-metric-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } .adm-overview-grid--wide { grid-template-columns:1fr; } }
-        @media (max-width:720px) { .adm-overview-intro { align-items:flex-start; flex-direction:column; } .adm-metric-grid { grid-template-columns:1fr; } .adm-table-head,.adm-product-row { grid-template-columns:24px minmax(150px,1fr) 70px; } .adm-table-head span:last-child,.adm-product-row > b:last-child { display:none; } .adm-recent-orders { overflow-x:auto; } .adm-order-head,.adm-order-row { min-width:620px; } }
+        @media (max-width:720px) { .adm-overview-intro { align-items:flex-start; flex-direction:column; } .adm-period-controls { justify-content:flex-start; width:100%; } .adm-period-controls label { flex:1; } .adm-period-controls select { width:100%; min-width:0; } .adm-metric-grid { grid-template-columns:1fr; } .adm-table-head,.adm-product-row { grid-template-columns:24px minmax(150px,1fr) 70px; } .adm-table-head span:last-child,.adm-product-row > b:last-child { display:none; } .adm-recent-orders { overflow-x:auto; } .adm-order-head,.adm-order-row { min-width:620px; } }
       `}</style>
     </div>
   )

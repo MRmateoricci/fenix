@@ -19,7 +19,7 @@ export const SEO = {
     hoursDisplay:'Lunes a Sábado · 8:30–13:00 / 16:00–20:00',
     instagram:   'https://instagram.com/fenixcitybell',
     geo: { lat: -34.8917, lng: -58.0556 },
-    mapsUrl:     'https://maps.google.com/?q=Electricidad+E+Iluminacion+Fenix+City+Bell+La+Plata',
+    mapsUrl:     'https://www.google.com/maps?cid=9156829281735180874',
     founded:     '1977',
   },
 }

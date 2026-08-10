@@ -585,32 +585,30 @@ function FeaturedCard({ product, onAdd }) {
 
   return (
     <div
+      className="fnx-home-product-card"
       style={{
         display: 'flex', flexDirection: 'column',
         height: '100%',
-        transform: cardHovered ? 'translateY(-3px)' : 'translateY(0)',
+        transform: cardHovered ? 'translateY(-5px)' : 'translateY(0)',
         transition: 'transform .38s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
       }}
       onMouseEnter={() => setCardHovered(true)}
       onMouseLeave={() => setCardHovered(false)}
     >
       <Link to={`/products/${product.id}`} style={{ textDecoration: 'none', color: 'inherit' }}>
-        <div style={{
+        <div className="fnx-home-product-stage" style={{
           position: 'relative', aspectRatio: '1/1',
-          background: T.surface2,
-          border: `1px solid ${cardHovered ? T.hairlineStrong : T.hairline}`,
-          borderRadius: 3, overflow: 'hidden',
-          boxShadow: cardHovered
-            ? '0 20px 52px -12px rgba(22,17,11,0.22)'
-            : '0 2px 10px -4px rgba(22,17,11,0.06)',
-          transition: 'box-shadow .38s ease, border-color .25s ease',
+          background: 'transparent',
+          border: 'none',
+          overflow: 'hidden',
         }}>
           {product.image
             ? <img
                 src={product.image} alt={product.name}
+                className="fnx-home-product-image"
                 style={{
-                  width: '100%', height: '100%', objectFit: 'cover', display: 'block',
-                  transform: cardHovered ? 'scale(1.07)' : 'scale(1)',
+                  width: '100%', height: '100%', objectFit: 'contain', display: 'block',
+                  transform: cardHovered ? 'translateY(-4px) scale(1.035)' : 'translateY(0) scale(1)',
                   transition: 'transform .6s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
                 }}
                 loading="lazy"
@@ -622,9 +620,6 @@ function FeaturedCard({ product, onAdd }) {
                 transition: 'transform .6s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
               }} />
           }
-          <span style={{ position: 'absolute', top: 9, left: 10, fontFamily: "'Inter', system-ui, sans-serif", fontSize: 9, letterSpacing: '.07em', color: T.text3, zIndex: 1 }}>
-            {product.category}
-          </span>
           {product.originalPrice && (
             <span style={{
               position: 'absolute', top: 9, right: 10, zIndex: 1,
@@ -636,28 +631,6 @@ function FeaturedCard({ product, onAdd }) {
               -{Math.round((1 - product.price / product.originalPrice) * 100)}%
             </span>
           )}
-          {/* Hover overlay */}
-          <div style={{
-            position: 'absolute', inset: 0, zIndex: 2,
-            background: 'rgba(22,17,11,0.36)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            opacity: cardHovered ? 1 : 0,
-            transition: 'opacity .3s ease',
-            pointerEvents: cardHovered ? 'auto' : 'none',
-          }}>
-            <span style={{
-              background: T.cream,
-              color: T.ink,
-              fontSize: 10, fontWeight: 500,
-              letterSpacing: '.15em', textTransform: 'uppercase',
-              padding: '9px 16px', borderRadius: 2,
-              fontFamily: "var(--font-sans)",
-              transform: cardHovered ? 'translateY(0)' : 'translateY(10px)',
-              transition: 'transform .35s ease',
-            }}>
-              Ver producto
-            </span>
-          </div>
         </div>
       </Link>
       <div style={{ padding: '10px 2px 0', display: 'flex', flexDirection: 'column', flex: 1 }}>
@@ -859,7 +832,7 @@ function ComoLlegarLink() {
   const [hovered, setHovered] = useState(false)
   return (
     <a
-      href="https://maps.google.com/?q=Electricidad+E+Iluminacion+Fenix+City+Bell+La+Plata"
+      href={seoCfg.business.mapsUrl}
       target="_blank" rel="noopener noreferrer"
       style={{
         textDecoration: 'none', color: T.ink,
@@ -885,30 +858,9 @@ function WaIcon() {
 }
 
 // ─── Reseñas Section ───────────────────────────────────────────────────────────
-const RESENAS = [
-  {
-    nombre: 'Martina G.',
-    inicial: 'M',
-    fecha: 'hace 2 semanas',
-    texto: 'Excelente atención. Fui buscando una lámpara para el comedor y me asesoraron muy bien, terminé eligiendo algo mucho mejor de lo que tenía en mente. El producto llegó perfecto.',
-  },
-  {
-    nombre: 'Pablo R.',
-    inicial: 'P',
-    fecha: 'hace 1 mes',
-    texto: 'Compré tiras LED para toda la cocina. Me explicaron todo sobre temperatura de color y potencia antes de llevar. Instalé todo sin problemas y quedó impecable.',
-  },
-  {
-    nombre: 'Laura S.',
-    inicial: 'L',
-    fecha: 'hace 3 semanas',
-    texto: 'Local de barrio con atención de primera. Llevan años en City Bell y se nota — conocen los productos de verdad. Los precios son más que razonables para la calidad que ofrecen.',
-  },
-]
-
-function StarIcon() {
+function StarIcon({ filled = true }) {
   return (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="#F59E0B" stroke="none">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill={filled ? '#F59E0B' : '#D8D1C5'} stroke="none">
       <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
     </svg>
   )
@@ -916,18 +868,74 @@ function StarIcon() {
 
 const RESENA_CARD_W = 340
 const RESENA_GAP = 20
-const RESENA_SPEED = 46 // px/s
 
 function ResenasSection() {
-  // Enough copies so the strip never runs out of content mid-loop, however wide
-  // the screen is — otherwise the reset shows a visible jump instead of an
-  // uninterrupted scroll. Kept even so translateX(-50%) lands on a whole
-  // multiple of one set's width.
-  const repeatRaw = Math.min(8, Math.max(2, Math.ceil(16 / RESENAS.length)))
-  const repeat = repeatRaw % 2 === 0 ? repeatRaw : repeatRaw + 1
-  const track = Array.from({ length: repeat }, () => RESENAS).flat()
-  const setWidth = RESENAS.length * RESENA_CARD_W + (RESENAS.length - 1) * RESENA_GAP
-  const duration = (repeat / 2) * setWidth / RESENA_SPEED
+  const viewportRef = useRef(null)
+  const dragRef = useRef({ active: false, moved: false, startX: 0, scrollLeft: 0 })
+  const [dragging, setDragging] = useState(false)
+  const [reviewsData, setReviewsData] = useState(null)
+  const [reviewsLoading, setReviewsLoading] = useState(true)
+
+  useEffect(() => {
+    const controller = new AbortController()
+
+    fetch(`${API_BASE}/api/google-reviews`, { signal: controller.signal })
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error('Google Reviews no disponible')))
+      .then(setReviewsData)
+      .catch((error) => {
+        if (error.name !== 'AbortError') setReviewsData(null)
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setReviewsLoading(false)
+      })
+
+    return () => controller.abort()
+  }, [])
+
+  function startDrag(event) {
+    if (event.pointerType === 'mouse' && event.button !== 0) return
+    const viewport = viewportRef.current
+    if (!viewport) return
+
+    dragRef.current = {
+      active: true,
+      moved: false,
+      startX: event.clientX,
+      scrollLeft: viewport.scrollLeft,
+    }
+    setDragging(true)
+    viewport.setPointerCapture?.(event.pointerId)
+  }
+
+  function moveDrag(event) {
+    const viewport = viewportRef.current
+    const drag = dragRef.current
+    if (!viewport || !drag.active) return
+
+    const distance = event.clientX - drag.startX
+    if (Math.abs(distance) > 4) drag.moved = true
+    viewport.scrollLeft = drag.scrollLeft - distance
+  }
+
+  function finishDrag(event) {
+    const viewport = viewportRef.current
+    dragRef.current.active = false
+    setDragging(false)
+    if (viewport?.hasPointerCapture?.(event.pointerId)) viewport.releasePointerCapture(event.pointerId)
+  }
+
+  function preventLinkAfterDrag(event) {
+    if (!dragRef.current.moved) return
+    event.preventDefault()
+    event.stopPropagation()
+    dragRef.current.moved = false
+  }
+
+  const reviews = reviewsData?.reviews || []
+  const googleMapsUrl = reviewsData?.googleMapsUrl || seoCfg.business.mapsUrl
+  const ratingLabel = reviewsData?.rating
+    ? `${reviewsData.rating.toLocaleString('es-AR')} ${reviewsData.userRatingCount ? `· ${reviewsData.userRatingCount} reseñas · ` : '· '}`
+    : ''
 
   return (
     <section style={{ background: T.paper, padding: '72px 0' }}>
@@ -945,35 +953,50 @@ function ResenasSection() {
               Lo que dicen nuestros clientes
             </h2>
           </div>
-          <div style={{
-            display: 'inline-flex', alignItems: 'center', gap: 8,
-            padding: '8px 16px', borderRadius: 999,
-            background: '#FBF8F3', border: '1px solid #DED6C7',
-            fontFamily: "var(--font-sans)", fontSize: 11, color: T.muted,
-          }}>
+          <a
+            href={googleMapsUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            translate="no"
+            style={{
+             display: 'inline-flex', alignItems: 'center', gap: 8,
+             padding: '8px 16px', borderRadius: 999,
+             background: '#FBF8F3', border: '1px solid #DED6C7',
+             fontFamily: "var(--font-sans)", fontSize: 11, color: T.muted,
+             textDecoration: 'none',
+            }}
+          >
             <svg width="13" height="13" viewBox="0 0 24 24" fill="#4285F4" stroke="none">
               <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
               <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
               <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z" fill="#FBBC05"/>
               <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
             </svg>
-            Google Reviews
-          </div>
+            {ratingLabel}Google Maps
+          </a>
         </div>
         </Reveal>
       </div>
 
-      <div style={{ overflow: 'hidden', width: '100%' }}>
+      <div
+        ref={viewportRef}
+        className={`fnx-resenas-viewport${dragging ? ' is-dragging' : ''}`}
+        aria-label="Reseñas de clientes en Google Maps. Arrastrá horizontalmente para ver más."
+        onPointerDown={startDrag}
+        onPointerMove={moveDrag}
+        onPointerUp={finishDrag}
+        onPointerCancel={finishDrag}
+        onClickCapture={preventLinkAfterDrag}
+      >
         <div
-          className="fnx-marquee-track fnx-resenas-track"
+          className="fnx-resenas-track"
           style={{
             display: 'flex', gap: RESENA_GAP, width: 'max-content', padding: '4px 40px',
-            animation: `fnx-marquee ${duration}s linear infinite`,
           }}
         >
-          {track.map((r, i) => (
-            <div
-              key={`${r.nombre}-${i}`}
+          {reviews.map((review) => (
+            <article
+              key={review.id || `${review.author}-${review.date}`}
               style={{
                 width: RESENA_CARD_W, flexShrink: 0,
                 background: T.panel, border: '1px solid #DED6C7',
@@ -981,34 +1004,60 @@ function ResenasSection() {
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
-                <div style={{
-                  width: 38, height: 38, borderRadius: '50%',
-                  background: T.surface2, color: T.ink,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontFamily: "'Inter', system-ui, sans-serif",
-                  fontSize: 15, fontWeight: 600, flexShrink: 0,
-                }}>
-                  {r.inicial}
-                </div>
+                <a href={review.authorUrl || googleMapsUrl} target="_blank" rel="noopener noreferrer" tabIndex={-1} style={{ textDecoration: 'none' }}>
+                  {review.authorPhoto
+                    ? <img src={review.authorPhoto} alt="" draggable="false" style={{ width: 38, height: 38, borderRadius: '50%', objectFit: 'cover', display: 'block' }} />
+                    : <div style={{
+                        width: 38, height: 38, borderRadius: '50%',
+                        background: T.surface2, color: T.ink,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        fontFamily: "'Inter', system-ui, sans-serif",
+                        fontSize: 15, fontWeight: 600,
+                      }}>
+                        {review.author?.charAt(0)?.toUpperCase() || 'G'}
+                      </div>
+                  }
+                </a>
                 <div>
-                  <p style={{ fontFamily: "'Inter', system-ui, sans-serif", fontSize: 13.5, fontWeight: 500, color: T.ink, margin: 0 }}>{r.nombre}</p>
-                  <p style={{ fontFamily: "'Inter', system-ui, sans-serif", fontSize: 11.5, color: T.muted2, margin: 0 }}>{r.fecha}</p>
+                  <a href={review.authorUrl || googleMapsUrl} target="_blank" rel="noopener noreferrer" style={{ textDecoration: 'none' }}>
+                    <p style={{ fontFamily: "'Inter', system-ui, sans-serif", fontSize: 13.5, fontWeight: 500, color: T.ink, margin: 0 }}>{review.author}</p>
+                  </a>
+                  <p style={{ fontFamily: "'Inter', system-ui, sans-serif", fontSize: 11.5, color: T.muted2, margin: 0 }}>{review.date}</p>
                 </div>
               </div>
               <div style={{ display: 'flex', gap: 2, marginBottom: 12 }}>
-                {[...Array(5)].map((_, i) => <StarIcon key={i} />)}
+                {[...Array(5)].map((_, index) => <StarIcon key={index} filled={index < Math.round(review.rating)} />)}
               </div>
               <p style={{
                 fontFamily: "'Inter', system-ui, sans-serif",
                 fontSize: 13.5, lineHeight: 1.65, color: '#5A5248', margin: 0,
               }}>
-                {r.texto}
+                {review.text}
               </p>
-            </div>
+              <a href={review.reviewUrl || googleMapsUrl} target="_blank" rel="noopener noreferrer" style={{ display: 'inline-block', marginTop: 14, color: T.muted, fontFamily: "'Inter', system-ui, sans-serif", fontSize: 11.5, textUnderlineOffset: 3 }}>
+                Ver reseña en Google Maps
+              </a>
+            </article>
           ))}
+          {!reviewsLoading && reviews.length === 0 && (
+            <a
+              href={googleMapsUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="fnx-resenas-fallback"
+            >
+              <span>Las opiniones del local se muestran directamente desde Google Maps.</span>
+              <strong>Ver reseñas reales →</strong>
+            </a>
+          )}
+          {reviewsLoading && <div className="fnx-resenas-loading" aria-label="Cargando reseñas de Google Maps" />}
         </div>
       </div>
-      <style>{`.fnx-resenas-track:hover { animation-play-state: paused; }`}</style>
+      {reviews.length > 0 && (
+        <p className="fnx-resenas-attribution" translate="no">
+          Reseñas seleccionadas y ordenadas por relevancia por Google Maps. Arrastrá para ver más.
+        </p>
+      )}
     </section>
   )
 }
