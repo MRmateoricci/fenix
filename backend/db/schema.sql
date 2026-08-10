@@ -221,6 +221,12 @@ ALTER TABLE products ADD COLUMN IF NOT EXISTS image_url         TEXT;
 ALTER TABLE products ADD COLUMN IF NOT EXISTS hover_image_url   TEXT;
 ALTER TABLE products ADD COLUMN IF NOT EXISTS color_options     JSONB NOT NULL DEFAULT '[]';
 ALTER TABLE products ADD COLUMN IF NOT EXISTS size_options      JSONB NOT NULL DEFAULT '[]';
+-- Stock por combinación exacta color×medida, opcional. Forma:
+-- { "<nombre color o '_'>": { "<medida o '_'>": <stock entero> } }.
+-- Vacío ('{}') = el producto no usa esto y sigue usando el `stock` de arriba
+-- tal cual siempre funcionó; cuando se carga, `stock` pasa a ser la suma de
+-- todas las celdas (ver POST/PATCH /api/products y reserveStock).
+ALTER TABLE products ADD COLUMN IF NOT EXISTS variant_stock     JSONB NOT NULL DEFAULT '{}';
 ALTER TABLE products ADD COLUMN IF NOT EXISTS color_temp        NUMERIC(6,0);
 ALTER TABLE products ADD COLUMN IF NOT EXISTS ip_rating         VARCHAR(10);
 ALTER TABLE products ADD COLUMN IF NOT EXISTS material          VARCHAR(100);

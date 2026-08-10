@@ -23,6 +23,7 @@ function toBackendPayload(p) {
   if ('hoverImage' in p)    out.hover_image_url    = p.hoverImage
   if ('colors' in p)        out.color_options      = p.colors
   if ('sizes' in p)         out.size_options       = p.sizes
+  if ('variantStock' in p)  out.variant_stock      = p.variantStock
   if ('colorTemp' in p)     out.color_temp         = p.colorTemp
   if ('ipRating' in p)      out.ip_rating          = p.ipRating
   if ('watts' in p)         out.watts              = p.watts
@@ -438,6 +439,19 @@ export function AdminProvider({ children }) {
   useEffect(() => {
     fetchSubcategories().catch(() => {})
     fetchProductTypes().catch(() => {})
+  }, [fetchSubcategories, fetchProductTypes])
+
+  // Si esta pestaña quedó abierta desde antes (ej. el header en una pestaña,
+  // el admin en otra) y se cargó una subcategoría/tipo nuevo en otro lado, al
+  // volver a esta pestaña se refrescan para que el mega-menú del header no
+  // quede desactualizado sin recargar la página a mano.
+  useEffect(() => {
+    const onFocus = () => {
+      fetchSubcategories().catch(() => {})
+      fetchProductTypes().catch(() => {})
+    }
+    window.addEventListener('focus', onFocus)
+    return () => window.removeEventListener('focus', onFocus)
   }, [fetchSubcategories, fetchProductTypes])
 
   // Árbol de categorías "en vivo": el estático de categoryTree.js + lo que el

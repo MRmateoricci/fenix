@@ -457,6 +457,7 @@ const FIELD_TRANSFORMS = {
   hover_image_url:   (v) => v,
   color_options:     (v) => JSON.stringify(v ?? []),
   size_options:      (v) => JSON.stringify(v ?? []),
+  variant_stock:     (v) => JSON.stringify(v ?? {}),
   color_temp:        (v) => toNumber(v),
   ip_rating:         (v) => v,
   material:          (v) => v,

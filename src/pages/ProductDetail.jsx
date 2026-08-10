@@ -76,11 +76,24 @@ export default function ProductDetail() {
       ? Number(selectedColor.price)
       : product?.price
 
+  // Si el producto carga stock por combinación exacta (variantStock no
+  // vacío), la disponibilidad depende del color/medida elegidos; si no,
+  // sigue siendo el stock único de siempre.
+  const hasVariantStock = Object.keys(product?.variantStock || {}).length > 0
+  const availableStock = hasVariantStock
+    ? Number(product.variantStock[selectedColor?.name ?? '_']?.[selectedSize?.label ?? '_'] ?? 0)
+    : (product?.stock ?? 0)
+  const variantInStock = availableStock > 0
+
   useEffect(() => {
     setSelectedColor(product?.colors?.[0] ?? null)
     setSelectedSize(product?.sizes?.[0] ?? null)
     setImgError(false)
   }, [product?.id])
+
+  useEffect(() => {
+    setQty((q) => Math.max(1, Math.min(q, availableStock || 1)))
+  }, [availableStock])
 
   useEffect(() => {
     if (product && window.location.hash === '#reviews') {
@@ -118,7 +131,7 @@ export default function ProductDetail() {
   }
 
   function handleAdd() {
-    if (!product.inStock || added) return
+    if (!variantInStock || added) return
     for (let i = 0; i < qty; i++) {
       addItem({
         id:       product.id,
@@ -153,7 +166,7 @@ export default function ProductDetail() {
       url: `${seoCfg.siteUrl}/products/${product.id}`,
       priceCurrency: 'ARS',
       price: selectedPrice,
-      availability: product.inStock
+      availability: variantInStock
         ? 'https://schema.org/InStock'
         : 'https://schema.org/OutOfStock',
       seller: { '@type': 'Organization', name: seoCfg.business.name },
@@ -267,7 +280,7 @@ export default function ProductDetail() {
                   }}>
                     {product.category}
                   </span>
-                  {product.inStock ? (
+                  {variantInStock ? (
                     <span style={{
                       padding: '4px 10px', borderRadius: 4,
                       fontSize: 11, letterSpacing: '.12em', textTransform: 'uppercase',
@@ -422,7 +435,7 @@ export default function ProductDetail() {
               <div style={{ height: 1, backgroundColor: 'var(--color-border)' }} />
 
               {/* Quantity selector */}
-              {product.inStock && (
+              {variantInStock && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
                   <span style={{
                     fontSize: 14, fontWeight: 500,
@@ -459,14 +472,16 @@ export default function ProductDetail() {
                       {qty}
                     </span>
                     <button
-                      onClick={() => setQty((q) => q + 1)}
+                      onClick={() => setQty((q) => Math.min(availableStock, q + 1))}
+                      disabled={qty >= availableStock}
                       style={{
                         width: 44, height: 44, display: 'flex', alignItems: 'center',
                         justifyContent: 'center', fontSize: 20, fontWeight: 300,
-                        background: 'none', border: 'none', cursor: 'pointer',
-                        color: 'var(--color-text-muted)', transition: 'background .15s',
+                        background: 'none', border: 'none', cursor: qty >= availableStock ? 'not-allowed' : 'pointer',
+                        color: qty >= availableStock ? 'var(--color-border)' : 'var(--color-text-muted)',
+                        transition: 'background .15s',
                       }}
-                      onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-surface-2)')}
+                      onMouseEnter={(e) => { if (qty < availableStock) e.currentTarget.style.backgroundColor = 'var(--color-surface-2)' }}
                       onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
                       aria-label="Aumentar cantidad"
                     >
@@ -483,25 +498,25 @@ export default function ProductDetail() {
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 <button
                   onClick={handleAdd}
-                  disabled={!product.inStock || added}
+                  disabled={!variantInStock || added}
                   style={{
                     width: '100%', padding: '15px 0',
                     fontSize: 14, fontWeight: 600, letterSpacing: '.04em',
-                    borderRadius: 10, border: 'none', cursor: product.inStock && !added ? 'pointer' : 'not-allowed',
+                    borderRadius: 10, border: 'none', cursor: variantInStock && !added ? 'pointer' : 'not-allowed',
                     display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
                     transition: 'background .2s, opacity .2s',
                     ...(added
                       ? { backgroundColor: '#166534', color: '#fff' }
-                      : product.inStock
+                      : variantInStock
                         ? { backgroundColor: 'var(--color-primary)', color: '#fff' }
                         : { backgroundColor: 'var(--color-border)', color: 'var(--color-text-muted)' }),
                   }}
-                  onMouseEnter={(e) => { if (product.inStock && !added) e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)' }}
-                  onMouseLeave={(e) => { if (product.inStock && !added) e.currentTarget.style.backgroundColor = 'var(--color-primary)' }}
+                  onMouseEnter={(e) => { if (variantInStock && !added) e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)' }}
+                  onMouseLeave={(e) => { if (variantInStock && !added) e.currentTarget.style.backgroundColor = 'var(--color-primary)' }}
                 >
                   {added ? (
                     <><CheckIcon /> Agregado al carrito</>
-                  ) : product.inStock ? (
+                  ) : variantInStock ? (
                     <><CartIcon /> Agregar al carrito</>
                   ) : (
                     'Sin stock'
@@ -535,7 +550,7 @@ export default function ProductDetail() {
                 </a>
               </div>
 
-              {!product.inStock && <StockAlertForm product={product} />}
+              {!variantInStock && <StockAlertForm product={product} />}
 
               {/* Info chips */}
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>

@@ -15,12 +15,23 @@ export class InsufficientStockError extends Error {
 // misma orden queda aplicado a medias.
 export async function reserveStock(client, items) {
   for (const item of items) {
-    const { rows } = await client.query(
-      `UPDATE products SET stock = stock - $1, stock_updated_at = NOW()
-       WHERE id = $2 AND stock >= $1
-       RETURNING stock`,
-      [item.quantity, item.id]
-    )
+    const { rows } = item.colorKey != null && item.sizeKey != null
+      ? await client.query(
+          `UPDATE products
+           SET variant_stock = jsonb_set(variant_stock, $3::text[], to_jsonb((variant_stock #>> $3::text[])::int - $1)),
+               stock = stock - $1,
+               stock_updated_at = NOW()
+           WHERE id = $2
+             AND (variant_stock #>> $3::text[])::int >= $1
+           RETURNING stock`,
+          [item.quantity, item.id, [item.colorKey, item.sizeKey]]
+        )
+      : await client.query(
+          `UPDATE products SET stock = stock - $1, stock_updated_at = NOW()
+           WHERE id = $2 AND stock >= $1
+           RETURNING stock`,
+          [item.quantity, item.id]
+        )
     if (!rows.length) throw new InsufficientStockError(item.name)
   }
 }
@@ -45,10 +56,29 @@ export async function releaseOrderStock(orderId) {
     if (rows.length) {
       const items = rows[0].items || []
       for (const item of items) {
-        await client.query(
-          `UPDATE products SET stock = stock + $1, stock_updated_at = NOW() WHERE id = $2`,
-          [item.quantity, item.id]
-        )
+        // Si la orden reservó una celda puntual de variant_stock, tratamos de
+        // reponerla ahí (solo si esa celda todavía existe hoy — el producto
+        // pudo haber sido editado desde la compra). Si no aplica o ya no
+        // existe, reponemos solo el total, igual que siempre.
+        let released = false
+        if (item.colorKey != null && item.sizeKey != null) {
+          const { rowCount } = await client.query(
+            `UPDATE products
+             SET variant_stock = jsonb_set(variant_stock, $3::text[], to_jsonb((variant_stock #>> $3::text[])::int + $1)),
+                 stock = stock + $1,
+                 stock_updated_at = NOW()
+             WHERE id = $2
+               AND (variant_stock #> $3::text[]) IS NOT NULL`,
+            [item.quantity, item.id, [item.colorKey, item.sizeKey]]
+          )
+          released = rowCount > 0
+        }
+        if (!released) {
+          await client.query(
+            `UPDATE products SET stock = stock + $1, stock_updated_at = NOW() WHERE id = $2`,
+            [item.quantity, item.id]
+          )
+        }
       }
     }
 

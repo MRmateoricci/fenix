@@ -16,7 +16,7 @@ const SELECT_FIELDS = `
   COALESCE((SELECT usd_ars_rate FROM store_settings WHERE id = 1), 1510) AS usd_ars_rate,
   description_larga,
   image_url, hover_image_url, stock, watts, ip_rating, color_temp, material, cable_type, product_type,
-  color_options, size_options, length_cm, width_cm, height_cm, weight_kg
+  color_options, size_options, variant_stock, length_cm, width_cm, height_cm, weight_kg
 `
 
 export function mapRow(r) {
@@ -69,6 +69,7 @@ export function mapRow(r) {
       ...size,
       price: size.price == null || size.price === '' ? null : Number(size.price),
     })),
+    variantStock: r.variant_stock || {},
     published: true,
   }
 }

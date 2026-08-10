@@ -64,6 +64,32 @@ export function resolveProductVariantPrice(product, selectedColor, selectedSize)
   return { error: null, price }
 }
 
+// Si el producto carga stock por combinación exacta (variant_stock no vacío),
+// resuelve a qué celda de esa matriz corresponde el color/medida elegidos —
+// '_' es el comodín para la dimensión que el producto no usa. Devuelve null
+// si el producto no usa stock por variante (ese item sigue reservando contra
+// el `stock` plano de siempre, sin cambios). Si el producto sí lo usa pero la
+// combinación pedida no es una celda cargada, devuelve error 'invalid_variant'.
+export function resolveVariantStockPath(product, selectedColor, selectedSize) {
+  const variantStock = product?.variant_stock
+  const colorKeys = variantStock && typeof variantStock === 'object' ? Object.keys(variantStock) : []
+  if (!colorKeys.length) return null
+
+  const colorKey = colorKeys.find(key =>
+    key === '_' ? !selectedColor : String(key).localeCompare(String(selectedColor || ''), 'es-AR', { sensitivity: 'base' }) === 0
+  )
+  if (!colorKey) return { error: 'invalid_variant' }
+
+  const sizeMap = variantStock[colorKey]
+  const sizeKeys = sizeMap && typeof sizeMap === 'object' ? Object.keys(sizeMap) : []
+  const sizeKey = sizeKeys.find(key =>
+    key === '_' ? !selectedSize : String(key).localeCompare(String(selectedSize || ''), 'es-AR', { sensitivity: 'base' }) === 0
+  )
+  if (!sizeKey) return { error: 'invalid_variant' }
+
+  return { error: null, colorKey, sizeKey }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /api/orders
 // Body: { customer: {...formData incl. deliveryType/paymentMethod/pickupDate}, items }
@@ -135,7 +161,7 @@ router.post('/', attachUserIfPresent, async (req, res) => {
     // en lo que manda el cliente (podría mandar cualquier item.price).
     const productIds = items.map((i) => i.id)
     const { rows: dbProducts } = await pool.query(
-      `SELECT id, precio_venta, color_options, size_options FROM products WHERE id = ANY($1::uuid[])`,
+      `SELECT id, precio_venta, color_options, size_options, variant_stock FROM products WHERE id = ANY($1::uuid[])`,
       [productIds]
     )
     const productMap = new Map(dbProducts.map((p) => [p.id, p]))
@@ -153,6 +179,11 @@ router.post('/', attachUserIfPresent, async (req, res) => {
       if (resolvedPrice.error === 'invalid_size') {
         return res.status(400).json({ error: `Medida no disponible para ${i.name || i.id}` })
       }
+      const variantPath = resolveVariantStockPath(dbProduct, i.color, i.size)
+      if (variantPath?.error === 'invalid_variant') {
+        return res.status(400).json({ error: `Combinación no disponible para ${i.name || i.id}` })
+      }
+
       const price = resolvedPrice.price
       itemsSnapshot.push({
         id:       dbProduct.id,
@@ -164,6 +195,8 @@ router.post('/', attachUserIfPresent, async (req, res) => {
         image:    i.image || null,
         color:    i.color || null,
         size:     i.size || null,
+        colorKey: variantPath ? variantPath.colorKey : null,
+        sizeKey:  variantPath ? variantPath.sizeKey : null,
       })
     }
     const productsTotal = itemsSnapshot.reduce((sum, i) => sum + i.subtotal, 0)

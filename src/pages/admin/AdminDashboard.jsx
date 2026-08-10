@@ -188,7 +188,7 @@ function DismissibleErrorNotice({ children, marginBottom = 20, fontSize = 13 }) 
 // redefine en cada render, React lo trata como un tipo de componente distinto
 // y remonta el <input> en cada tecla, haciendo que pierda el foco todo el
 // tiempo y parezca que "no deja escribir".
-function FormField({ label, value, onChange, type = 'text', placeholder = '', span = 1, step }) {
+function FormField({ label, value, onChange, type = 'text', placeholder = '', span = 1, step, disabled = false }) {
   return (
     <div style={{ gridColumn: `span ${span}`, display: 'flex', flexDirection: 'column', gap: 5 }}>
       <label style={lbl}>{label}</label>
@@ -199,7 +199,8 @@ function FormField({ label, value, onChange, type = 'text', placeholder = '', sp
         placeholder={placeholder}
         min={type === 'number' ? 0 : undefined}
         step={type === 'number' ? step : undefined}
-        style={inp}
+        disabled={disabled}
+        style={disabled ? { ...inp, opacity: 0.6, cursor: 'not-allowed' } : inp}
       />
     </div>
   )
@@ -335,7 +336,7 @@ const EMPTY = {
   price: '', originalPrice: '',
   description: '', image: '', hoverImage: '',
   lengthCm: '', widthCm: '', heightCm: '', weightKg: '',
-  inStock: true, stock: '', colors: [], sizes: [],
+  inStock: true, stock: '', colors: [], sizes: [], variantStock: {},
   published: true,
 }
 
@@ -370,6 +371,7 @@ function draftFromInventoryRow(inv) {
     weightKg:    inv.weight_kg ?? '',
     colors:      inv.color_options || [],
     sizes:       inv.size_options || [],
+    variantStock: inv.variant_stock || {},
     published:   Boolean(inv.published),
   }
 }
@@ -397,6 +399,7 @@ function toUnifiedProductPayload(data) {
     hover_image_url: data.hoverImage || null,
     color_options: data.colors || [],
     size_options: data.sizes || [],
+    variant_stock: data.variantStock || {},
     color_temp: data.colorTemp || null,
     ip_rating: data.ipRating || null,
     watts: data.watts || null,
@@ -422,7 +425,11 @@ function ProductModal({ product, onSave, onClose, publishOnSave = false }) {
     weightKg:      String(product.weightKg ?? ''),
     colors:        product.colors || [],
     sizes:         product.sizes || [],
+    variantStock:  product.variantStock || {},
   })
+  const [useVariantStock, setUseVariantStock] = useState(
+    () => Object.keys(product?.variantStock || {}).length > 0
+  )
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
   const willBePublished = publishOnSave || form.published
@@ -444,6 +451,24 @@ function ProductModal({ product, onSave, onClose, publishOnSave = false }) {
   }))
   const addSize = () => setForm(f => ({ ...f, sizes: [...f.sizes, { label: '', price: '' }] }))
   const removeSize = (idx) => setForm(f => ({ ...f, sizes: f.sizes.filter((_, i) => i !== idx) }))
+
+  // Stock por combinación exacta color×medida. Filas = colores (o una sola
+  // fila implícita '_' si el producto no tiene colores), columnas = medidas
+  // (o una sola columna implícita '_' si no tiene medidas).
+  const filledColorNames = form.colors.map(c => c.name).filter(Boolean)
+  const filledSizeLabels = form.sizes.map(s => s.label).filter(Boolean)
+  const variantRows = filledColorNames.length ? filledColorNames : ['_']
+  const variantCols = filledSizeLabels.length ? filledSizeLabels : ['_']
+  const setVariantCell = (rowKey, colKey, value) => setForm(f => ({
+    ...f,
+    variantStock: {
+      ...f.variantStock,
+      [rowKey]: { ...(f.variantStock[rowKey] || {}), [colKey]: value },
+    },
+  }))
+  const variantStockTotal = Object.values(form.variantStock)
+    .flatMap(row => Object.values(row || {}))
+    .reduce((sum, v) => sum + (Number(v) || 0), 0)
 
   const [saving, setSaving] = useState(false)
 
@@ -470,6 +495,27 @@ function ProductModal({ product, onSave, onClose, publishOnSave = false }) {
     }
     out.colors = form.colors.filter(c => c.name?.trim()).map(c => ({ ...c, price: c.price === '' || c.price == null ? null : Number(c.price) }))
     out.sizes  = form.sizes.filter(s => s.label.trim()).map(s => ({ ...s, price: s.price === '' || s.price == null ? null : Number(s.price) }))
+
+    if (useVariantStock) {
+      const rowKeys = out.colors.length ? out.colors.map(c => c.name) : ['_']
+      const colKeys = out.sizes.length ? out.sizes.map(s => s.label) : ['_']
+      const cleanedVariantStock = {}
+      let total = 0
+      for (const rowKey of rowKeys) {
+        const row = form.variantStock[rowKey] || {}
+        cleanedVariantStock[rowKey] = {}
+        for (const colKey of colKeys) {
+          const n = Math.max(0, Math.round(Number(row[colKey]) || 0))
+          cleanedVariantStock[rowKey][colKey] = n
+          total += n
+        }
+      }
+      out.variantStock = cleanedVariantStock
+      out.stock = total
+      out.inStock = total > 0
+    } else {
+      out.variantStock = {}
+    }
     try {
       await onSave(out)
       onClose()
@@ -517,7 +563,13 @@ function ProductModal({ product, onSave, onClose, publishOnSave = false }) {
             <datalist id="supplier-options">{SUPPLIER_FILTERS.filter(s => s !== 'Todos').map(s => <option key={s} value={s} />)}</datalist>
           </div>
           <FormField label="Descripción interna" value={form.inventoryDescription} onChange={v => set('inventoryDescription', v)} span={2} />
-          <FormField label="Stock" value={form.stock} onChange={v => set('stock', v)} type="number" />
+          <FormField
+            label={useVariantStock ? 'Stock (suma de las variantes)' : 'Stock'}
+            value={useVariantStock ? String(variantStockTotal) : form.stock}
+            onChange={v => set('stock', v)}
+            type="number"
+            disabled={useVariantStock}
+          />
           <div style={{ gridColumn: 'span 2', marginTop: 4 }}>
             <label style={lbl}>Dimensiones para envío</label>
             <p style={{ fontSize: 10.5, color: C.muted, margin: '3px 0 8px' }}>Medidas del paquete en centímetros y peso aproximado en kilogramos.</p>
@@ -717,6 +769,58 @@ function ProductModal({ product, onSave, onClose, publishOnSave = false }) {
             </div>
           )}
         </div>
+
+        {/* Stock por combinación exacta color×medida */}
+        {(form.colors.length > 0 || form.sizes.length > 0) && (
+          <div style={{ marginTop: 20 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+              <Toggle value={useVariantStock} onChange={setUseVariantStock} />
+              <label style={lbl}>Cargar stock por color/medida</label>
+            </div>
+            <p style={{ fontSize: 11.5, color: C.muted, margin: '0 0 10px' }}>
+              Si lo activás, cargás una cantidad para cada combinación exacta (ej: Negro + medida 10) y el campo "Stock" de arriba pasa a ser la suma de todas. Si lo dejás apagado, seguís usando un único número de stock para todo el producto, como siempre.
+            </p>
+            {useVariantStock && (
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ borderCollapse: 'collapse', fontSize: 12.5 }}>
+                  <thead>
+                    <tr>
+                      <th style={{ padding: 6, textAlign: 'left' }} />
+                      {variantCols.map(colKey => (
+                        <th key={colKey} style={{ padding: 6, textAlign: 'center', fontWeight: 600, color: C.text3, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                          {colKey === '_' ? 'Stock' : colKey}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {variantRows.map(rowKey => (
+                      <tr key={rowKey}>
+                        <td style={{ padding: 6, fontWeight: 600, color: C.ink, whiteSpace: 'nowrap' }}>
+                          {rowKey === '_' ? 'Stock' : rowKey}
+                        </td>
+                        {variantCols.map(colKey => (
+                          <td key={colKey} style={{ padding: 4 }}>
+                            <input
+                              type="number"
+                              min={0}
+                              value={form.variantStock[rowKey]?.[colKey] ?? ''}
+                              onChange={e => setVariantCell(rowKey, colKey, e.target.value)}
+                              style={{ ...inp, width: 70, textAlign: 'center' }}
+                            />
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <p style={{ fontSize: 12, color: C.muted, margin: '8px 0 0' }}>
+                  Stock total: <strong style={{ color: C.ink }}>{variantStockTotal}</strong>
+                </p>
+              </div>
+            )}
+          </div>
+        )}
 
         {form.image && (
           <div style={{ marginTop: 16 }}>
