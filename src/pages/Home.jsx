@@ -198,7 +198,7 @@ function HeroSection() {
 
   return (
     <header
-      className="fnx-hero-light-on"
+      className="fnx-hero-light-on fnx-hero"
       style={{
         position: 'relative',
         marginTop: 64,
@@ -230,6 +230,7 @@ function HeroSection() {
               <Link
                 to={slide.ctaHref}
                 aria-label={`${slide.title} — ${slide.ctaText}`}
+                className="fnx-hero-slide-bg"
                 style={{
                   position: 'absolute', inset: 0,
                   backgroundImage: `url(${slide.imageUrl})`,
@@ -238,7 +239,7 @@ function HeroSection() {
                 }}
               />
             ) : (
-              <div style={{
+              <div className="fnx-hero-slide-bg" style={{
                 position: 'absolute', inset: 0,
                 backgroundImage: `url(${slide.imageUrl})`,
                 backgroundSize: 'cover',
@@ -392,6 +393,14 @@ function HeroSection() {
         @media (min-width: 900px) {
           .fnx-hero-arrow { display: flex; }
         }
+        /* Hero banners have their title/CTA baked into the photo (see heroSlides.js).
+           On narrow screens the tall portrait hero forces background-size:cover to
+           crop away most of that baked-in text — match the container to the image's
+           own aspect ratio instead, so the full banner (text included) stays visible. */
+        @media (max-width: 700px) {
+          .fnx-hero { min-height: 0 !important; aspect-ratio: 1916 / 821; }
+          .fnx-hero-slide-bg { background-position: center !important; }
+        }
         .fnx-hero-dots {
           position: absolute; left: 50%; bottom: 28px; transform: translateX(-50%);
           z-index: 3; display: flex; gap: 10px;
@@ -426,6 +435,27 @@ function CategoriasSection() {
           <CategoryCard key={cat.code} cat={cat} onClick={() => navigate(cat.to)} />
         ))}
       </div>
+      <style>{`
+        @media (max-width: 700px) {
+          .fnx-cat-grid {
+            display: flex !important;
+            overflow-x: auto;
+            overflow-y: hidden;
+            gap: 20px !important;
+            padding-bottom: 8px;
+            scroll-snap-type: x proximity;
+            -webkit-overflow-scrolling: touch;
+            scrollbar-width: none;
+          }
+          .fnx-cat-grid::-webkit-scrollbar { display: none; }
+          .fnx-cat-card {
+            flex: 0 0 auto;
+            width: 44vw;
+            max-width: 200px;
+            scroll-snap-align: start;
+          }
+        }
+      `}</style>
     </section>
   )
 }
@@ -435,6 +465,7 @@ function CategoryCard({ cat, onClick }) {
   return (
     <a
       href={cat.to}
+      className="fnx-cat-card"
       onClick={(e) => { e.preventDefault(); onClick() }}
       style={{ textDecoration: 'none', color: T.ink, display: 'block' }}
       onMouseEnter={() => setHovered(true)}
@@ -800,7 +831,7 @@ function ContactoSection() {
     <section id="contacto" style={{ maxWidth: 1320, margin: '0 auto', padding: '90px 40px', scrollMarginTop: 90 }}>
       <div className="fnx-contacto-grid" style={{ display: 'grid', gridTemplateColumns: '0.92fr 1.08fr', gap: 54, alignItems: 'stretch' }}>
         {/* Info */}
-        <div>
+        <div className="fnx-contacto-slide">
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
             <span style={{ fontFamily: "var(--font-sans)", fontSize: 12, color: T.muted }}>El local</span>
             <span style={{ width: 34, height: 1, background: T.hairlineStrong }} />
@@ -833,7 +864,7 @@ function ContactoSection() {
         </div>
 
         {/* Map embed */}
-        <figure style={{ margin: 0, display: 'flex', flexDirection: 'column' }}>
+        <figure className="fnx-contacto-slide" style={{ margin: 0, display: 'flex', flexDirection: 'column' }}>
           <div style={{
             position: 'relative', flex: 1, minHeight: 360,
             borderRadius: 3, overflow: 'hidden',
@@ -855,7 +886,26 @@ function ContactoSection() {
           </figcaption>
         </figure>
       </div>
-      <style>{`.fnx-contacto-grid { grid-template-columns: 1fr !important; } @media (min-width: 820px) { .fnx-contacto-grid { grid-template-columns: 0.92fr 1.08fr !important; } }`}</style>
+      <style>{`
+        .fnx-contacto-grid { grid-template-columns: 1fr !important; }
+        @media (min-width: 820px) { .fnx-contacto-grid { grid-template-columns: 0.92fr 1.08fr !important; } }
+        @media (max-width: 700px) {
+          .fnx-contacto-grid {
+            display: flex !important;
+            overflow-x: auto;
+            overflow-y: hidden;
+            scroll-snap-type: x mandatory;
+            -webkit-overflow-scrolling: touch;
+            scrollbar-width: none;
+          }
+          .fnx-contacto-grid::-webkit-scrollbar { display: none; }
+          .fnx-contacto-slide {
+            flex: 0 0 100%;
+            width: 100%;
+            scroll-snap-align: start;
+          }
+        }
+      `}</style>
     </section>
   )
 }
