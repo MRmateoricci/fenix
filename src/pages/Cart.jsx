@@ -131,10 +131,10 @@ export default function Cart() {
             <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
               {items.map((item) => (
                 <CartItem
-                  key={`${item.id}-${item.color ?? 'default'}-${item.size ?? 'default'}`}
+                  key={`${item.id}-${item.color ?? 'default'}-${item.size ?? 'default'}-${item.tone ?? 'default'}`}
                   item={item}
-                  onRemove={() => removeItem(item.id, item.color, item.size)}
-                  onQtyChange={(q) => updateQuantity(item.id, item.color, item.size, q)}
+                  onRemove={() => removeItem(item.id, item.color, item.size, item.tone)}
+                  onQtyChange={(q) => updateQuantity(item.id, item.color, item.size, q, item.tone)}
                 />
               ))}
             </ul>
@@ -296,7 +296,7 @@ function CartItem({ item, onRemove, onQtyChange }) {
             fontFamily: "'Inter', system-ui, sans-serif",
             fontSize: 12, color: T.muted, margin: '0 0 3px',
           }}>
-            {item.category}{item.color ? ` · Color: ${item.color}` : ''}{item.size ? ` · Medida: ${item.size}` : ''}
+            {item.category}{item.color ? ` · Color: ${item.color}` : ''}{item.tone ? ` · Tono: ${item.tone}` : ''}{item.size ? ` · Medida: ${item.size}` : ''}
           </p>
           <p style={{
             fontFamily: "'Inter', system-ui, sans-serif",

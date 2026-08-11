@@ -43,7 +43,7 @@ export function OrderItemsBlock({
               {item.name}
             </p>
             <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-              {item.quantity} × {fmt(item.price)}{item.color ? ` · ${item.color}` : ''}{item.size ? ` · ${item.size}` : ''}
+              {item.quantity} × {fmt(item.price)}{item.color ? ` · ${item.color}` : ''}{item.tone ? ` · ${item.tone}` : ''}{item.size ? ` · ${item.size}` : ''}
             </p>
           </div>
           <p className="text-sm font-semibold shrink-0" style={{ color: 'var(--color-text)' }}>

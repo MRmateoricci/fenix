@@ -221,6 +221,12 @@ ALTER TABLE products ADD COLUMN IF NOT EXISTS image_url         TEXT;
 ALTER TABLE products ADD COLUMN IF NOT EXISTS hover_image_url   TEXT;
 ALTER TABLE products ADD COLUMN IF NOT EXISTS color_options     JSONB NOT NULL DEFAULT '[]';
 ALTER TABLE products ADD COLUMN IF NOT EXISTS size_options      JSONB NOT NULL DEFAULT '[]';
+-- Tono de luz (ej: cálido/neutro/frío), típico de focos y reflectores.
+-- Misma forma que color_options (name/hex/price...) pero es un eje aparte:
+-- un producto puede tener color de carcasa y tono de luz al mismo tiempo. La
+-- celda de variant_stock combina color+tono en una sola clave de fila (ver
+-- resolveVariantStockPath en backend/routes/orders.js).
+ALTER TABLE products ADD COLUMN IF NOT EXISTS tone_options      JSONB NOT NULL DEFAULT '[]';
 -- Stock por combinación exacta color×medida, opcional. Forma:
 -- { "<nombre color o '_'>": { "<medida o '_'>": <stock entero> } }.
 -- Vacío ('{}') = el producto no usa esto y sigue usando el `stock` de arriba
@@ -244,6 +250,10 @@ ALTER TABLE products ADD COLUMN IF NOT EXISTS length_cm          NUMERIC(10,2);
 ALTER TABLE products ADD COLUMN IF NOT EXISTS width_cm           NUMERIC(10,2);
 ALTER TABLE products ADD COLUMN IF NOT EXISTS height_cm          NUMERIC(10,2);
 ALTER TABLE products ADD COLUMN IF NOT EXISTS weight_kg          NUMERIC(10,3);
+-- Etiquetas manuales para la tarjeta de producto de la tienda ("Nuevo" / "Más
+-- vendido"). Se activan a mano desde el admin, no se calculan de ventas.
+ALTER TABLE products ADD COLUMN IF NOT EXISTS is_new             BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS best_seller        BOOLEAN NOT NULL DEFAULT FALSE;
 
 -- Asociaciones confirmadas entre el código que usa cada proveedor en su XLS y
 -- el producto real del catálogo. Se consultan antes de cualquier heurística de

@@ -16,6 +16,16 @@ const fmt = (n) =>
     maximumFractionDigits: 0,
   }).format(n)
 
+// Combina color + tono en una sola clave de fila para variantStock: un
+// producto puede tener color de carcasa y tono de luz (cálido/neutro/frío) a
+// la vez, pero la matriz de stock sigue siendo 2D (fila × medida). Misma
+// convención en backend/routes/orders.js y AdminDashboard.jsx — si se cambia
+// acá hay que cambiarla en los tres lados.
+function combineVariantRowKey(colorName, toneName) {
+  if (colorName && toneName) return `${colorName} / ${toneName}`
+  return colorName || toneName || '_'
+}
+
 const REVIEWS_API = import.meta.env.VITE_API_URL || ''
 
 function useProductReviews(productId, authKey) {
@@ -69,25 +79,30 @@ export default function ProductDetail() {
   const [added, setAdded] = useState(false)
   const [selectedColor, setSelectedColor] = useState(product?.colors?.[0] ?? null)
   const [selectedSize, setSelectedSize] = useState(product?.sizes?.[0] ?? null)
+  const [selectedTone, setSelectedTone] = useState(product?.tones?.[0] ?? null)
   const [imgError, setImgError] = useState(false)
   const selectedPrice = selectedSize?.price != null
     ? Number(selectedSize.price)
-    : selectedColor?.price != null
-      ? Number(selectedColor.price)
-      : product?.price
+    : selectedTone?.price != null
+      ? Number(selectedTone.price)
+      : selectedColor?.price != null
+        ? Number(selectedColor.price)
+        : product?.price
 
   // Si el producto carga stock por combinación exacta (variantStock no
-  // vacío), la disponibilidad depende del color/medida elegidos; si no,
+  // vacío), la disponibilidad depende del color/tono/medida elegidos; si no,
   // sigue siendo el stock único de siempre.
   const hasVariantStock = Object.keys(product?.variantStock || {}).length > 0
+  const variantRowKey = combineVariantRowKey(selectedColor?.name, selectedTone?.name)
   const availableStock = hasVariantStock
-    ? Number(product.variantStock[selectedColor?.name ?? '_']?.[selectedSize?.label ?? '_'] ?? 0)
+    ? Number(product.variantStock[variantRowKey]?.[selectedSize?.label ?? '_'] ?? 0)
     : (product?.stock ?? 0)
   const variantInStock = availableStock > 0
 
   useEffect(() => {
     setSelectedColor(product?.colors?.[0] ?? null)
     setSelectedSize(product?.sizes?.[0] ?? null)
+    setSelectedTone(product?.tones?.[0] ?? null)
     setImgError(false)
   }, [product?.id])
 
@@ -141,6 +156,7 @@ export default function ProductDetail() {
         category: product.category,
         color:    selectedColor?.name,
         size:     selectedSize?.label,
+        tone:     selectedTone?.name,
       })
     }
     setAdded(true)
@@ -378,6 +394,46 @@ export default function ProductDetail() {
                           style={{
                             width: 34, height: 34, borderRadius: '50%',
                             backgroundColor: c.hex || '#ccc',
+                            border: isSelected
+                              ? '2px solid var(--color-text)'
+                              : '2px solid var(--color-border)',
+                            outline: isSelected ? '2px solid var(--color-bg)' : 'none',
+                            outlineOffset: isSelected ? '-4px' : '0',
+                            boxShadow: isSelected ? '0 0 0 1.5px var(--color-text)' : 'none',
+                            cursor: 'pointer', padding: 0,
+                            transition: 'box-shadow .15s, border-color .15s',
+                          }}
+                        />
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Selector de tono */}
+              {product.tones?.length > 0 && (
+                <div>
+                  <span style={{
+                    fontSize: 14, fontWeight: 500,
+                    color: 'var(--color-text)', fontFamily: 'var(--font-sans)',
+                    display: 'block', marginBottom: 10,
+                  }}>
+                    Tono{selectedTone ? `: ${selectedTone.name}` : ''}
+                  </span>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+                    {product.tones.map((t) => {
+                      const isSelected = selectedTone?.name === t.name
+                      return (
+                        <button
+                          key={t.name}
+                          type="button"
+                          onClick={() => setSelectedTone(t)}
+                          title={t.name}
+                          aria-label={t.name}
+                          aria-pressed={isSelected}
+                          style={{
+                            width: 34, height: 34, borderRadius: '50%',
+                            backgroundColor: t.hex || '#ccc',
                             border: isSelected
                               ? '2px solid var(--color-text)'
                               : '2px solid var(--color-border)',

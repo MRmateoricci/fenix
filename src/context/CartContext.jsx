@@ -5,13 +5,14 @@ const CartContext = createContext(null)
 const STORAGE_KEY = 'fenix_cart'
 const DNI_STORAGE_KEY = 'fenix_checkout_dni'
 
-// Dos líneas de carrito son "la misma" si comparten producto, color y medida
-// elegidos. Productos sin color/medida (undefined/null) siguen matcheando
-// como antes.
+// Dos líneas de carrito son "la misma" si comparten producto, color, tono y
+// medida elegidos. Productos sin color/tono/medida (undefined/null) siguen
+// matcheando como antes.
 const sameLine = (a, b) =>
   a.id === b.id &&
   (a.color ?? null) === (b.color ?? null) &&
-  (a.size ?? null) === (b.size ?? null)
+  (a.size ?? null) === (b.size ?? null) &&
+  (a.tone ?? null) === (b.tone ?? null)
 
 function cartReducer(state, action) {
   switch (action.type) {
@@ -75,12 +76,12 @@ export function CartProvider({ children }) {
     try { localStorage.setItem(DNI_STORAGE_KEY, normalized) } catch { /* ignore */ }
   }
 
-  function removeItem(id, color = null, size = null) {
-    dispatch({ type: 'REMOVE_ITEM', id, color, size })
+  function removeItem(id, color = null, size = null, tone = null) {
+    dispatch({ type: 'REMOVE_ITEM', id, color, size, tone })
   }
 
-  function updateQuantity(id, color, size, quantity) {
-    dispatch({ type: 'UPDATE_QUANTITY', id, color, size, quantity })
+  function updateQuantity(id, color, size, quantity, tone = null) {
+    dispatch({ type: 'UPDATE_QUANTITY', id, color, size, quantity, tone })
   }
 
   function clearCart() {

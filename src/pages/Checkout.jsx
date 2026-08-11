@@ -1156,7 +1156,7 @@ function OrderSummary({ items, totalPrice, deliveryType, shippingZone, shippingC
       <ul>
         {items.map((item) => (
           <li
-            key={`${item.id}-${item.color ?? 'default'}-${item.size ?? 'default'}`}
+            key={`${item.id}-${item.color ?? 'default'}-${item.size ?? 'default'}-${item.tone ?? 'default'}`}
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -1191,7 +1191,7 @@ function OrderSummary({ items, totalPrice, deliveryType, shippingZone, shippingC
                 {item.name}
               </p>
               <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: '0.125rem' }}>
-                {item.quantity} × {fmt(item.price)}{item.color ? ` · ${item.color}` : ''}{item.size ? ` · ${item.size}` : ''}
+                {item.quantity} × {fmt(item.price)}{item.color ? ` · ${item.color}` : ''}{item.tone ? ` · ${item.tone}` : ''}{item.size ? ` · ${item.size}` : ''}
               </p>
             </div>
             <p style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-text)', flexShrink: 0 }}>

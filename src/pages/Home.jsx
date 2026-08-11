@@ -1,15 +1,15 @@
 import { useState, useEffect, useRef } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAdmin } from '../context/AdminContext'
-import { useCart } from '../context/CartContext'
+import ProductCard from '../components/ProductCard'
 import localImg from '../assets/Fenix local.jpg'
-import heroImg from '../assets/fondo fenix.jpg'
 import interiorImg from '../assets/sin fondo iluminacion.png'
 import electricidadImg from '../assets/sin fondo electricidad.png'
 import herramientasImg from '../assets/sin fondo herramientas.png'
 import automatizacionImg from '../assets/sin fondo automatizacion.png'
 import PageSEO from '../components/SEO'
 import { SEO as seoCfg } from '../config/seo'
+import { HERO_SLIDES } from '../data/heroSlides'
 
 const T = {
   paper:          '#F7F4EF',
@@ -32,9 +32,8 @@ const T = {
 const API_BASE = import.meta.env.VITE_API_URL || ''
 
 const HERO_PAPER_FADE_HEIGHT = 'clamp(140px, 20vw, 240px)'
-
-const fmt = (n) =>
-  new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(n)
+const HERO_AUTOPLAY_MS = 5000
+const HERO_SWIPE_THRESHOLD = 40
 
 // Reveals children with a fade + rise-up cinematic entrance the first time they scroll into view.
 function useInView(threshold = 0.2) {
@@ -164,63 +163,246 @@ export default function Home() {
   )
 }
 
-// ─── 1. Hero ───────────────────────────────────────────────────────────────────
+// ─── 1. Hero (carrusel) ─────────────────────────────────────────────────────────
 function HeroSection() {
-  return (
-    <header className="fnx-hero-light-on" style={{
-      position: 'relative',
-      minHeight: 'clamp(620px, 72vh, 840px)',
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      textAlign: 'center', color: '#F2EBDC',
-      background: '#14100A',
-      overflow: 'hidden',
-    }}>
-      {/* Photo background — pendant globe lights */}
-      <div aria-hidden="true" style={{
-        position: 'absolute', inset: 0, zIndex: 0,
-        backgroundImage: `url(${heroImg})`,
-        backgroundSize: 'cover',
-        backgroundPosition: 'center 66%',
-      }} />
+  const [activeIndex, setActiveIndex] = useState(0)
+  const [paused, setPaused] = useState(false)
+  const touchStartX = useRef(null)
 
-      {/* Darkening overlay for text legibility */}
+  useEffect(() => {
+    if (paused || HERO_SLIDES.length <= 1) return undefined
+    const timer = setInterval(() => {
+      setActiveIndex((i) => (i + 1) % HERO_SLIDES.length)
+    }, HERO_AUTOPLAY_MS)
+    return () => clearInterval(timer)
+  }, [paused])
+
+  function goTo(index) {
+    setActiveIndex((index + HERO_SLIDES.length) % HERO_SLIDES.length)
+  }
+
+  function handleTouchStart(e) {
+    touchStartX.current = e.touches[0].clientX
+    setPaused(true)
+  }
+
+  function handleTouchEnd(e) {
+    const startX = touchStartX.current
+    if (startX != null) {
+      const deltaX = e.changedTouches[0].clientX - startX
+      if (Math.abs(deltaX) > HERO_SWIPE_THRESHOLD) goTo(activeIndex + (deltaX < 0 ? 1 : -1))
+    }
+    touchStartX.current = null
+    setPaused(false)
+  }
+
+  return (
+    <header
+      className="fnx-hero-light-on"
+      style={{
+        position: 'relative',
+        marginTop: 64,
+        minHeight: 'clamp(620px, 72vh, 840px)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        textAlign: 'center', color: '#F2EBDC',
+        background: '#14100A',
+        overflow: 'hidden',
+      }}
+      onMouseEnter={() => setPaused(true)}
+      onMouseLeave={() => setPaused(false)}
+      onTouchStart={handleTouchStart}
+      onTouchEnd={handleTouchEnd}
+    >
+      {/* Photo background per slide, cross-fading */}
+      {HERO_SLIDES.map((slide, index) => (
+        <div
+          key={index}
+          aria-hidden="true"
+          style={{
+            position: 'absolute', inset: 0, zIndex: 0,
+            opacity: index === activeIndex ? 1 : 0,
+            pointerEvents: index === activeIndex ? 'auto' : 'none',
+            transition: 'opacity 1s ease',
+          }}
+        >
+          {slide.imageUrl ? (
+            slide.textOverlay === false ? (
+              <Link
+                to={slide.ctaHref}
+                aria-label={`${slide.title} — ${slide.ctaText}`}
+                style={{
+                  position: 'absolute', inset: 0,
+                  backgroundImage: `url(${slide.imageUrl})`,
+                  backgroundSize: 'cover',
+                  backgroundPosition: 'center 66%',
+                }}
+              />
+            ) : (
+              <div style={{
+                position: 'absolute', inset: 0,
+                backgroundImage: `url(${slide.imageUrl})`,
+                backgroundSize: 'cover',
+                backgroundPosition: 'center 66%',
+              }} />
+            )
+          ) : (
+            <div style={{
+              position: 'absolute', inset: 0,
+              background: 'linear-gradient(160deg, #2A2118 0%, #3A2E1E 55%, #4A3B24 100%)',
+              display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
+              padding: '32px 40px',
+            }}>
+              <span style={{
+                fontFamily: "var(--font-sans)", fontSize: 13, letterSpacing: '.08em',
+                color: 'rgba(242,235,220,0.4)', textTransform: 'uppercase', textAlign: 'center',
+              }}>
+                {slide.imagePlaceholder}
+              </span>
+            </div>
+          )}
+        </div>
+      ))}
+
+      {/* Darkening overlay for text legibility — skipped for slides whose photo has its own baked-in text */}
       <div aria-hidden="true" style={{
         position: 'absolute', inset: 0, zIndex: 1,
+        opacity: HERO_SLIDES[activeIndex]?.textOverlay === false ? 0 : 1,
+        transition: 'opacity 1s ease',
+        pointerEvents: 'none',
         background: [
           'linear-gradient(180deg, rgba(10,8,4,0.55) 0%, rgba(10,8,4,0.35) 40%, rgba(10,8,4,0.72) 100%)',
           'radial-gradient(60% 55% at 50% 42%, rgba(10,8,4,0.15), rgba(10,8,4,0.55) 78%)',
         ].join(','),
       }} />
 
-      {/* Fade into the page background so the categories blend in, no hard cut. */}
+      {/* Fade into the page background so the categories blend in, no hard cut — skipped for slides whose photo has its own baked-in text */}
       <div aria-hidden="true" style={{
         position: 'absolute', left: 0, right: 0, bottom: 0, zIndex: 1,
         height: HERO_PAPER_FADE_HEIGHT,
+        opacity: HERO_SLIDES[activeIndex]?.textOverlay === false ? 0 : 1,
+        transition: 'opacity 1s ease',
         background: `linear-gradient(180deg, rgba(247,244,239,0) 0%, rgba(247,244,239,.05) 18%, rgba(247,244,239,.18) 38%, rgba(247,244,239,.42) 60%, rgba(247,244,239,.72) 80%, rgba(247,244,239,.92) 94%, ${T.paper} 100%)`,
         pointerEvents: 'none',
       }} />
 
-      {/* Content */}
-      <div style={{ position: 'relative', zIndex: 2, padding: '90px 30px 44px', maxWidth: 900 }}>
-        <div style={{
-          fontFamily: "var(--font-sans)",
-          fontSize: 12.5, letterSpacing: '.26em', textTransform: 'uppercase',
-          color: 'rgba(242,235,220,0.72)', marginBottom: 20,
-        }}>
-          City Bell · desde 1977
+      {/* Content — slides with textOverlay: false skip this (their photo already has title/CTA baked in) */}
+      {HERO_SLIDES[activeIndex]?.textOverlay !== false && (
+        <div style={{ position: 'relative', zIndex: 2, padding: '90px 30px 44px', maxWidth: 900 }}>
+          <div style={{
+            fontFamily: "var(--font-sans)",
+            fontSize: 12.5, letterSpacing: '.26em', textTransform: 'uppercase',
+            color: 'rgba(242,235,220,0.72)', marginBottom: 20,
+          }}>
+            City Bell · desde 1977
+          </div>
+          {HERO_SLIDES.map((slide, index) => (
+            index === activeIndex && (
+              <div key={index}>
+                <h1 style={{
+                  fontFamily: "'Cormorant Garamond', Georgia, serif",
+                  fontWeight: 600, margin: 0,
+                  fontSize: 'clamp(48px, 7vw, 100px)',
+                  lineHeight: .9, letterSpacing: '-.025em',
+                  color: '#F7F4EF',
+                  textShadow: '0 4px 32px rgba(0,0,0,0.35)',
+                }}>
+                  {slide.title}
+                </h1>
+                <p style={{
+                  fontFamily: "var(--font-sans)",
+                  fontSize: 'clamp(15px, 1.6vw, 19px)',
+                  lineHeight: 1.5,
+                  color: 'rgba(242,235,220,0.86)',
+                  margin: '22px 0 0',
+                }}>
+                  {slide.subtitle}
+                </p>
+                <Link
+                  to={slide.ctaHref}
+                  style={{
+                    display: 'inline-block', marginTop: 32,
+                    background: '#F7F4EF', color: '#14100A',
+                    fontFamily: "var(--font-sans)", fontWeight: 600, fontSize: 14,
+                    padding: '15px 34px', borderRadius: 2, textDecoration: 'none',
+                    letterSpacing: '.01em',
+                  }}
+                >
+                  {slide.ctaText}
+                </Link>
+              </div>
+            )
+          ))}
         </div>
-        <h1 style={{
-          fontFamily: "'Cormorant Garamond', Georgia, serif",
-          fontWeight: 600, margin: 0,
-          fontSize: 'clamp(48px, 7vw, 100px)',
-          lineHeight: .9, letterSpacing: '-.025em',
-          color: '#F7F4EF',
-          textShadow: '0 4px 32px rgba(0,0,0,0.35)',
-        }}>
-          Tu casa,<br />
-          <em style={{ fontStyle: 'normal' }}>en su mejor luz</em>
-        </h1>
-      </div>
+      )}
+
+      {/* Prev/next arrows — desktop only */}
+      {HERO_SLIDES.length > 1 && (
+        <>
+          <button
+            type="button"
+            className="fnx-hero-arrow fnx-hero-arrow--previous"
+            onClick={() => goTo(activeIndex - 1)}
+            aria-label="Slide anterior"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14.5 5-7 7 7 7" /></svg>
+          </button>
+          <button
+            type="button"
+            className="fnx-hero-arrow fnx-hero-arrow--next"
+            onClick={() => goTo(activeIndex + 1)}
+            aria-label="Slide siguiente"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9.5 5 7 7-7 7" /></svg>
+          </button>
+        </>
+      )}
+
+      {/* Pagination dots */}
+      {HERO_SLIDES.length > 1 && (
+        <div className="fnx-hero-dots" role="tablist" aria-label="Seleccionar slide">
+          {HERO_SLIDES.map((_, index) => (
+            <button
+              key={index}
+              type="button"
+              role="tab"
+              aria-selected={index === activeIndex}
+              aria-label={`Ir al slide ${index + 1}`}
+              className="fnx-hero-dot"
+              data-active={index === activeIndex}
+              onClick={() => goTo(index)}
+            />
+          ))}
+        </div>
+      )}
+
+      <style>{`
+        .fnx-hero-arrow {
+          display: none;
+          position: absolute; top: 50%; transform: translateY(-50%);
+          z-index: 3; width: 44px; height: 44px; border-radius: 50%;
+          background: rgba(20,16,10,0.35); border: 1px solid rgba(242,235,220,0.35);
+          color: #F2EBDC; cursor: pointer;
+          align-items: center; justify-content: center;
+          transition: background .15s, border-color .15s;
+        }
+        .fnx-hero-arrow:hover { background: rgba(20,16,10,0.6); border-color: rgba(242,235,220,0.6); }
+        .fnx-hero-arrow svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+        .fnx-hero-arrow--previous { left: 24px; }
+        .fnx-hero-arrow--next { right: 24px; }
+        @media (min-width: 900px) {
+          .fnx-hero-arrow { display: flex; }
+        }
+        .fnx-hero-dots {
+          position: absolute; left: 50%; bottom: 28px; transform: translateX(-50%);
+          z-index: 3; display: flex; gap: 10px;
+        }
+        .fnx-hero-dot {
+          width: 8px; height: 8px; border-radius: 50%; padding: 0;
+          border: none; background: rgba(242,235,220,0.4); cursor: pointer;
+          transition: background .2s, transform .2s;
+        }
+        .fnx-hero-dot[data-active="true"] { background: #F7F4EF; transform: scale(1.25); }
+      `}</style>
     </header>
   )
 }
@@ -233,7 +415,7 @@ function CategoriasSection() {
     <section
       id="categorias"
       style={{
-        maxWidth: 1440, margin: '0 auto', padding: '0 40px 120px', position: 'relative', zIndex: 3, scrollMarginTop: 90,
+        maxWidth: 1440, margin: '0 auto', padding: '90px 40px 120px', position: 'relative', zIndex: 3, scrollMarginTop: 90,
       }}
     >
       <div
@@ -244,11 +426,6 @@ function CategoriasSection() {
           <CategoryCard key={cat.code} cat={cat} onClick={() => navigate(cat.to)} />
         ))}
       </div>
-      <style>{`
-        .fnx-cat-grid { margin-top: -72px; }
-        @media (min-width: 640px)  { .fnx-cat-grid { margin-top: -104px; } }
-        @media (min-width: 1024px) { .fnx-cat-grid { margin-top: -136px; } }
-      `}</style>
     </section>
   )
 }
@@ -385,7 +562,6 @@ function CategoryIcon({ type }) {
 // Same product set as the "Promociones" category page (/products?category=Promociones):
 // anything currently marked down (has an originalPrice), kept in sync via that one condition.
 function DestacadosSection() {
-  const { addItem } = useCart()
   const { products } = useAdmin()
   const featured = products.filter(p => p.originalPrice)
 
@@ -407,7 +583,7 @@ function DestacadosSection() {
               <h2 className="fnx-tonal-product-section__title">Promociones</h2>
             </Link>
           </div>
-          <InfiniteProductCarousel products={featured} onAdd={addItem} label="Promociones" />
+          <InfiniteProductCarousel products={featured} label="Promociones" />
         </div>
       </Reveal>
     </section>
@@ -415,7 +591,6 @@ function DestacadosSection() {
 }
 
 function MostSearchedSection() {
-  const { addItem } = useCart()
   const { products } = useAdmin()
   const [bestSellerIds, setBestSellerIds] = useState([])
 
@@ -456,14 +631,14 @@ function MostSearchedSection() {
           <div className="fnx-tonal-product-section__header">
             <h2 className="fnx-tonal-product-section__title">Los más buscados</h2>
           </div>
-          <InfiniteProductCarousel products={mostSearched} onAdd={addItem} label="Los más buscados" />
+          <InfiniteProductCarousel products={mostSearched} label="Los más buscados" />
         </div>
       </Reveal>
     </section>
   )
 }
 
-function InfiniteProductCarousel({ products, onAdd, label }) {
+function InfiniteProductCarousel({ products, label }) {
   const carouselRef = useRef(null)
   const normalizeTimer = useRef(null)
   const [canScroll, setCanScroll] = useState(false)
@@ -548,7 +723,7 @@ function InfiniteProductCarousel({ products, onAdd, label }) {
       <div ref={carouselRef} className="fnx-promo-carousel" aria-label={label}>
         {carouselProducts.map((product, index) => (
           <div key={`${product.id}-${index}`} className="fnx-promo-slide">
-            <FeaturedCard product={product} onAdd={onAdd} />
+            <ProductCard product={product} />
           </div>
         ))}
       </div>
@@ -561,125 +736,6 @@ function InfiniteProductCarousel({ products, onAdd, label }) {
       >
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9.5 5 7 7-7 7" /></svg>
       </button>
-    </div>
-  )
-}
-
-function FeaturedCard({ product, onAdd }) {
-  const [addHover, setAddHover] = useState(false)
-  const [cardHovered, setCardHovered] = useState(false)
-
-  function handleAdd(e) {
-    e.preventDefault()
-    if (!product.inStock) return
-    const defaultColor = product.colors?.[0]
-    onAdd({
-      id: product.id,
-      name: product.name,
-      price: defaultColor?.price != null ? Number(defaultColor.price) : product.price,
-      image: defaultColor?.image || product.image,
-      category: product.category,
-      color: defaultColor?.name,
-    })
-  }
-
-  return (
-    <div
-      className="fnx-home-product-card"
-      style={{
-        display: 'flex', flexDirection: 'column',
-        height: '100%',
-        transform: cardHovered ? 'translateY(-5px)' : 'translateY(0)',
-        transition: 'transform .38s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
-      }}
-      onMouseEnter={() => setCardHovered(true)}
-      onMouseLeave={() => setCardHovered(false)}
-    >
-      <Link to={`/products/${product.id}`} style={{ textDecoration: 'none', color: 'inherit' }}>
-        <div className="fnx-home-product-stage" style={{
-          position: 'relative', aspectRatio: '1/1',
-          background: 'transparent',
-          border: 'none',
-          overflow: 'hidden',
-        }}>
-          {product.image
-            ? <img
-                src={product.image} alt={product.name}
-                className="fnx-home-product-image"
-                style={{
-                  width: '100%', height: '100%', objectFit: 'contain', display: 'block',
-                  transform: cardHovered ? 'translateY(-4px) scale(1.035)' : 'translateY(0) scale(1)',
-                  transition: 'transform .6s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
-                }}
-                loading="lazy"
-              />
-            : <div style={{
-                position: 'absolute', inset: 0,
-                background: 'radial-gradient(64% 54% at 58% 32%, rgba(255,255,255,0.72), transparent 64%)',
-                transform: cardHovered ? 'scale(1.07)' : 'scale(1)',
-                transition: 'transform .6s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
-              }} />
-          }
-          {product.originalPrice && (
-            <span style={{
-              position: 'absolute', top: 9, right: 10, zIndex: 1,
-              background: T.amber, color: '#fff',
-              fontFamily: "'Inter', system-ui, sans-serif",
-              fontSize: 10, fontWeight: 600, letterSpacing: '.02em',
-              padding: '2px 6px', borderRadius: 2,
-            }}>
-              -{Math.round((1 - product.price / product.originalPrice) * 100)}%
-            </span>
-          )}
-        </div>
-      </Link>
-      <div style={{ padding: '10px 2px 0', display: 'flex', flexDirection: 'column', flex: 1 }}>
-        <Link to={`/products/${product.id}`} style={{ textDecoration: 'none', color: 'inherit' }}>
-          <h3 style={{ fontFamily: "'Inter', system-ui, sans-serif", fontWeight: 400, fontSize: 12.5, lineHeight: 1.35, margin: '0 0 8px', color: T.ink }}>
-            {product.name}
-          </h3>
-        </Link>
-        <div style={{
-          marginTop: 'auto',
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
-          borderTop: `1px solid ${T.hairline}`, paddingTop: 9,
-        }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-            <span style={{ fontFamily: "'Inter', system-ui, sans-serif", fontSize: 13, fontWeight: 500, color: T.ink }}>
-              {fmt(product.price)}
-            </span>
-            {product.originalPrice && (
-              <span style={{ fontFamily: "'Inter', system-ui, sans-serif", fontSize: 10.5, color: T.muted2, textDecoration: 'line-through' }}>
-                {fmt(product.originalPrice)}
-              </span>
-            )}
-          </div>
-          <button
-            onClick={handleAdd}
-            disabled={!product.inStock}
-            style={{
-              background: 'none', border: 'none',
-              cursor: product.inStock ? 'pointer' : 'default',
-              fontSize: 11.5, fontWeight: 500,
-              color: addHover && product.inStock ? T.red : T.ink,
-              display: 'inline-flex', alignItems: 'center', gap: 4,
-              padding: '3px 0',
-              borderBottom: `1px solid ${addHover && product.inStock ? T.red : T.hairlineStrong}`,
-              transition: 'color .15s, border-color .15s',
-              fontFamily: "'Inter', system-ui, sans-serif",
-            }}
-            onMouseEnter={() => setAddHover(true)}
-            onMouseLeave={() => setAddHover(false)}
-          >
-            {product.inStock ? 'Agregar' : 'Sin stock'}
-            {product.inStock && (
-              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.9">
-                <path d="M12 5v14M5 12h14" strokeLinecap="round" />
-              </svg>
-            )}
-          </button>
-        </div>
-      </div>
     </div>
   )
 }

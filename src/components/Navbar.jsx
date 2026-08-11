@@ -133,13 +133,7 @@ export default function Navbar() {
     searchBlurTimer.current = setTimeout(() => setSearchFocused(false), 150)
   }
 
-  useEffect(() => {
-    if (!isHome) { setScrolled(true); return }
-    const check = () => setScrolled(window.scrollY > window.innerHeight * 0.82)
-    check()
-    window.addEventListener('scroll', check, { passive: true })
-    return () => window.removeEventListener('scroll', check)
-  }, [isHome])
+  useEffect(() => { setScrolled(true) }, [])
 
   useEffect(() => {
     document.body.style.overflow = mobileOpen ? 'hidden' : ''

@@ -327,6 +327,16 @@ function guessCategory(grupo, subgrupo) {
   return ''
 }
 
+// Combina color + tono en una sola clave de fila para variant_stock: un
+// producto puede tener color de carcasa y tono de luz (cálido/neutro/frío) a
+// la vez, pero la matriz de stock sigue siendo 2D (fila × medida). Misma
+// convención en backend/routes/orders.js y ProductDetail.jsx — si se cambia
+// acá hay que cambiarla en los tres lados.
+function combineVariantRowKey(colorName, toneName) {
+  if (colorName && toneName) return `${colorName} / ${toneName}`
+  return colorName || toneName || '_'
+}
+
 const EMPTY = {
   codigo: '', supplier: 'OTRO', inventoryDescription: '',
   priceCost: '', priceWithTax: '',
@@ -334,8 +344,8 @@ const EMPTY = {
   price: '', originalPrice: '',
   description: '', image: '', hoverImage: '',
   lengthCm: '', widthCm: '', heightCm: '', weightKg: '',
-  inStock: true, stock: '', colors: [], sizes: [], variantStock: {},
-  published: true,
+  inStock: true, stock: '', colors: [], sizes: [], tones: [], variantStock: {},
+  published: true, isNew: false, bestSeller: false,
 }
 
 // Normaliza una fila de la API para editar todos sus datos en un único modal.
@@ -369,8 +379,11 @@ function draftFromInventoryRow(inv) {
     weightKg:    inv.weight_kg ?? '',
     colors:      inv.color_options || [],
     sizes:       inv.size_options || [],
+    tones:       inv.tone_options || [],
     variantStock: inv.variant_stock || {},
     published:   Boolean(inv.published),
+    isNew:       Boolean(inv.is_new),
+    bestSeller:  Boolean(inv.best_seller),
   }
 }
 
@@ -397,12 +410,15 @@ function toUnifiedProductPayload(data) {
     hover_image_url: data.hoverImage || null,
     color_options: data.colors || [],
     size_options: data.sizes || [],
+    tone_options: data.tones || [],
     variant_stock: data.variantStock || {},
     color_temp: data.colorTemp || null,
     ip_rating: data.ipRating || null,
     watts: data.watts || null,
     material: data.material || null,
     published: Boolean(data.published),
+    is_new: Boolean(data.isNew),
+    best_seller: Boolean(data.bestSeller),
   }
 }
 
@@ -423,6 +439,7 @@ function ProductModal({ product, onSave, onClose, publishOnSave = false }) {
     weightKg:      String(product.weightKg ?? ''),
     colors:        product.colors || [],
     sizes:         product.sizes || [],
+    tones:         product.tones || [],
     variantStock:  product.variantStock || {},
   })
   const [useVariantStock, setUseVariantStock] = useState(
@@ -451,12 +468,23 @@ function ProductModal({ product, onSave, onClose, publishOnSave = false }) {
   const addSize = () => setForm(f => ({ ...f, sizes: [...f.sizes, { label: '', price: '' }] }))
   const removeSize = (idx) => setForm(f => ({ ...f, sizes: f.sizes.filter((_, i) => i !== idx) }))
 
-  // Stock por combinación exacta color×medida. Filas = colores (o una sola
-  // fila implícita '_' si el producto no tiene colores), columnas = medidas
-  // (o una sola columna implícita '_' si no tiene medidas).
+  const setTone = (idx, key, value) => setForm(f => ({
+    ...f,
+    tones: f.tones.map((t, i) => i === idx ? { ...t, [key]: value } : t),
+  }))
+  const addTone = () => setForm(f => ({ ...f, tones: [...f.tones, { name: '', hex: '#F5D08A', price: '' }] }))
+  const removeTone = (idx) => setForm(f => ({ ...f, tones: f.tones.filter((_, i) => i !== idx) }))
+
+  // Stock por combinación exacta color×tono×medida. Filas = combinación de
+  // color y tono (ver combineVariantRowKey — una sola fila implícita '_' si
+  // el producto no tiene ninguno de los dos), columnas = medidas (o una sola
+  // columna implícita '_' si no tiene medidas).
   const filledColorNames = form.colors.map(c => c.name).filter(Boolean)
   const filledSizeLabels = form.sizes.map(s => s.label).filter(Boolean)
-  const variantRows = filledColorNames.length ? filledColorNames : ['_']
+  const filledToneNames = form.tones.map(t => t.name).filter(Boolean)
+  const colorRowKeys = filledColorNames.length ? filledColorNames : ['']
+  const toneRowKeys = filledToneNames.length ? filledToneNames : ['']
+  const variantRows = colorRowKeys.flatMap(color => toneRowKeys.map(tone => combineVariantRowKey(color, tone)))
   const variantCols = filledSizeLabels.length ? filledSizeLabels : ['_']
   const setVariantCell = (rowKey, colKey, value) => setForm(f => ({
     ...f,
@@ -494,9 +522,12 @@ function ProductModal({ product, onSave, onClose, publishOnSave = false }) {
     }
     out.colors = form.colors.filter(c => c.name?.trim()).map(c => ({ ...c, price: c.price === '' || c.price == null ? null : Number(c.price) }))
     out.sizes  = form.sizes.filter(s => s.label.trim()).map(s => ({ ...s, price: s.price === '' || s.price == null ? null : Number(s.price) }))
+    out.tones  = form.tones.filter(t => t.name?.trim()).map(t => ({ ...t, price: t.price === '' || t.price == null ? null : Number(t.price) }))
 
     if (useVariantStock) {
-      const rowKeys = out.colors.length ? out.colors.map(c => c.name) : ['_']
+      const colorNames = out.colors.length ? out.colors.map(c => c.name) : ['']
+      const toneNames = out.tones.length ? out.tones.map(t => t.name) : ['']
+      const rowKeys = colorNames.flatMap(color => toneNames.map(tone => combineVariantRowKey(color, tone)))
       const colKeys = out.sizes.length ? out.sizes.map(s => s.label) : ['_']
       const cleanedVariantStock = {}
       let total = 0
@@ -654,6 +685,26 @@ function ProductModal({ product, onSave, onClose, publishOnSave = false }) {
                   </span>
                 </div>
               </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                <label style={lbl}>Etiqueta "Nuevo"</label>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, height: 38 }}>
+                  <Toggle value={form.isNew} onChange={v => set('isNew', v)} />
+                  <span style={{ fontSize: 13, color: form.isNew ? C.green : C.text3, fontWeight: 600 }}>
+                    {form.isNew ? 'Se muestra en la tarjeta' : 'No se muestra'}
+                  </span>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                <label style={lbl}>Etiqueta "Más vendido"</label>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, height: 38 }}>
+                  <Toggle value={form.bestSeller} onChange={v => set('bestSeller', v)} />
+                  <span style={{ fontSize: 13, color: form.bestSeller ? C.green : C.text3, fontWeight: 600 }}>
+                    {form.bestSeller ? 'Se muestra en la tarjeta' : 'No se muestra'}
+                  </span>
+                </div>
+              </div>
             </div>
           </section>
         </div>
@@ -720,6 +771,62 @@ function ProductModal({ product, onSave, onClose, publishOnSave = false }) {
           )}
         </div>
 
+        {/* Variantes de tono (luz cálida/neutra/fría, típico de focos y reflectores) */}
+        <div style={{ marginTop: 20 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+            <label style={lbl}>Tonos (opcional)</label>
+            <button type="button" onClick={addTone} style={{ ...outlineBtn, padding: '5px 12px', fontSize: 11 }}>
+              + Agregar tono
+            </button>
+          </div>
+          <p style={{ fontSize: 11.5, color: C.muted, margin: '0 0 10px' }}>
+            Para focos, reflectores y otros productos de luz: cargá los tonos disponibles (ej: Cálido, Neutro, Frío) y el comprador va a poder elegir uno en la página del producto. Es un eje aparte del color (un producto puede tener color de carcasa y tono de luz al mismo tiempo). Si le cargás un precio a un tono, ese precio reemplaza al precio de venta cuando el comprador elige ese tono; si lo dejás vacío, usa el precio de venta normal.
+          </p>
+
+          {form.tones.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 4 }}>
+              {form.tones.map((t, idx) => (
+                <div key={idx} style={{
+                  display: 'grid', gridTemplateColumns: '38px minmax(120px, 1fr) 120px auto', gap: 8, alignItems: 'center',
+                  padding: 8, background: C.white, border: `1px solid ${C.border}`, borderRadius: 6,
+                }}>
+                  <input
+                    type="color"
+                    value={t.hex || '#F5D08A'}
+                    onChange={e => setTone(idx, 'hex', e.target.value)}
+                    title="Color representativo del tono"
+                    style={{ width: 34, height: 34, padding: 0, border: `1px solid ${C.border}`, borderRadius: 6, cursor: 'pointer' }}
+                  />
+                  <input
+                    type="text"
+                    value={t.name}
+                    onChange={e => setTone(idx, 'name', e.target.value)}
+                    placeholder="Nombre (ej: Cálido)"
+                    style={inp}
+                  />
+                  <input
+                    type="number"
+                    min={0}
+                    value={t.price ?? ''}
+                    onChange={e => setTone(idx, 'price', e.target.value)}
+                    placeholder="Precio propio"
+                    title="Precio de venta propio de este tono (ARS). Vacío = usa el precio de venta del producto."
+                    style={inp}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => removeTone(idx)}
+                    aria-label="Quitar tono"
+                    style={{ ...iconBtn, color: C.red }}
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
         {/* Variantes de medida comerciales */}
         <div style={{ marginTop: 20 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
@@ -769,15 +876,15 @@ function ProductModal({ product, onSave, onClose, publishOnSave = false }) {
           )}
         </div>
 
-        {/* Stock por combinación exacta color×medida */}
-        {(form.colors.length > 0 || form.sizes.length > 0) && (
+        {/* Stock por combinación exacta color×tono×medida */}
+        {(form.colors.length > 0 || form.sizes.length > 0 || form.tones.length > 0) && (
           <div style={{ marginTop: 20 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
               <Toggle value={useVariantStock} onChange={setUseVariantStock} />
-              <label style={lbl}>Cargar stock por color/medida</label>
+              <label style={lbl}>Cargar stock por color/tono/medida</label>
             </div>
             <p style={{ fontSize: 11.5, color: C.muted, margin: '0 0 10px' }}>
-              Si lo activás, cargás una cantidad para cada combinación exacta (ej: Negro + medida 10) y el campo "Stock" de arriba pasa a ser la suma de todas. Si lo dejás apagado, seguís usando un único número de stock para todo el producto, como siempre.
+              Si lo activás, cargás una cantidad para cada combinación exacta (ej: Negro + Cálido + medida 10) y el campo "Stock" de arriba pasa a ser la suma de todas. Si lo dejás apagado, seguís usando un único número de stock para todo el producto, como siempre.
             </p>
             {useVariantStock && (
               <div style={{ overflowX: 'auto' }}>

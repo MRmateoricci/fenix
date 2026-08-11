@@ -33,10 +33,21 @@ function generateOrderNumber() {
   return `FX-${rand}`
 }
 
-// Si el color y la medida elegidos tienen precio propio, la medida manda
-// (suele ser lo que más cambia el costo, ej. largo de un cable); el color
-// solo se usa si la medida no tiene precio propio.
-export function resolveProductVariantPrice(product, selectedColor, selectedSize) {
+// Combina color + tono en una sola clave de fila para variant_stock: un
+// producto puede tener color de carcasa y tono de luz (cálido/neutro/frío) a
+// la vez, pero la matriz de stock sigue siendo 2D (fila × medida). Misma
+// convención en ProductModal (AdminDashboard.jsx) y ProductDetail.jsx — si
+// se cambia acá hay que cambiarla en los tres lados.
+export function combineVariantRowKey(selectedColor, selectedTone) {
+  if (selectedColor && selectedTone) return `${selectedColor} / ${selectedTone}`
+  return selectedColor || selectedTone || '_'
+}
+
+// Si el color, el tono y la medida elegidos tienen precio propio, la medida
+// manda (suele ser lo que más cambia el costo, ej. largo de un cable); el
+// tono pisa al color, y el color solo se usa si ni el tono ni la medida
+// tienen precio propio.
+export function resolveProductVariantPrice(product, selectedColor, selectedSize, selectedTone) {
   const basePrice = Number(product?.precio_venta)
   if (!Number.isFinite(basePrice)) return { error: 'missing_price', price: null }
   let price = basePrice
@@ -47,6 +58,16 @@ export function resolveProductVariantPrice(product, selectedColor, selectedSize)
       String(color?.name || '').localeCompare(String(selectedColor), 'es-AR', { sensitivity: 'base' }) === 0
     )
     if (colors.length && !variant) return { error: 'invalid_color', price: null }
+    const variantPrice = Number(variant?.price)
+    if (Number.isFinite(variantPrice)) price = variantPrice
+  }
+
+  if (selectedTone) {
+    const tones = Array.isArray(product.tone_options) ? product.tone_options : []
+    const variant = tones.find(tone =>
+      String(tone?.name || '').localeCompare(String(selectedTone), 'es-AR', { sensitivity: 'base' }) === 0
+    )
+    if (tones.length && !variant) return { error: 'invalid_tone', price: null }
     const variantPrice = Number(variant?.price)
     if (Number.isFinite(variantPrice)) price = variantPrice
   }
@@ -65,18 +86,20 @@ export function resolveProductVariantPrice(product, selectedColor, selectedSize)
 }
 
 // Si el producto carga stock por combinación exacta (variant_stock no vacío),
-// resuelve a qué celda de esa matriz corresponde el color/medida elegidos —
-// '_' es el comodín para la dimensión que el producto no usa. Devuelve null
-// si el producto no usa stock por variante (ese item sigue reservando contra
-// el `stock` plano de siempre, sin cambios). Si el producto sí lo usa pero la
-// combinación pedida no es una celda cargada, devuelve error 'invalid_variant'.
-export function resolveVariantStockPath(product, selectedColor, selectedSize) {
+// resuelve a qué celda de esa matriz corresponde el color+tono/medida
+// elegidos — '_' es el comodín para la dimensión que el producto no usa.
+// Devuelve null si el producto no usa stock por variante (ese item sigue
+// reservando contra el `stock` plano de siempre, sin cambios). Si el
+// producto sí lo usa pero la combinación pedida no es una celda cargada,
+// devuelve error 'invalid_variant'.
+export function resolveVariantStockPath(product, selectedColor, selectedSize, selectedTone) {
   const variantStock = product?.variant_stock
   const colorKeys = variantStock && typeof variantStock === 'object' ? Object.keys(variantStock) : []
   if (!colorKeys.length) return null
 
+  const targetRowKey = combineVariantRowKey(selectedColor, selectedTone)
   const colorKey = colorKeys.find(key =>
-    key === '_' ? !selectedColor : String(key).localeCompare(String(selectedColor || ''), 'es-AR', { sensitivity: 'base' }) === 0
+    String(key).localeCompare(targetRowKey, 'es-AR', { sensitivity: 'base' }) === 0
   )
   if (!colorKey) return { error: 'invalid_variant' }
 
@@ -161,7 +184,7 @@ router.post('/', attachUserIfPresent, async (req, res) => {
     // en lo que manda el cliente (podría mandar cualquier item.price).
     const productIds = items.map((i) => i.id)
     const { rows: dbProducts } = await pool.query(
-      `SELECT id, precio_venta, color_options, size_options, variant_stock FROM products WHERE id = ANY($1::uuid[])`,
+      `SELECT id, precio_venta, color_options, size_options, tone_options, variant_stock FROM products WHERE id = ANY($1::uuid[])`,
       [productIds]
     )
     const productMap = new Map(dbProducts.map((p) => [p.id, p]))
@@ -172,14 +195,17 @@ router.post('/', attachUserIfPresent, async (req, res) => {
       if (!dbProduct || dbProduct.precio_venta == null) {
         return res.status(400).json({ error: `Producto no disponible: ${i.name || i.id}` })
       }
-      const resolvedPrice = resolveProductVariantPrice(dbProduct, i.color, i.size)
+      const resolvedPrice = resolveProductVariantPrice(dbProduct, i.color, i.size, i.tone)
       if (resolvedPrice.error === 'invalid_color') {
         return res.status(400).json({ error: `Color no disponible para ${i.name || i.id}` })
+      }
+      if (resolvedPrice.error === 'invalid_tone') {
+        return res.status(400).json({ error: `Tono no disponible para ${i.name || i.id}` })
       }
       if (resolvedPrice.error === 'invalid_size') {
         return res.status(400).json({ error: `Medida no disponible para ${i.name || i.id}` })
       }
-      const variantPath = resolveVariantStockPath(dbProduct, i.color, i.size)
+      const variantPath = resolveVariantStockPath(dbProduct, i.color, i.size, i.tone)
       if (variantPath?.error === 'invalid_variant') {
         return res.status(400).json({ error: `Combinación no disponible para ${i.name || i.id}` })
       }
@@ -195,6 +221,7 @@ router.post('/', attachUserIfPresent, async (req, res) => {
         image:    i.image || null,
         color:    i.color || null,
         size:     i.size || null,
+        tone:     i.tone || null,
         colorKey: variantPath ? variantPath.colorKey : null,
         sizeKey:  variantPath ? variantPath.sizeKey : null,
       })

@@ -16,7 +16,8 @@ const SELECT_FIELDS = `
   COALESCE((SELECT usd_ars_rate FROM store_settings WHERE id = 1), 1510) AS usd_ars_rate,
   description_larga,
   image_url, hover_image_url, stock, watts, ip_rating, color_temp, material, cable_type, product_type,
-  color_options, size_options, variant_stock, length_cm, width_cm, height_cm, weight_kg
+  color_options, size_options, tone_options, variant_stock, length_cm, width_cm, height_cm, weight_kg,
+  is_new, best_seller
 `
 
 export function mapRow(r) {
@@ -80,7 +81,24 @@ export function mapRow(r) {
       priceCostUsd: size.priceCostUsd == null ? null : Number(size.priceCostUsd),
       priceWithTaxUsd: size.priceWithTaxUsd == null ? null : Number(size.priceWithTaxUsd),
     })),
+    tones: (r.tone_options || []).map(tone => ({
+      ...tone,
+      price: sourceIsUsd && tone.priceUsd != null
+        ? Math.round(Number(tone.priceUsd) * usdArsRate * 100) / 100
+        : tone.price == null ? null : Number(tone.price),
+      priceCost: sourceIsUsd && tone.priceCostUsd != null
+        ? Math.round(Number(tone.priceCostUsd) * usdArsRate * 100) / 100
+        : tone.priceCost == null ? null : Number(tone.priceCost),
+      priceWithTax: sourceIsUsd && tone.priceWithTaxUsd != null
+        ? Math.round(Number(tone.priceWithTaxUsd) * usdArsRate * 100) / 100
+        : tone.priceWithTax == null ? null : Number(tone.priceWithTax),
+      priceUsd: tone.priceUsd == null ? null : Number(tone.priceUsd),
+      priceCostUsd: tone.priceCostUsd == null ? null : Number(tone.priceCostUsd),
+      priceWithTaxUsd: tone.priceWithTaxUsd == null ? null : Number(tone.priceWithTaxUsd),
+    })),
     variantStock: r.variant_stock || {},
+    isNew: Boolean(r.is_new),
+    bestSeller: Boolean(r.best_seller),
     published: true,
   }
 }

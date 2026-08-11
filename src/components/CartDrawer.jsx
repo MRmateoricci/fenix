@@ -124,10 +124,10 @@ export default function CartDrawer({ open, onClose }) {
             <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
               {items.map((item) => (
                 <CartItem
-                  key={item.id}
+                  key={`${item.id}-${item.color ?? 'default'}-${item.size ?? 'default'}-${item.tone ?? 'default'}`}
                   item={item}
-                  onRemove={() => removeItem(item.id, item.color, item.size)}
-                  onUpdate={(quantity) => updateQuantity(item.id, item.color, item.size, quantity)}
+                  onRemove={() => removeItem(item.id, item.color, item.size, item.tone)}
+                  onUpdate={(quantity) => updateQuantity(item.id, item.color, item.size, quantity, item.tone)}
                 />
               ))}
             </ul>

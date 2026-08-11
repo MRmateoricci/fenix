@@ -5,18 +5,28 @@ import { getCategoryValue, getSubcategoryOptions, getProductTypeOptions } from '
 import { useAdmin } from '../context/AdminContext'
 import ProductCard from '../components/ProductCard'
 import PageSEO from '../components/SEO'
-import electricidadImg from '../assets/electricidad.jfif'
-import iluminacionImg from '../assets/iluminacion.jfif'
-import herramientasImg from '../assets/herramientas.jpg'
-import automatizacionImg from '../assets/automatizacion.jfif'
-import promocionImg from '../assets/promocion.jfif'
+import iluminacionImg from '../assets/ilu.png'
+import herramientasImg from '../assets/her.png'
+import automatizacionImg from '../assets/auto.png'
+import promocionImg from '../assets/pro.png'
+import catalogoImg from '../assets/cat.png'
 
 const CATEGORY_IMAGE = {
-  'Electricidad':                electricidadImg,
+  'Electricidad':                automatizacionImg, // TEMP: electricidad.png se borró, usando la de Automatización hasta tener la definitiva
   'Herramientas':                herramientasImg,
   'Iluminación':                 iluminacionImg,
   'Automatización Industrial':   automatizacionImg,
   'Promociones':                 promocionImg,
+  'Catálogo':                    catalogoImg,
+}
+
+const CATEGORY_IMAGE_POSITION = {
+  'Electricidad':               'left 75%',
+  'Herramientas':                'left 75%',
+  'Iluminación':                 'left 78%',
+  'Automatización Industrial':   'left 75%',
+  'Promociones':                 'left 80%',
+  'Catálogo':                    'left 80%',
 }
 
 const T = {
@@ -131,9 +141,9 @@ function CatalogHeader({ filters, categoryTree }) {
   const catLabel  = categoryNode?.label || (activeCategory ? CATEGORY_NAV_LABEL[activeCategory] : null)
   const subLabel  = filters.sub || null
   const pageTitle = subLabel || catLabel || 'Catálogo'
-  const headerImg = activeCategory
-    ? CATEGORY_IMAGE[categoryNode?._taxonomy?.category || activeCategory]
-    : null
+  const headerImgKey = activeCategory ? (categoryNode?._taxonomy?.category || activeCategory) : 'Catálogo'
+  const headerImg = CATEGORY_IMAGE[headerImgKey]
+  const headerImgPosition = CATEGORY_IMAGE_POSITION[headerImgKey] || 'left center'
 
   return (
     <div style={{ position: 'relative', padding: '96px 0 32px', borderBottom: `1px solid ${T.hairline}`, marginBottom: 36 }}>
@@ -142,12 +152,11 @@ function CatalogHeader({ filters, categoryTree }) {
           aria-hidden="true"
           style={{
             position: 'absolute', top: 0, bottom: 0,
-            left: '50%', width: '100vw',
-            marginLeft: '-50vw',
-            backgroundImage: `linear-gradient(90deg, ${T.paper} 0%, ${T.paper}CC 28%, ${T.paper}66 55%, transparent 78%), url(${headerImg})`,
+            left: '50%', transform: 'translateX(-50%)',
+            width: 'min(100vw, 1920px)',
+            backgroundImage: `url(${headerImg})`,
             backgroundSize: 'cover',
-            backgroundPosition: 'center',
-            opacity: 0.9,
+            backgroundPosition: headerImgPosition,
             zIndex: 0,
           }}
         />

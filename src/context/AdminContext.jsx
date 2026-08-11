@@ -23,6 +23,7 @@ function toBackendPayload(p) {
   if ('hoverImage' in p)    out.hover_image_url    = p.hoverImage
   if ('colors' in p)        out.color_options      = p.colors
   if ('sizes' in p)         out.size_options       = p.sizes
+  if ('tones' in p)         out.tone_options       = p.tones
   if ('variantStock' in p)  out.variant_stock      = p.variantStock
   if ('colorTemp' in p)     out.color_temp         = p.colorTemp
   if ('ipRating' in p)      out.ip_rating          = p.ipRating
@@ -35,6 +36,8 @@ function toBackendPayload(p) {
   if ('heightCm' in p)      out.height_cm           = p.heightCm
   if ('weightKg' in p)      out.weight_kg           = p.weightKg
   if ('published' in p)     out.published          = p.published
+  if ('isNew' in p)         out.is_new             = p.isNew
+  if ('bestSeller' in p)    out.best_seller        = p.bestSeller
   // El backend solo tiene `stock` (entero) — inStock es stock > 0 derivado al
   // leer. Si viene stock explícito se usa tal cual; si solo viene el toggle
   // inStock, se traduce a un stock mínimo (1) o a 0.

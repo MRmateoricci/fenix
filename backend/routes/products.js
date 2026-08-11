@@ -120,6 +120,20 @@ function convertedVariantOptions(products, currency, usdArsRate) {
           priceWithTaxUsd: tax.usd,
         }
       }),
+      tones: (product.tone_options || []).map(tone => {
+        const sale = convert(tone, 'price', 'priceUsd')
+        const cost = convert(tone, 'priceCost', 'priceCostUsd')
+        const tax = convert(tone, 'priceWithTax', 'priceWithTaxUsd')
+        return {
+          ...tone,
+          price: sale.ars,
+          priceUsd: sale.usd,
+          priceCost: cost.ars,
+          priceCostUsd: cost.usd,
+          priceWithTax: tax.ars,
+          priceWithTaxUsd: tax.usd,
+        }
+      }),
     }
   })
 }
@@ -298,10 +312,10 @@ router.patch('/currency-settings', async (req, res) => {
     const current = await client.query('SELECT usd_ars_rate FROM store_settings WHERE id = 1 FOR UPDATE')
     const previousRate = Number(current.rows[0]?.usd_ars_rate || 1510)
     const colorProducts = await client.query(
-      `SELECT id, color_options, size_options, price_currency, price_exchange_rate
+      `SELECT id, color_options, size_options, tone_options, price_currency, price_exchange_rate
        FROM products
        WHERE price_currency = 'USD'
-         AND (jsonb_array_length(color_options) > 0 OR jsonb_array_length(size_options) > 0)
+         AND (jsonb_array_length(color_options) > 0 OR jsonb_array_length(size_options) > 0 OR jsonb_array_length(tone_options) > 0)
        FOR UPDATE`
     )
     const convertedColors = convertedVariantOptions(colorProducts.rows, 'USD', usdArsRate)
@@ -322,8 +336,8 @@ router.patch('/currency-settings', async (req, res) => {
     )
     for (const product of convertedColors) {
       await client.query(
-        'UPDATE products SET color_options = $1::jsonb, size_options = $2::jsonb WHERE id = $3',
-        [JSON.stringify(product.colors), JSON.stringify(product.sizes), product.id]
+        'UPDATE products SET color_options = $1::jsonb, size_options = $2::jsonb, tone_options = $3::jsonb WHERE id = $4',
+        [JSON.stringify(product.colors), JSON.stringify(product.sizes), JSON.stringify(product.tones), product.id]
       )
     }
     const { rows } = await client.query(
@@ -385,10 +399,10 @@ router.patch('/supplier-settings/:supplier', async (req, res) => {
     const settings = await client.query('SELECT usd_ars_rate FROM store_settings WHERE id = 1')
     const usdArsRate = Number(settings.rows[0]?.usd_ars_rate || 1510)
     const colorProducts = await client.query(
-      `SELECT id, color_options, size_options, price_currency, price_exchange_rate
+      `SELECT id, color_options, size_options, tone_options, price_currency, price_exchange_rate
        FROM products
        WHERE supplier = $1
-         AND (jsonb_array_length(color_options) > 0 OR jsonb_array_length(size_options) > 0)
+         AND (jsonb_array_length(color_options) > 0 OR jsonb_array_length(size_options) > 0 OR jsonb_array_length(tone_options) > 0)
        FOR UPDATE`,
       [supplier]
     )
@@ -422,8 +436,8 @@ router.patch('/supplier-settings/:supplier', async (req, res) => {
 
     for (const product of convertedColors) {
       await client.query(
-        'UPDATE products SET color_options = $1::jsonb, size_options = $2::jsonb WHERE id = $3',
-        [JSON.stringify(product.colors), JSON.stringify(product.sizes), product.id]
+        'UPDATE products SET color_options = $1::jsonb, size_options = $2::jsonb, tone_options = $3::jsonb WHERE id = $4',
+        [JSON.stringify(product.colors), JSON.stringify(product.sizes), JSON.stringify(product.tones), product.id]
       )
     }
     await client.query(
@@ -479,6 +493,7 @@ const FIELD_TRANSFORMS = {
   hover_image_url:   (v) => v,
   color_options:     (v) => JSON.stringify(v ?? []),
   size_options:      (v) => JSON.stringify(v ?? []),
+  tone_options:      (v) => JSON.stringify(v ?? []),
   variant_stock:     (v) => JSON.stringify(v ?? {}),
   color_temp:        (v) => toNumber(v),
   ip_rating:         (v) => v,
@@ -490,6 +505,8 @@ const FIELD_TRANSFORMS = {
   height_cm:         (v) => toNumber(v),
   weight_kg:         (v) => toNumber(v),
   published:         (v) => Boolean(v),
+  is_new:            (v) => Boolean(v),
+  best_seller:       (v) => Boolean(v),
 }
 const EDITABLE_FIELDS = Object.keys(FIELD_TRANSFORMS)
 
