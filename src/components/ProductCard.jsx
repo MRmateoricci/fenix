@@ -110,12 +110,6 @@ export default function ProductCard({ product }) {
     setSelectedColor(color)
   }
 
-  function handleSelectTone(e, tone) {
-    e.preventDefault()
-    e.stopPropagation()
-    setSelectedTone(tone)
-  }
-
   return (
     <div
       style={{
@@ -266,57 +260,59 @@ export default function ProductCard({ product }) {
 
       {/* Info below image */}
       <div style={{ padding: '24px 2px 0', display: 'flex', flexDirection: 'column', gap: 10, flex: 1 }}>
-        {/* Color thumbnails */}
-        {product.colors?.length > 0 && (
-          <div style={{ display: 'flex', gap: 6 }}>
-            {product.colors.map((c) => {
-              const isSelected = selectedColor?.name === c.name
-              return (
-                <button
-                  key={c.name}
-                  type="button"
-                  onClick={(e) => handleSelectColor(e, c)}
-                  title={c.name}
-                  aria-label={c.name}
-                  aria-pressed={isSelected}
-                  style={{
-                    width: 32, height: 32, borderRadius: 3,
-                    padding: 0, cursor: 'pointer', overflow: 'hidden',
-                    background: c.image ? `${T.surface2} url(${c.image}) center/cover no-repeat` : (c.hex || T.surface2),
-                    border: isSelected ? `2px solid ${T.ink}` : `1px solid ${T.hairline}`,
-                    transition: 'border-color .15s',
-                  }}
-                />
-              )
-            })}
-          </div>
-        )}
+        <Link to={`/products/${product.id}`} style={{ textDecoration: 'none', color: 'inherit' }}>
+          <h3 style={{
+            fontFamily: "'Inter', system-ui, sans-serif",
+            fontWeight: 400, fontSize: 14, lineHeight: 1.4,
+            margin: 0, color: T.ink,
+            minHeight: 'calc(1.4em * 2)',
+            display: '-webkit-box',
+            WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+            overflow: 'hidden',
+          }}>
+            {product.name}
+          </h3>
+        </Link>
 
-        {/* Tone thumbnails */}
-        {product.tones?.length > 0 && (
-          <div style={{ display: 'flex', gap: 6 }}>
-            {product.tones.map((t) => {
-              const isSelected = selectedTone?.name === t.name
-              return (
-                <button
-                  key={t.name}
-                  type="button"
-                  onClick={(e) => handleSelectTone(e, t)}
-                  title={t.name}
-                  aria-label={t.name}
-                  aria-pressed={isSelected}
-                  style={{
-                    width: 32, height: 32, borderRadius: '50%',
-                    padding: 0, cursor: 'pointer', overflow: 'hidden',
-                    background: t.hex || T.surface2,
-                    border: isSelected ? `2px solid ${T.ink}` : `1px solid ${T.hairline}`,
-                    transition: 'border-color .15s',
-                  }}
-                />
-              )
-            })}
-          </div>
-        )}
+        {/* Color thumbnails — tone is only shown on the product detail page.
+            Always reserves one row of height so the price line lands in the
+            same place whether or not a product has color variants. The
+            selected color shows as a larger bordered thumbnail, the rest as
+            small plain photos. Products with no color variants (or whose
+            colors have no photo assigned) still show a single bordered
+            thumbnail of the product itself, for the same look — a flat hex
+            swatch with no picture reads as a UI glitch, not a color option. */}
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, minHeight: 32 }}>
+          {product.colors?.some((c) => c.image)
+            ? product.colors.filter((c) => c.image).map((c) => {
+                const isSelected = selectedColor?.name === c.name
+                const size = isSelected ? 44 : 32
+                return (
+                  <button
+                    key={`color-${c.name}`}
+                    type="button"
+                    onClick={(e) => handleSelectColor(e, c)}
+                    title={c.name}
+                    aria-label={c.name}
+                    aria-pressed={isSelected}
+                    style={{
+                      width: size, height: size, borderRadius: 4,
+                      padding: 0, cursor: 'pointer', overflow: 'hidden',
+                      background: c.image ? `${T.surface2} url(${c.image}) center/cover no-repeat` : (c.hex || T.surface2),
+                      border: isSelected ? `2px solid ${T.ink}` : 'none',
+                      transition: 'width .15s, height .15s, border-color .15s',
+                    }}
+                  />
+                )
+              })
+            : product.image && (
+                <div style={{
+                  width: 44, height: 44, borderRadius: 4, overflow: 'hidden',
+                  background: `${T.surface2} url(${product.image}) center/cover no-repeat`,
+                  border: `2px solid ${T.ink}`,
+                }} />
+              )}
+        </div>
 
         {/* Badges */}
         {(product.isNew || product.bestSeller) && (
@@ -344,20 +340,6 @@ export default function ProductCard({ product }) {
             )}
           </div>
         )}
-
-        <Link to={`/products/${product.id}`} style={{ textDecoration: 'none', color: 'inherit' }}>
-          <h3 style={{
-            fontFamily: "'Inter', system-ui, sans-serif",
-            fontWeight: 400, fontSize: 14, lineHeight: 1.4,
-            margin: 0, color: T.ink,
-            minHeight: 'calc(1.4em * 2)',
-            display: '-webkit-box',
-            WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
-            overflow: 'hidden',
-          }}>
-            {product.name}
-          </h3>
-        </Link>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
           <span style={{

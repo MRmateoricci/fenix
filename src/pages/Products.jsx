@@ -5,14 +5,15 @@ import { getCategoryValue, getSubcategoryOptions, getProductTypeOptions } from '
 import { useAdmin } from '../context/AdminContext'
 import ProductCard from '../components/ProductCard'
 import PageSEO from '../components/SEO'
+import electricidadImg from '../assets/elec.png'
 import iluminacionImg from '../assets/ilu.png'
 import herramientasImg from '../assets/her.png'
-import automatizacionImg from '../assets/auto.png'
+import automatizacionImg from '../assets/autom.png'
 import promocionImg from '../assets/pro.png'
 import catalogoImg from '../assets/cat.png'
 
 const CATEGORY_IMAGE = {
-  'Electricidad':                automatizacionImg, // TEMP: electricidad.png se borró, usando la de Automatización hasta tener la definitiva
+  'Electricidad':                electricidadImg,
   'Herramientas':                herramientasImg,
   'Iluminación':                 iluminacionImg,
   'Automatización Industrial':   automatizacionImg,
@@ -24,7 +25,7 @@ const CATEGORY_IMAGE_POSITION = {
   'Electricidad':               'left 75%',
   'Herramientas':                'left 75%',
   'Iluminación':                 'left 78%',
-  'Automatización Industrial':   'left 75%',
+  'Automatización Industrial':   'left 82%',
   'Promociones':                 'left 80%',
   'Catálogo':                    'left 80%',
 }
@@ -167,14 +168,12 @@ function CatalogHeader({ filters, categoryTree }) {
         display: 'flex', alignItems: 'center', gap: 8,
         fontFamily: "'Inter', system-ui, sans-serif",
         fontSize: 11, letterSpacing: '.10em', textTransform: 'uppercase',
-        color: T.muted2, marginBottom: 18,
+        color: T.ink, marginBottom: 18,
       }}>
         <a
           href="/"
           onClick={(e) => { e.preventDefault(); navigate('/') }}
-          style={{ textDecoration: 'none', color: T.muted2, transition: 'color .15s' }}
-          onMouseEnter={(e) => (e.currentTarget.style.color = T.ink)}
-          onMouseLeave={(e) => (e.currentTarget.style.color = T.muted2)}
+          style={{ textDecoration: 'none', color: T.ink, transition: 'color .15s' }}
         >
           Inicio
         </a>

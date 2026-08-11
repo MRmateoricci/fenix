@@ -100,9 +100,9 @@ export default function Footer() {
               >
                 City Bell, La Plata
               </a>
-              <a href="tel:+5422148011977" style={LINK} onMouseEnter={enter} onMouseLeave={leave}>(221) 480-1977</a>
+              <a href="tel:+542216007560" style={LINK} onMouseEnter={enter} onMouseLeave={leave}>221-600-7560</a>
               <a
-                href="https://wa.me/5492214801977?text=Hola!%20Quiero%20consultar%20sobre%20sus%20productos"
+                href="https://wa.me/5492216007560?text=Hola!%20Quiero%20consultar%20sobre%20sus%20productos"
                 target="_blank" rel="noopener noreferrer"
                 style={LINK} onMouseEnter={enter} onMouseLeave={leave}
               >

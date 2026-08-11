@@ -815,8 +815,8 @@ function ContactoSection() {
           <div style={{ borderTop: `1px solid ${T.hairline}` }}>
             {[
               { label: 'dirección', value: <span>C. Cantilo 745, City Bell<br />La Plata, Buenos Aires</span> },
-              { label: 'horarios',  value: 'Lunes a Sábado · 8:30–13:00 / 16:00–20:00' },
-              { label: 'teléfono', value: '(221) 480-1977' },
+              { label: 'horarios',  value: <span>Lunes a Viernes · 8:00–18:00<br />Sábado · 9:00–14:00</span> },
+              { label: 'teléfono', value: '221-600-7560' },
             ].map(({ label, value }) => (
               <div key={label} style={{ display: 'flex', gap: 18, padding: '17px 0', borderBottom: `1px solid ${T.hairline}` }}>
                 <span style={{ fontFamily: "var(--font-sans)", fontSize: 11, color: T.muted2, minWidth: 88, paddingTop: 3 }}>
@@ -864,7 +864,7 @@ function WaButton() {
   const [hovered, setHovered] = useState(false)
   return (
     <a
-      href="https://wa.me/5492214801977?text=Hola!%20Quiero%20consultar%20sobre%20sus%20productos"
+      href="https://wa.me/5492216007560?text=Hola!%20Quiero%20consultar%20sobre%20sus%20productos"
       target="_blank" rel="noopener noreferrer"
       style={{
         textDecoration: 'none',
@@ -922,31 +922,142 @@ function StarIcon({ filled = true }) {
   )
 }
 
+function GoogleGIcon({ size = 14 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24">
+      <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+      <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+      <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z" fill="#FBBC05"/>
+      <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+    </svg>
+  )
+}
+
+function VerifiedCheckIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+      <circle cx="12" cy="12" r="12" fill="#4285F4" />
+      <path d="M7 12.5l3 3 7-7" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+// Reseñas reales curadas manualmente desde Google Maps.
+const STATIC_REVIEWS = [
+  {
+    id: 'santiago-massa',
+    author: 'Santiago Massa',
+    date: 'hace 2 meses',
+    rating: 5,
+    text: 'Variedad, buenos precios y excelente atención',
+  },
+  {
+    id: 'rodolfo-pascualon',
+    author: 'Rodolfo daniel Pascualon',
+    date: 'hace 6 meses',
+    rating: 5,
+    text: 'Exelente atención y predisposición para asesorar al cliente, en artículos de iluminación y electricidad tienen de todo\nMuy Recomendable',
+  },
+  {
+    id: 'maria-pia-santucci',
+    author: 'Maria Pia Santucci',
+    date: 'hace 11 meses',
+    rating: 5,
+    text: 'Excelente. La atención es buenisima! Siempre encuentro todo lo que busco y los precios son excelente. Son muy honestos.',
+  },
+  {
+    id: 'dj-pino',
+    author: 'DJ Pino',
+    date: 'hace 2 años',
+    rating: 5,
+    text: 'Me ayudaron siempre que fui. Los precios muy buenos pero destaco la amabilidad para atender de todos. El lugar es hermoso para mirar y elegir que comprar. Tienen amplia variedad de productos',
+  },
+  {
+    id: 'carlos-cuevas',
+    author: 'Carlos Cuevas',
+    date: 'hace 3 años',
+    rating: 5,
+    text: 'Excelente atención, buen precio y calidad',
+  },
+  {
+    id: 'diego-valerdi',
+    author: 'Diego Valerdi',
+    date: 'hace 7 años',
+    rating: 5,
+    text: 'Excelente atención. Hay de todo y de primera calidad.',
+  },
+  {
+    id: 'silvia-ocampo',
+    author: 'Silvia Ocampo',
+    date: 'hace 3 años',
+    rating: 5,
+    text: 'Excelente atención, siempre los empleados están dispuestos y orientándote ante cualquier consulta con conocimienuo acabado en el tema',
+  },
+]
+
+const RESENA_TRUNCATE_LENGTH = 110
 const RESENA_CARD_W = 340
 const RESENA_GAP = 20
+const RESENA_SET_WIDTH = STATIC_REVIEWS.length * (RESENA_CARD_W + RESENA_GAP)
+const RESENA_AUTOSCROLL_SPEED = 28 // px/s
+
+// Duplicated so the track can loop seamlessly: scrolling one full set width
+// (RESENA_SET_WIDTH) lands on pixel-identical content, so the wrap is invisible.
+const DISPLAY_REVIEWS = [...STATIC_REVIEWS, ...STATIC_REVIEWS].map((review, index) => ({
+  ...review,
+  uid: `${review.id}-${index < STATIC_REVIEWS.length ? 'a' : 'b'}`,
+  duplicate: index >= STATIC_REVIEWS.length,
+}))
 
 function ResenasSection() {
   const viewportRef = useRef(null)
   const dragRef = useRef({ active: false, moved: false, startX: 0, scrollLeft: 0 })
+  const pausedRef = useRef(false)
   const [dragging, setDragging] = useState(false)
-  const [reviewsData, setReviewsData] = useState(null)
-  const [reviewsLoading, setReviewsLoading] = useState(true)
+  const [expanded, setExpanded] = useState({})
+
+  function toggleExpanded(uid) {
+    setExpanded((prev) => ({ ...prev, [uid]: !prev[uid] }))
+  }
 
   useEffect(() => {
-    const controller = new AbortController()
+    const viewport = viewportRef.current
+    if (!viewport) return
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
 
-    fetch(`${API_BASE}/api/google-reviews`, { signal: controller.signal })
-      .then((response) => response.ok ? response.json() : Promise.reject(new Error('Google Reviews no disponible')))
-      .then(setReviewsData)
-      .catch((error) => {
-        if (error.name !== 'AbortError') setReviewsData(null)
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setReviewsLoading(false)
-      })
+    let rafId
+    let last = null
+    // Tracked as a float outside the DOM: scrollLeft's getter rounds to an
+    // integer, so accumulating sub-pixel-per-frame increments through it
+    // would round every frame back to the same value and never move.
+    let pos = viewport.scrollLeft
 
-    return () => controller.abort()
+    function step(now) {
+      if (last === null) last = now
+      const dt = (now - last) / 1000
+      last = now
+
+      if (pausedRef.current || dragRef.current.active) {
+        pos = viewport.scrollLeft
+      } else {
+        pos += RESENA_AUTOSCROLL_SPEED * dt
+        if (pos >= RESENA_SET_WIDTH) pos -= RESENA_SET_WIDTH
+        viewport.scrollLeft = pos
+      }
+      rafId = requestAnimationFrame(step)
+    }
+
+    rafId = requestAnimationFrame(step)
+    return () => cancelAnimationFrame(rafId)
   }, [])
+
+  function pauseAutoScroll() {
+    pausedRef.current = true
+  }
+
+  function resumeAutoScroll() {
+    pausedRef.current = false
+  }
 
   function startDrag(event) {
     if (event.pointerType === 'mouse' && event.button !== 0) return
@@ -958,9 +1069,8 @@ function ResenasSection() {
       moved: false,
       startX: event.clientX,
       scrollLeft: viewport.scrollLeft,
+      pointerId: event.pointerId,
     }
-    setDragging(true)
-    viewport.setPointerCapture?.(event.pointerId)
   }
 
   function moveDrag(event) {
@@ -969,7 +1079,13 @@ function ResenasSection() {
     if (!viewport || !drag.active) return
 
     const distance = event.clientX - drag.startX
-    if (Math.abs(distance) > 4) drag.moved = true
+    if (!drag.moved && Math.abs(distance) > 4) {
+      drag.moved = true
+      setDragging(true)
+      // Deferred until real movement so a plain click/tap on a button or link
+      // inside a card isn't retargeted to the viewport by pointer capture.
+      viewport.setPointerCapture?.(drag.pointerId)
+    }
     viewport.scrollLeft = drag.scrollLeft - distance
   }
 
@@ -987,11 +1103,7 @@ function ResenasSection() {
     dragRef.current.moved = false
   }
 
-  const reviews = reviewsData?.reviews || []
-  const googleMapsUrl = reviewsData?.googleMapsUrl || seoCfg.business.mapsUrl
-  const ratingLabel = reviewsData?.rating
-    ? `${reviewsData.rating.toLocaleString('es-AR')} ${reviewsData.userRatingCount ? `· ${reviewsData.userRatingCount} reseñas · ` : '· '}`
-    : ''
+  const googleMapsUrl = seoCfg.business.mapsUrl
 
   return (
     <section style={{ background: T.paper, padding: '72px 0' }}>
@@ -1028,7 +1140,7 @@ function ResenasSection() {
               <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z" fill="#FBBC05"/>
               <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
             </svg>
-            {ratingLabel}Google Maps
+            Google Maps
           </a>
         </div>
         </Reveal>
@@ -1043,6 +1155,10 @@ function ResenasSection() {
         onPointerUp={finishDrag}
         onPointerCancel={finishDrag}
         onClickCapture={preventLinkAfterDrag}
+        onMouseEnter={pauseAutoScroll}
+        onMouseLeave={resumeAutoScroll}
+        onFocus={pauseAutoScroll}
+        onBlur={resumeAutoScroll}
       >
         <div
           className="fnx-resenas-track"
@@ -1050,70 +1166,85 @@ function ResenasSection() {
             display: 'flex', gap: RESENA_GAP, width: 'max-content', padding: '4px 40px',
           }}
         >
-          {reviews.map((review) => (
-            <article
-              key={review.id || `${review.author}-${review.date}`}
-              style={{
-                width: RESENA_CARD_W, flexShrink: 0,
-                background: T.panel, border: '1px solid #DED6C7',
-                borderRadius: 3, padding: '24px',
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
-                <a href={review.authorUrl || googleMapsUrl} target="_blank" rel="noopener noreferrer" tabIndex={-1} style={{ textDecoration: 'none' }}>
-                  {review.authorPhoto
-                    ? <img src={review.authorPhoto} alt="" draggable="false" style={{ width: 38, height: 38, borderRadius: '50%', objectFit: 'cover', display: 'block' }} />
-                    : <div style={{
-                        width: 38, height: 38, borderRadius: '50%',
-                        background: T.surface2, color: T.ink,
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        fontFamily: "'Inter', system-ui, sans-serif",
-                        fontSize: 15, fontWeight: 600,
-                      }}>
-                        {review.author?.charAt(0)?.toUpperCase() || 'G'}
-                      </div>
-                  }
-                </a>
-                <div>
-                  <a href={review.authorUrl || googleMapsUrl} target="_blank" rel="noopener noreferrer" style={{ textDecoration: 'none' }}>
-                    <p style={{ fontFamily: "'Inter', system-ui, sans-serif", fontSize: 13.5, fontWeight: 500, color: T.ink, margin: 0 }}>{review.author}</p>
+          {DISPLAY_REVIEWS.map((review) => {
+            const isExpanded = !!expanded[review.uid]
+            const isLong = review.text.length > RESENA_TRUNCATE_LENGTH
+            return (
+              <article
+                key={review.uid}
+                aria-hidden={review.duplicate || undefined}
+                style={{
+                  width: RESENA_CARD_W, flexShrink: 0,
+                  background: T.panel, border: '1px solid #DED6C7',
+                  borderRadius: 3, padding: '24px', position: 'relative',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8, marginBottom: 14 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <div style={{
+                      width: 38, height: 38, borderRadius: '50%', flexShrink: 0,
+                      background: T.surface2, color: T.ink,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontFamily: "'Inter', system-ui, sans-serif",
+                      fontSize: 15, fontWeight: 600,
+                    }}>
+                      {review.author.charAt(0).toUpperCase()}
+                    </div>
+                    <div>
+                      <p style={{ fontFamily: "'Inter', system-ui, sans-serif", fontSize: 13.5, fontWeight: 500, color: T.ink, margin: 0 }}>{review.author}</p>
+                      <p style={{ fontFamily: "'Inter', system-ui, sans-serif", fontSize: 11.5, color: T.muted2, margin: 0 }}>{review.date}</p>
+                    </div>
+                  </div>
+                  <a
+                    href={googleMapsUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label="Ver reseñas de Fénix en Google Maps"
+                    tabIndex={review.duplicate ? -1 : 0}
+                    className="fnx-resena-tip-wrap"
+                    style={{ flexShrink: 0, marginTop: 2, cursor: 'pointer', textDecoration: 'none' }}
+                  >
+                    <GoogleGIcon />
+                    <span className="fnx-resena-tip fnx-resena-tip-right">Publicado en Google</span>
                   </a>
-                  <p style={{ fontFamily: "'Inter', system-ui, sans-serif", fontSize: 11.5, color: T.muted2, margin: 0 }}>{review.date}</p>
                 </div>
-              </div>
-              <div style={{ display: 'flex', gap: 2, marginBottom: 12 }}>
-                {[...Array(5)].map((_, index) => <StarIcon key={index} filled={index < Math.round(review.rating)} />)}
-              </div>
-              <p style={{
-                fontFamily: "'Inter', system-ui, sans-serif",
-                fontSize: 13.5, lineHeight: 1.65, color: '#5A5248', margin: 0,
-              }}>
-                {review.text}
-              </p>
-              <a href={review.reviewUrl || googleMapsUrl} target="_blank" rel="noopener noreferrer" style={{ display: 'inline-block', marginTop: 14, color: T.muted, fontFamily: "'Inter', system-ui, sans-serif", fontSize: 11.5, textUnderlineOffset: 3 }}>
-                Ver reseña en Google Maps
-              </a>
-            </article>
-          ))}
-          {!reviewsLoading && reviews.length === 0 && (
-            <a
-              href={googleMapsUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="fnx-resenas-fallback"
-            >
-              <span>Las opiniones del local se muestran directamente desde Google Maps.</span>
-              <strong>Ver reseñas reales →</strong>
-            </a>
-          )}
-          {reviewsLoading && <div className="fnx-resenas-loading" aria-label="Cargando reseñas de Google Maps" />}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12 }}>
+                  <div style={{ display: 'flex', gap: 2 }}>
+                    {[...Array(5)].map((_, index) => <StarIcon key={index} filled={index < Math.round(review.rating)} />)}
+                  </div>
+                  <span className="fnx-resena-tip-wrap" tabIndex={review.duplicate ? -1 : 0}>
+                    <VerifiedCheckIcon />
+                    <span className="fnx-resena-tip fnx-resena-tip-center">Trustindex verifica que la fuente original de la reseña sea Google.</span>
+                  </span>
+                </div>
+                <p
+                  className={isExpanded ? undefined : 'fnx-resena-clamp'}
+                  style={{
+                    fontFamily: "'Inter', system-ui, sans-serif",
+                    fontSize: 13.5, lineHeight: 1.65, color: '#5A5248', margin: 0,
+                    whiteSpace: 'pre-line',
+                  }}
+                >
+                  {review.text}
+                </p>
+                {isLong && (
+                  <button
+                    type="button"
+                    tabIndex={review.duplicate ? -1 : 0}
+                    onClick={() => toggleExpanded(review.uid)}
+                    className="fnx-resena-toggle"
+                  >
+                    {isExpanded ? 'Ocultar' : 'Leer más'}
+                  </button>
+                )}
+              </article>
+            )
+          })}
         </div>
       </div>
-      {reviews.length > 0 && (
-        <p className="fnx-resenas-attribution" translate="no">
-          Reseñas seleccionadas y ordenadas por relevancia por Google Maps. Arrastrá para ver más.
-        </p>
-      )}
+      <p className="fnx-resenas-attribution" translate="no">
+        Reseñas reales de clientes, verificadas y publicadas en Google Maps. Arrastrá para ver más.
+      </p>
     </section>
   )
 }

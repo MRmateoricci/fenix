@@ -27,6 +27,21 @@ const C = {
   sidebar:     218,
 }
 const ADMIN_FONT = "var(--font-sans)"
+// Tonos de luz predeterminados que se pueden agregar con un clic (ver addTonePreset).
+const TONE_PRESETS = [
+  { name: 'Cálido', hex: '#F5D08A' },
+  { name: 'Neutro', hex: '#FDF6E3' },
+  { name: 'Frío',   hex: '#CFE8FF' },
+]
+// Colores predeterminados (típicos de cables) que se pueden agregar con un clic (ver addColorPreset).
+const COLOR_PRESETS = [
+  { name: 'Negro',  hex: '#000000' },
+  { name: 'Rojo',   hex: '#CC0000' },
+  { name: 'Azul',   hex: '#1565C0' },
+  { name: 'Verde',  hex: '#2E7D32' },
+  { name: 'Blanco', hex: '#FFFFFF' },
+  { name: 'Marrón', hex: '#6D4C33' },
+]
 
 
 const fmt = n =>
@@ -458,8 +473,32 @@ function ProductModal({ product, onSave, onClose, publishOnSave = false }) {
     ...f,
     colors: f.colors.map((c, i) => i === idx ? { ...c, [key]: value } : c),
   }))
-  const addColor = () => setForm(f => ({ ...f, colors: [...f.colors, { name: '', hex: '#000000', image: '', price: '' }] }))
+  // El primer color que se agrega arranca con la imagen principal ya cargada
+  // (representa el aspecto "de base" del producto, ej. blanco): si no se
+  // replica acá, esa imagen deja de verse en la tienda en cuanto se suma
+  // cualquier otro color, porque el selector solo muestra colores cargados.
+  const addColor = () => setForm(f => ({
+    ...f,
+    colors: [...f.colors, {
+      name: '', hex: '#000000',
+      image: f.colors.length === 0 ? f.image : '',
+      price: '',
+    }],
+  }))
   const removeColor = (idx) => setForm(f => ({ ...f, colors: f.colors.filter((_, i) => i !== idx) }))
+  // Agrega un color predeterminado (Negro/Rojo/Azul/...) si todavía no está cargado.
+  const addColorPreset = (preset) => setForm(f => {
+    const already = f.colors.some(c => c.name?.trim().toLowerCase() === preset.name.toLowerCase())
+    if (already) return f
+    return {
+      ...f,
+      colors: [...f.colors, {
+        name: preset.name, hex: preset.hex,
+        image: f.colors.length === 0 ? f.image : '',
+        price: '',
+      }],
+    }
+  })
 
   const setSize = (idx, key, value) => setForm(f => ({
     ...f,
@@ -474,6 +513,12 @@ function ProductModal({ product, onSave, onClose, publishOnSave = false }) {
   }))
   const addTone = () => setForm(f => ({ ...f, tones: [...f.tones, { name: '', hex: '#F5D08A', price: '' }] }))
   const removeTone = (idx) => setForm(f => ({ ...f, tones: f.tones.filter((_, i) => i !== idx) }))
+  // Agrega un tono predeterminado (Cálido/Neutro/Frío) si todavía no está cargado.
+  const addTonePreset = (preset) => setForm(f => {
+    const already = f.tones.some(t => t.name?.trim().toLowerCase() === preset.name.toLowerCase())
+    if (already) return f
+    return { ...f, tones: [...f.tones, { name: preset.name, hex: preset.hex, price: '' }] }
+  })
 
   // Stock por combinación exacta color×tono×medida. Filas = combinación de
   // color y tono (ver combineVariantRowKey — una sola fila implícita '_' si
@@ -721,6 +766,28 @@ function ProductModal({ product, onSave, onClose, publishOnSave = false }) {
             Si cargás colores, el comprador va a poder elegir uno en la página del producto. La imagen por color es opcional; si falta, se usa la foto principal. Si le cargás un precio a un color, ese precio reemplaza al precio de venta cuando el comprador elige ese color; si lo dejás vacío, usa el precio de venta normal.
           </p>
 
+          <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+            {COLOR_PRESETS.map(preset => {
+              const already = form.colors.some(c => c.name?.trim().toLowerCase() === preset.name.toLowerCase())
+              return (
+                <button
+                  key={preset.name}
+                  type="button"
+                  onClick={() => addColorPreset(preset)}
+                  disabled={already}
+                  style={{
+                    ...outlineBtn, padding: '5px 12px', fontSize: 11,
+                    display: 'flex', alignItems: 'center', gap: 6,
+                    opacity: already ? 0.5 : 1, cursor: already ? 'default' : 'pointer',
+                  }}
+                >
+                  <span aria-hidden="true" style={{ width: 12, height: 12, borderRadius: '50%', background: preset.hex, border: `1px solid ${C.border}` }} />
+                  {already ? `${preset.name} agregado` : preset.name}
+                </button>
+              )
+            })}
+          </div>
+
           {form.colors.length > 0 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 4 }}>
               {form.colors.map((c, idx) => (
@@ -751,12 +818,27 @@ function ProductModal({ product, onSave, onClose, publishOnSave = false }) {
                     title="Precio de venta propio de este color (ARS). Vacío = usa el precio de venta del producto."
                     style={inp}
                   />
-                  <ImageFileField
-                    compact
-                    value={c.image}
-                    onChange={value => setColor(idx, 'image', value)}
-                    productId={product?.id}
-                  />
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    <ImageFileField
+                      compact
+                      value={c.image}
+                      onChange={value => setColor(idx, 'image', value)}
+                      productId={product?.id}
+                    />
+                    {form.image && c.image !== form.image && (
+                      <button
+                        type="button"
+                        onClick={() => setColor(idx, 'image', form.image)}
+                        style={{
+                          background: 'none', border: 'none', padding: 0,
+                          fontSize: 10.5, fontFamily: ADMIN_FONT, color: C.text3,
+                          textDecoration: 'underline', textAlign: 'left', cursor: 'pointer',
+                        }}
+                      >
+                        Usar imagen principal
+                      </button>
+                    )}
+                  </div>
                   <button
                     type="button"
                     onClick={() => removeColor(idx)}
@@ -782,6 +864,28 @@ function ProductModal({ product, onSave, onClose, publishOnSave = false }) {
           <p style={{ fontSize: 11.5, color: C.muted, margin: '0 0 10px' }}>
             Para focos, reflectores y otros productos de luz: cargá los tonos disponibles (ej: Cálido, Neutro, Frío) y el comprador va a poder elegir uno en la página del producto. Es un eje aparte del color (un producto puede tener color de carcasa y tono de luz al mismo tiempo). Si le cargás un precio a un tono, ese precio reemplaza al precio de venta cuando el comprador elige ese tono; si lo dejás vacío, usa el precio de venta normal.
           </p>
+
+          <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+            {TONE_PRESETS.map(preset => {
+              const already = form.tones.some(t => t.name?.trim().toLowerCase() === preset.name.toLowerCase())
+              return (
+                <button
+                  key={preset.name}
+                  type="button"
+                  onClick={() => addTonePreset(preset)}
+                  disabled={already}
+                  style={{
+                    ...outlineBtn, padding: '5px 12px', fontSize: 11,
+                    display: 'flex', alignItems: 'center', gap: 6,
+                    opacity: already ? 0.5 : 1, cursor: already ? 'default' : 'pointer',
+                  }}
+                >
+                  <span aria-hidden="true" style={{ width: 12, height: 12, borderRadius: '50%', background: preset.hex, border: `1px solid ${C.border}` }} />
+                  {already ? `${preset.name} agregado` : preset.name}
+                </button>
+              )
+            })}
+          </div>
 
           {form.tones.length > 0 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 4 }}>

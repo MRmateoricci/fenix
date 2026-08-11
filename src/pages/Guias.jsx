@@ -91,7 +91,7 @@ export default function Guias() {
               Pasá por el local o escribinos — te asesoramos sin compromiso.
             </p>
             <a
-              href="https://wa.me/5492214801977?text=Hola!%20Quiero%20consultar%20sobre%20iluminaci%C3%B3n"
+              href="https://wa.me/5492216007560?text=Hola!%20Quiero%20consultar%20sobre%20iluminaci%C3%B3n"
               target="_blank" rel="noopener noreferrer"
               style={{
                 display: 'inline-flex', alignItems: 'center', gap: 8,

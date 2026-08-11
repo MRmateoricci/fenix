@@ -847,7 +847,7 @@
   50%       { opacity: 1; }
 }
 
-/* Home: reseñas reales de Google Maps con desplazamiento manual. */
+/* Home: reseñas reales de Google Maps, con auto-scroll continuo y desplazamiento manual. */
 .fnx-resenas-viewport {
   width: 100%;
   overflow-x: auto;
@@ -856,7 +856,6 @@
   touch-action: pan-y;
   overscroll-behavior-inline: contain;
   scrollbar-width: none;
-  scroll-snap-type: x proximity;
 }
 
 .fnx-resenas-viewport::-webkit-scrollbar {
@@ -865,7 +864,6 @@
 
 .fnx-resenas-viewport.is-dragging {
   cursor: grabbing;
-  scroll-snap-type: none;
 }
 
 .fnx-resenas-track,
@@ -873,44 +871,66 @@
   user-select: none;
 }
 
-.fnx-resenas-track article {
-  scroll-snap-align: start;
+.fnx-resena-clamp {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
-.fnx-resenas-fallback {
-  width: min(560px, calc(100vw - 80px));
-  min-height: 150px;
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  justify-content: center;
-  gap: 14px;
-  box-sizing: border-box;
-  padding: 28px;
-  border: 1px solid #DED6C7;
-  border-radius: 3px;
-  background: #FBF8F3;
-  color: #5A5248;
-  font-size: 14px;
-  line-height: 1.55;
-  text-decoration: none;
+.fnx-resena-toggle {
+  display: inline-block;
+  margin-top: 10px;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-family: "Inter", system-ui, sans-serif;
+  font-size: 11.5px;
+  color: #8A8175;
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
-.fnx-resenas-fallback strong {
-  color: #16110B;
-  font-size: 13px;
+.fnx-resena-tip-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  cursor: default;
 }
 
-.fnx-resenas-loading {
-  width: 340px;
-  height: 220px;
-  flex-shrink: 0;
-  border: 1px solid #DED6C7;
-  border-radius: 3px;
-  background: linear-gradient(100deg, #FBF8F3 25%, #F1ECE3 38%, #FBF8F3 52%);
-  background-size: 200% 100%;
-  animation: fnx-review-loading 1.2s ease-in-out infinite;
+.fnx-resena-tip {
+  position: absolute;
+  z-index: 5;
+  width: 168px;
+  padding: 9px 11px;
+  border-radius: 8px;
+  background: #14100A;
+  color: #F7F4EF;
+  font-family: "Inter", system-ui, sans-serif;
+  font-size: 11px;
+  line-height: 1.4;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity .15s ease;
+}
+
+.fnx-resena-tip-wrap:hover .fnx-resena-tip,
+.fnx-resena-tip-wrap:focus-visible .fnx-resena-tip {
+  opacity: 1;
+  visibility: visible;
+}
+
+.fnx-resena-tip-right {
+  top: calc(100% + 8px);
+  right: 0;
+}
+
+.fnx-resena-tip-center {
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
 }
 
 .fnx-resenas-attribution {
@@ -923,16 +943,7 @@
   line-height: 1.5;
 }
 
-@keyframes fnx-review-loading {
-  from { background-position: 100% 0; }
-  to { background-position: -100% 0; }
-}
-
 @media (max-width: 639px) {
-  .fnx-resenas-fallback {
-    width: calc(100vw - 56px);
-  }
-
   .fnx-resenas-attribution {
     padding: 0 24px;
   }
@@ -951,7 +962,6 @@
 
 @media (prefers-reduced-motion: reduce) {
   .fnx-hero-light-on { animation: none; }
-  .fnx-resenas-loading { animation: none; }
 }
 
 /* Promotions carousel (home) */

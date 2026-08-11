@@ -178,10 +178,10 @@ export default function Nosotros() {
           C. Cantilo 745, City Bell, La Plata
         </h2>
         <p style={{ fontFamily: "'Inter', system-ui, sans-serif", fontSize: 14, color: T.muted, marginBottom: 32 }}>
-          Lunes a sábado · 8:30–13:00 / 16:00–20:00
+          Lunes a Viernes · 8:00–18:00 / Sábado · 9:00–14:00
         </p>
         <a
-          href="https://wa.me/5492214801977?text=Hola!%20Quisiera%20consultar%20sobre%20sus%20productos"
+          href="https://wa.me/5492216007560?text=Hola!%20Quisiera%20consultar%20sobre%20sus%20productos"
           target="_blank" rel="noopener noreferrer"
           style={{
             display: 'inline-flex', alignItems: 'center', gap: 9,

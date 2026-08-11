@@ -79,7 +79,7 @@ export default function Profesionales() {
           </p>
           <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
             <a
-              href="https://wa.me/5492214801977?text=Hola!%20Soy%20profesional%20y%20quisiera%20consultar%20sobre%20precios%20y%20condiciones"
+              href="https://wa.me/5492216007560?text=Hola!%20Soy%20profesional%20y%20quisiera%20consultar%20sobre%20precios%20y%20condiciones"
               target="_blank" rel="noopener noreferrer"
               style={{
                 display: 'inline-flex', alignItems: 'center', gap: 9,
@@ -190,7 +190,7 @@ export default function Profesionales() {
           Escribinos con los detalles y te respondemos con presupuesto y disponibilidad.
         </p>
         <a
-          href="https://wa.me/5492214801977?text=Hola!%20Tengo%20un%20proyecto%20y%20quisiera%20cotizar"
+          href="https://wa.me/5492216007560?text=Hola!%20Tengo%20un%20proyecto%20y%20quisiera%20cotizar"
           target="_blank" rel="noopener noreferrer"
           style={{
             display: 'inline-flex', alignItems: 'center', gap: 9,

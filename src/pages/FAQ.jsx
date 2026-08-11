@@ -49,7 +49,7 @@ const FAQS = [
       },
       {
         q: '¿Puedo retirar el pedido en el local?',
-        a: 'Sí, retiro en local es siempre gratuito. Nuestro local está en C. Cantilo 745, City Bell, La Plata. Abrimos de lunes a sábado, de 8:30 a 13:00 y de 16:00 a 20:00.',
+        a: 'Sí, retiro en local es siempre gratuito. Nuestro local está en C. Cantilo 745, City Bell, La Plata. Abrimos de lunes a viernes de 8 a 18 hs corrido, y los sábados de 9 a 14 hs.',
       },
       {
         q: '¿Cuáles son los medios de pago?',
@@ -57,7 +57,7 @@ const FAQS = [
       },
       {
         q: '¿Puedo hacer consultas antes de comprar?',
-        a: 'Sí, y te lo recomendamos. Podés escribirnos por WhatsApp, llamarnos al (221) 480-1977 o pasar directamente al local. Tenemos personal capacitado para asesorarte en iluminación, instalaciones eléctricas y domótica.',
+        a: 'Sí, y te lo recomendamos. Podés escribirnos por WhatsApp, llamarnos al 221-600-7560 o pasar directamente al local. Tenemos personal capacitado para asesorarte en iluminación, instalaciones eléctricas y domótica.',
       },
       {
         q: '¿Hacen proyectos de iluminación para obras o remodelaciones?',
@@ -190,7 +190,7 @@ export default function FAQ() {
               ¿No encontraste lo que buscabas?
             </p>
             <a
-              href="https://wa.me/5492214801977?text=Hola!%20Tengo%20una%20consulta"
+              href="https://wa.me/5492216007560?text=Hola!%20Tengo%20una%20consulta"
               target="_blank" rel="noopener noreferrer"
               style={{
                 display: 'inline-flex', alignItems: 'center', gap: 8,

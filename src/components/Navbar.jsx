@@ -15,7 +15,6 @@ const NAV_ITEMS = [
   { label: 'Herramientas',   to: '/products?category=Herramientas' },
   { label: 'Automatización', to: '/products?category=Automatización Industrial' },
   { label: 'Contacto',      hash: 'contacto' },
-  { label: 'Quiénes somos',  hash: 'historia'  },
 ]
 
 function scrollTo(id) {
@@ -776,8 +775,8 @@ function MobileMenu({ open, onClose, onNavigate, navigate }) {
         display: 'flex', gap: 26, flexWrap: 'wrap',
       }}>
         <span>C. Cantilo 745 · City Bell</span>
-        <span>(221) 480-1977</span>
-        <span>Lun a Sáb · 8:30–13 / 16–20</span>
+        <span>221-600-7560</span>
+        <span>Lun a Vie · 8–18 / Sáb · 9–14</span>
       </div>
     </div>
   )
