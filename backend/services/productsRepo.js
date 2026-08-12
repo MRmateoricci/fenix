@@ -79,14 +79,218 @@ export async function upsertPriceRows(client, rows) {
 // Alta masiva de listas de proveedores. Crea borradores para códigos nuevos y
 // actualiza las variantes que ya tienen una asociación confirmada; nunca publica
 // un artículo automáticamente ni rompe una familia unificada.
-export async function createSupplierPriceDrafts(client, files, usdArsRate) {
+const pricePreviewRound = value => value == null || !Number.isFinite(Number(value))
+  ? null
+  : Math.round(Number(value) * 100) / 100
+
+function previewSourceValue(arsValue, usdValue, currency, usdArsRate) {
+  if (currency === 'USD') {
+    return pricePreviewRound(usdValue ?? (arsValue == null ? null : Number(arsValue) / usdArsRate))
+  }
+  return pricePreviewRound(arsValue)
+}
+
+function legacyOption(options, key, label) {
+  if (!label || !Array.isArray(options)) return null
+  return options.find(option =>
+    String(option?.[key] || '').localeCompare(String(label), 'es-AR', { sensitivity: 'base' }) === 0
+  ) || null
+}
+
+function mappedCurrentPrices(mapping, currency, usdArsRate) {
+  if (mapping.variant_rule_id) {
+    return {
+      precioCosto: previewSourceValue(mapping.rule_precio_costo, mapping.rule_precio_costo_usd, currency, usdArsRate),
+      precioVenta: previewSourceValue(mapping.rule_precio_venta, mapping.rule_precio_venta_usd, currency, usdArsRate),
+      precioIva: previewSourceValue(mapping.rule_precio_iva, mapping.rule_precio_iva_usd, currency, usdArsRate),
+    }
+  }
+
+  const option = mapping.color_name
+    ? legacyOption(mapping.color_options, 'name', mapping.color_name)
+    : mapping.size_label
+      ? legacyOption(mapping.size_options, 'label', mapping.size_label)
+      : null
+  return {
+    precioCosto: previewSourceValue(option?.priceCost ?? mapping.precio_costo, option?.priceCostUsd ?? mapping.precio_costo_usd, currency, usdArsRate),
+    precioVenta: previewSourceValue(option?.price ?? mapping.precio_venta, option?.priceUsd ?? mapping.precio_venta_usd, currency, usdArsRate),
+    precioIva: previewSourceValue(option?.priceWithTax ?? mapping.precio_iva, option?.priceWithTaxUsd ?? mapping.precio_iva_usd, currency, usdArsRate),
+  }
+}
+
+function pricePreviewChanges(previous, row) {
+  return [
+    ['precioCosto', 'Precio costo', row.precio_costo],
+    ['precioVenta', 'Precio venta', row.precio_venta],
+    ['precioIva', 'Precio con IVA', row.precio_iva],
+  ].filter(([, , next]) => next != null).map(([field, label, next]) => ({
+    field,
+    label,
+    previous: previous?.[field] ?? null,
+    next: pricePreviewRound(next),
+    changed: previous?.[field] == null || Math.abs(Number(previous[field]) - Number(next)) >= 0.005,
+  }))
+}
+
+// Analiza exactamente las mismas decisiones que aplicará la carga masiva, pero
+// sin escribir. El detalle se usa tanto en la confirmación previa como en el
+// comprobante posterior de la importación.
+export async function previewSupplierPriceDrafts(client, files, usdArsRate) {
   const seenCodes = new Set()
   const fileResults = []
   let created = 0
   let updated = 0
+  let unchanged = 0
   let skipped = 0
 
   for (const file of files) {
+    const uniqueRows = []
+    const duplicateItems = []
+    for (const row of file.rows) {
+      const codeKey = priceCodeKey(row.codigo)
+      if (seenCodes.has(codeKey)) {
+        duplicateItems.push({
+          status: 'duplicate', codigo: row.codigo, descripcion: row.descripcion,
+          reason: 'Código repetido en los archivos seleccionados', changes: [],
+        })
+        continue
+      }
+      seenCodes.add(codeKey)
+      uniqueRows.push(row)
+    }
+
+    const sourceKeys = uniqueRows.map(row => priceCodeKey(row.codigo)).filter(Boolean)
+    const { rows: mappings } = sourceKeys.length
+      ? await client.query(
+        `SELECT mapping.source_code_key, mapping.product_id, mapping.color_name,
+                mapping.size_label, mapping.tone_name, mapping.variant_rule_id,
+                product.codigo AS product_code,
+                COALESCE(NULLIF(product.name, ''), NULLIF(product.descripcion, ''), product.codigo) AS product_name,
+                product.precio_costo, product.precio_venta, product.precio_iva,
+                product.precio_costo_usd, product.precio_venta_usd, product.precio_iva_usd,
+                product.color_options, product.size_options,
+                rule.precio_costo AS rule_precio_costo,
+                rule.precio_venta AS rule_precio_venta,
+                rule.precio_iva AS rule_precio_iva,
+                rule.precio_costo_usd AS rule_precio_costo_usd,
+                rule.precio_venta_usd AS rule_precio_venta_usd,
+                rule.precio_iva_usd AS rule_precio_iva_usd
+         FROM supplier_product_mappings mapping
+         JOIN products product ON product.id = mapping.product_id
+         LEFT JOIN product_variant_rules rule ON rule.id = mapping.variant_rule_id
+         WHERE mapping.supplier = $1 AND mapping.source_code_key = ANY($2::text[])`,
+        [file.supplier, sourceKeys]
+      )
+      : { rows: [] }
+    const mappedByCode = new Map(mappings.map(mapping => [mapping.source_code_key, mapping]))
+    const unmappedRows = uniqueRows.filter(row => !mappedByCode.has(priceCodeKey(row.codigo)))
+    const unmappedCodes = unmappedRows.map(row => row.codigo)
+    const { rows: existingProducts } = unmappedCodes.length
+      ? await client.query(
+        `SELECT id, codigo, supplier,
+                COALESCE(NULLIF(name, ''), NULLIF(descripcion, ''), codigo) AS product_name,
+                precio_costo, precio_venta, precio_iva,
+                precio_costo_usd, precio_venta_usd, precio_iva_usd,
+                color_options, size_options
+         FROM products WHERE codigo = ANY($1::varchar[])`,
+        [unmappedCodes]
+      )
+      : { rows: [] }
+    const existingByCode = new Map(existingProducts.map(product => [product.codigo, product]))
+
+    const items = []
+    for (const row of uniqueRows) {
+      const mapping = mappedByCode.get(priceCodeKey(row.codigo))
+      if (mapping) {
+        const variant = [mapping.color_name, mapping.size_label, mapping.tone_name].filter(Boolean).join(' / ')
+        const changes = pricePreviewChanges(mappedCurrentPrices(mapping, file.currency, usdArsRate), row)
+        const hasChanges = changes.some(change => change.changed)
+        items.push({
+          status: hasChanges ? 'update' : 'unchanged',
+          codigo: row.codigo,
+          descripcion: row.descripcion,
+          targetProductId: mapping.product_id,
+          targetCode: mapping.product_code,
+          targetName: mapping.product_name,
+          variant: variant || null,
+          currency: file.currency,
+          changes,
+          ...(!hasChanges ? { reason: 'Los precios ya coinciden. No se realizará ningún cambio.' } : {}),
+        })
+        if (hasChanges) updated++
+        else { unchanged++; skipped++ }
+        continue
+      }
+
+      const existing = existingByCode.get(row.codigo)
+      if (existing) {
+        const previousSupplier = String(existing.supplier || '').trim()
+        items.push({
+          status: 'update', codigo: row.codigo, descripcion: row.descripcion,
+          targetProductId: existing.id,
+          targetCode: existing.codigo, targetName: existing.product_name,
+          currency: file.currency,
+          reason: previousSupplier && previousSupplier !== file.supplier
+            ? `Se asociará a ${file.supplier} (actualmente figura como ${previousSupplier}).`
+            : `Se creará la asociación con ${file.supplier}.`,
+          changes: pricePreviewChanges(mappedCurrentPrices(existing, file.currency, usdArsRate), row),
+        })
+        updated++
+      } else {
+        items.push({
+          status: 'create', codigo: row.codigo, descripcion: row.descripcion,
+          currency: file.currency, changes: pricePreviewChanges(null, row),
+        })
+        created++
+      }
+    }
+
+    items.push(...duplicateItems)
+    skipped += duplicateItems.length
+    const invalidItems = (file.invalidRows || []).map(row => ({
+      status: 'invalid', codigo: row.codigo, descripcion: row.descripcion,
+      rowNumber: row.rowNumber, reason: row.reason, changes: [],
+    }))
+    items.push(...invalidItems)
+    skipped += invalidItems.length
+
+    const fileCreated = items.filter(item => item.status === 'create').length
+    const fileUpdated = items.filter(item => item.status === 'update').length
+    const fileUnchanged = items.filter(item => item.status === 'unchanged').length
+    const fileSkipped = items.length - fileCreated - fileUpdated
+    fileResults.push({
+      fileName: file.fileName,
+      supplier: file.supplier,
+      currency: file.currency,
+      totalRows: file.totalRows,
+      created: fileCreated,
+      updated: fileUpdated,
+      unchanged: fileUnchanged,
+      skipped: fileSkipped,
+      invalidRows: invalidItems.length,
+      duplicateRows: duplicateItems.length,
+      existingCount: items.filter(item => item.status === 'skipped').length,
+      items,
+    })
+  }
+
+  return { created, updated, unchanged, skipped, files: fileResults }
+}
+
+export async function createSupplierPriceDrafts(client, files, usdArsRate, preview = null) {
+  const seenCodes = new Set()
+  const fileResults = []
+  let created = 0
+  let updated = 0
+  let unchanged = 0
+  let skipped = 0
+
+  for (let fileIndex = 0; fileIndex < files.length; fileIndex++) {
+    const file = files[fileIndex]
+    const previewItems = preview?.files?.[fileIndex]?.items || null
+    const previewByCode = previewItems
+      ? new Map(previewItems.filter(item => item.codigo).map(item => [priceCodeKey(item.codigo), item]))
+      : null
     const uniqueRows = []
     let duplicateRows = 0
 
@@ -113,13 +317,29 @@ export async function createSupplierPriceDrafts(client, files, usdArsRate) {
       )
       : { rows: [] }
     const mappedByCode = new Map(savedMappings.rows.map(mapping => [mapping.source_code_key, mapping]))
-    const mappedRows = uniqueRows.filter(row => mappedByCode.has(priceCodeKey(row.codigo)))
-    const unmappedRows = uniqueRows.filter(row => !mappedByCode.has(priceCodeKey(row.codigo)))
+    const mappedRows = uniqueRows.filter(row => {
+      const codeKey = priceCodeKey(row.codigo)
+      return mappedByCode.has(codeKey) && (!previewByCode || previewByCode.get(codeKey)?.status === 'update')
+    })
+    const directExistingRows = previewByCode
+      ? uniqueRows.filter(row => {
+        const codeKey = priceCodeKey(row.codigo)
+        const item = previewByCode.get(codeKey)
+        return !mappedByCode.has(codeKey) && item?.status === 'update' && item.targetProductId
+      })
+      : []
+    const unmappedRows = previewByCode
+      ? uniqueRows.filter(row => previewByCode.get(priceCodeKey(row.codigo))?.status === 'create')
+      : uniqueRows.filter(row => !mappedByCode.has(priceCodeKey(row.codigo)))
 
-    if (mappedRows.length) {
-      const mappedResult = await applyPriceUpdates(client, mappedRows.map(row => ({
+    const rowsToUpdate = [
+      ...mappedRows.map(row => ({ row, productId: mappedByCode.get(priceCodeKey(row.codigo)).product_id })),
+      ...directExistingRows.map(row => ({ row, productId: previewByCode.get(priceCodeKey(row.codigo)).targetProductId })),
+    ]
+    if (rowsToUpdate.length) {
+      const mappedResult = await applyPriceUpdates(client, rowsToUpdate.map(({ row, productId }) => ({
         type: 'update',
-        productId: mappedByCode.get(priceCodeKey(row.codigo)).product_id,
+        productId,
         sourceCode: row.codigo,
         currency: file.currency,
         precioCosto: row.precio_costo,
@@ -127,6 +347,13 @@ export async function createSupplierPriceDrafts(client, files, usdArsRate) {
         precioIva: row.precio_iva,
       })), usdArsRate, file.supplier)
       fileUpdated += mappedResult.updated
+    }
+    if (directExistingRows.length) {
+      await client.query(
+        `UPDATE products SET supplier = $1, updated_at = NOW()
+         WHERE id = ANY($2::uuid[])`,
+        [file.supplier, directExistingRows.map(row => previewByCode.get(priceCodeKey(row.codigo)).targetProductId)]
+      )
     }
 
     for (const batch of chunk(unmappedRows)) {
@@ -171,9 +398,11 @@ export async function createSupplierPriceDrafts(client, files, usdArsRate) {
       existingCodes.push(...batch.filter(row => !insertedCodes.has(row.codigo)).map(row => row.codigo))
     }
 
-    const fileSkipped = Number(file.skipped || 0) + duplicateRows + existingCodes.length
+    const unchangedRows = preview?.files?.[fileIndex]?.unchanged || 0
+    const fileSkipped = Number(file.skipped || 0) + duplicateRows + existingCodes.length + unchangedRows
     created += fileCreated
     updated += fileUpdated
+    unchanged += unchangedRows
     skipped += fileSkipped
     fileResults.push({
       fileName: file.fileName,
@@ -182,6 +411,7 @@ export async function createSupplierPriceDrafts(client, files, usdArsRate) {
       totalRows: file.totalRows,
       created: fileCreated,
       updated: fileUpdated,
+      unchanged: unchangedRows,
       skipped: fileSkipped,
       invalidRows: Number(file.skipped || 0),
       duplicateRows,
@@ -190,7 +420,7 @@ export async function createSupplierPriceDrafts(client, files, usdArsRate) {
     })
   }
 
-  return { created, updated, skipped, files: fileResults }
+  return { created, updated, unchanged, skipped, files: fileResults }
 }
 
 // La lista de precios se revisa antes de tocar la base. Este paso busca primero

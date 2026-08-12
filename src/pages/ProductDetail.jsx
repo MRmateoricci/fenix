@@ -91,6 +91,25 @@ export default function ProductDetail() {
   const ruleSelection = { color: selectedColor?.name, size: selectedSize?.label, tone: selectedTone?.name }
   const selectedPriceRule = resolvePublicVariantRule(product?.variantRules, ruleSelection, 'price')
   const selectedStockRule = resolvePublicVariantRule(product?.variantRules, ruleSelection, 'stock')
+  const selectedImageRule = resolvePublicVariantRule(product?.variantRules, ruleSelection, 'image')
+  const selectedDetailsRule = resolvePublicVariantRule(product?.variantRules, ruleSelection, 'productData')
+  const variantData = selectedDetailsRule?.productData || {}
+  const variantValue = (field, fallback) => variantData[field] !== '' && variantData[field] != null ? variantData[field] : fallback
+  const displayName = variantValue('name', product?.name)
+  const displayDescription = variantValue('description', product?.description)
+  const displayCategory = variantValue('category', product?.category)
+  const variantSpecs = [
+    ['Código', variantValue('codigo', null)], ['Medida', variantValue('medida', selectedSize?.label)],
+    ['Categoría', variantValue('category', product?.category)], ['Subcategoría', variantValue('subcategory', product?.subcategory)],
+    ['Marca / grupo', variantValue('grupo', null)], ['Proveedor', variantValue('supplier', null)],
+    ['Potencia', variantValue('watts', product?.watts) != null ? `${variantValue('watts', product?.watts)} W` : null],
+    ['Temperatura', variantValue('colorTemp', product?.colorTemp) != null ? `${variantValue('colorTemp', product?.colorTemp)} K` : null],
+    ['Protección', variantValue('ipRating', product?.ipRating)], ['Material', variantValue('material', product?.material)],
+    ['Tipo', variantValue('productType', product?.productType)], ['Tipo de cable', variantValue('cableType', product?.cableType)],
+    ['Dimensiones', [variantValue('lengthCm', product?.lengthCm), variantValue('widthCm', product?.widthCm), variantValue('heightCm', product?.heightCm)].every(value => value != null) ? `${variantValue('lengthCm', product?.lengthCm)} × ${variantValue('widthCm', product?.widthCm)} × ${variantValue('heightCm', product?.heightCm)} cm` : null],
+    ['Peso', variantValue('weightKg', product?.weightKg) != null ? `${variantValue('weightKg', product?.weightKg)} kg` : null],
+  ].filter(([, value]) => value !== '' && value != null)
+  const selectedImage = selectedImageRule?.image || selectedSize?.image || selectedTone?.image || selectedColor?.image || product?.image
   const selectedPrice = selectedPriceRule?.price != null
     ? Number(selectedPriceRule.price)
     : selectedSize?.price != null
@@ -142,6 +161,10 @@ export default function ProductDetail() {
   }, [availableStock])
 
   useEffect(() => {
+    setImgError(false)
+  }, [selectedImage])
+
+  useEffect(() => {
     if (product && window.location.hash === '#reviews') {
       window.requestAnimationFrame(() => {
         document.getElementById('reviews')?.scrollIntoView({ block: 'start' })
@@ -181,9 +204,9 @@ export default function ProductDetail() {
     for (let i = 0; i < qty; i++) {
       addItem({
         id:       product.id,
-        name:     product.name,
+        name:     displayName,
         price:    selectedPrice,
-        image:    selectedColor?.image || product.image,
+        image:    selectedImage,
         category: product.category,
         color:    selectedColor?.name,
         size:     selectedSize?.label,
@@ -198,14 +221,14 @@ export default function ProductDetail() {
     .filter(p => p.category === product.category && p.id !== product.id)
     .slice(0, 4)
 
-  const displayImage = selectedColor?.image || product.image
+  const displayImage = selectedImage
   const bigImage = displayImage?.replace('w=400&h=400', 'w=900&h=900') || null
 
   const productSchema = {
     '@context': 'https://schema.org',
     '@type': 'Product',
-    name: product.name,
-    description: product.description,
+    name: displayName,
+    description: displayDescription,
     image: bigImage,
     brand: { '@type': 'Brand', name: seoCfg.business.name },
     offers: {
@@ -223,8 +246,8 @@ export default function ProductDetail() {
   return (
     <>
       <PageSEO
-        title={product.name}
-        description={`${product.description} — Disponible en Fénix Iluminación, City Bell, La Plata.`}
+        title={displayName}
+        description={`${displayDescription} — Disponible en Fénix Iluminación, City Bell, La Plata.`}
         url={`/products/${product.id}`}
         image={product.image}
         schema={productSchema}
@@ -259,15 +282,15 @@ export default function ProductDetail() {
             </Link>
             <span style={{ opacity: 0.5 }}>/</span>
             <Link
-              to={`/products?category=${encodeURIComponent(product.category)}`}
+              to={`/products?category=${encodeURIComponent(displayCategory)}`}
               style={{ color: 'var(--color-text-muted)', textDecoration: 'none', transition: 'color .15s' }}
               onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--color-text)')}
               onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--color-text-muted)')}
             >
-              {product.category}
+              {displayCategory}
             </Link>
             <span style={{ opacity: 0.5 }}>/</span>
-            <span style={{ color: 'var(--color-text)' }}>{product.name}</span>
+            <span style={{ color: 'var(--color-text)' }}>{displayName}</span>
           </nav>
 
           {/* Two-column layout */}
@@ -287,7 +310,7 @@ export default function ProductDetail() {
                 ) : (
                   <img
                     src={bigImage}
-                    alt={product.name}
+                    alt={displayName}
                     style={{ width: '100%', display: 'block', objectFit: 'cover' }}
                     onError={() => setImgError(true)}
                   />
@@ -307,8 +330,13 @@ export default function ProductDetail() {
                   fontSize: 15, lineHeight: 1.75,
                   color: 'var(--color-text-muted)', margin: 0,
                 }}>
-                  {product.description}
+                  {displayDescription}
                 </p>
+                {variantSpecs.length > 0 && (
+                  <dl style={{ display: 'grid', gridTemplateColumns: 'repeat(2,minmax(0,1fr))', gap: '9px 16px', margin: '18px 0 0' }}>
+                    {variantSpecs.map(([label, value]) => <div key={label}><dt style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '.08em', color: 'var(--color-text-muted)' }}>{label}</dt><dd style={{ margin: '3px 0 0', fontSize: 13, color: 'var(--color-text)' }}>{value}</dd></div>)}
+                  </dl>
+                )}
               </div>
             </div>
 
@@ -325,7 +353,7 @@ export default function ProductDetail() {
                     backgroundColor: 'var(--color-surface-2)',
                     color: 'var(--color-text-muted)',
                   }}>
-                    {product.category}
+                    {displayCategory}
                   </span>
                   {variantInStock ? (
                     <span style={{
@@ -371,7 +399,7 @@ export default function ProductDetail() {
                 color: 'var(--color-text)',
                 margin: 0,
               }}>
-                {product.name}
+                {displayName}
               </h1>
 
               {/* Rating summary */}
@@ -644,7 +672,7 @@ export default function ProductDetail() {
                 </button>
 
                 <a
-                  href={`https://wa.me/${seoCfg.business.whatsapp}?text=Hola!%20Quiero%20consultar%20sobre%20${encodeURIComponent(product.name)}`}
+                  href={`https://wa.me/${seoCfg.business.whatsapp}?text=Hola!%20Quiero%20consultar%20sobre%20${encodeURIComponent(displayName)}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   style={{

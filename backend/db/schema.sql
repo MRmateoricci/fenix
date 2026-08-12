@@ -290,8 +290,11 @@ CREATE TABLE IF NOT EXISTS product_variant_rules (
   id                 UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
   product_id         UUID          NOT NULL REFERENCES products(id) ON DELETE CASCADE,
   color_name         VARCHAR(100),
+  color_hex          VARCHAR(7),
   size_label         VARCHAR(100),
   tone_name          VARCHAR(100),
+  image_url          TEXT,
+  product_data       JSONB         NOT NULL DEFAULT '{}',
   precio_costo       NUMERIC(14,2),
   precio_venta       NUMERIC(14,2),
   precio_iva         NUMERIC(14,2),
@@ -305,6 +308,10 @@ CREATE TABLE IF NOT EXISTS product_variant_rules (
   created_at         TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
   updated_at         TIMESTAMPTZ   NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE product_variant_rules ADD COLUMN IF NOT EXISTS image_url TEXT;
+ALTER TABLE product_variant_rules ADD COLUMN IF NOT EXISTS color_hex VARCHAR(7);
+ALTER TABLE product_variant_rules ADD COLUMN IF NOT EXISTS product_data JSONB NOT NULL DEFAULT '{}';
 
 CREATE INDEX IF NOT EXISTS idx_product_variant_rules_product
   ON product_variant_rules(product_id);

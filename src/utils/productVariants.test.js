@@ -20,3 +20,12 @@ test('color y medida seleccionados reemplazan al fallback', () => {
 
   assert.equal(resolvePublicVariantRule(rules, { color: 'Azul', tone: null, size: '10 MM2' }, 'price').id, '10-blue')
 })
+
+test('la imagen se resuelve con la variante seleccionada', () => {
+  const rules = [
+    { id: '10', size: '10 mm²', image: '/cable-10.jpg' },
+    { id: '16', size: '16 mm²', image: '/cable-16.jpg' },
+  ]
+
+  assert.equal(resolvePublicVariantRule(rules, { size: '16 mm²' }, 'image').image, '/cable-16.jpg')
+})

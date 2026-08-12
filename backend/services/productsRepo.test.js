@@ -1,6 +1,80 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { createSupplierPriceDrafts } from './productsRepo.js'
+import { createSupplierPriceDrafts, previewSupplierPriceDrafts } from './productsRepo.js'
+
+test('la vista previa detalla creaciones, cambios, vinculaciones, repetidos e inválidos sin escribir', async () => {
+  const client = {
+    async query(sql) {
+      if (/FROM supplier_product_mappings mapping/.test(sql)) {
+        assert.match(sql, /product\.name/)
+        assert.doesNotMatch(sql, /product\.nombre/)
+        return { rows: [{
+          source_code_key: 'MAP-1', product_id: 'product-1', color_name: null, size_label: null,
+          tone_name: null, variant_rule_id: null, product_code: 'GRUPO-1', product_name: 'Producto unido',
+          precio_costo: 80, precio_venta: 100, precio_iva: 121,
+          precio_costo_usd: null, precio_venta_usd: null, precio_iva_usd: null,
+          color_options: [], size_options: [],
+        }] }
+      }
+      if (/FROM products WHERE codigo = ANY/.test(sql)) {
+        assert.match(sql, /NULLIF\(name,/)
+        return { rows: [{
+          id: 'product-2', codigo: 'EXISTE', supplier: 'NOMBRE ANTERIOR', product_name: 'Ya cargado',
+          precio_costo: 10, precio_venta: 20, precio_iva: 24.2,
+          precio_costo_usd: null, precio_venta_usd: null, precio_iva_usd: null,
+          color_options: [], size_options: [],
+        }] }
+      }
+      throw new Error(`Consulta inesperada: ${sql}`)
+    },
+  }
+
+  const result = await previewSupplierPriceDrafts(client, [{
+    fileName: 'PROVEEDOR.xlsx', supplier: 'PROVEEDOR', currency: 'ARS', totalRows: 5, skipped: 1,
+    invalidRows: [{ rowNumber: 6, codigo: '', descripcion: 'Sin código', reason: 'Falta el código' }],
+    rows: [
+      { codigo: 'MAP-1', descripcion: 'Asociado', precio_costo: 80, precio_venta: 150, precio_iva: 181.5 },
+      { codigo: 'NUEVO', descripcion: 'Nuevo', precio_costo: 10, precio_venta: 20, precio_iva: 24.2 },
+      { codigo: 'EXISTE', descripcion: 'Existente', precio_costo: 10, precio_venta: 20, precio_iva: 24.2 },
+      { codigo: 'NUEVO', descripcion: 'Duplicado', precio_costo: 10, precio_venta: 20, precio_iva: 24.2 },
+    ],
+  }], 1510)
+
+  assert.equal(result.created, 1)
+  assert.equal(result.updated, 2)
+  assert.equal(result.skipped, 2)
+  assert.deepEqual(result.files[0].items.map(item => item.status), ['update', 'create', 'update', 'duplicate', 'invalid'])
+  const update = result.files[0].items[0]
+  assert.equal(update.targetCode, 'GRUPO-1')
+  assert.equal(update.changes.find(change => change.field === 'precioVenta').previous, 100)
+  assert.equal(update.changes.find(change => change.field === 'precioVenta').next, 150)
+  assert.equal(update.changes.find(change => change.field === 'precioCosto').changed, false)
+  assert.match(result.files[0].items[2].reason, /Se asociará a PROVEEDOR/)
+})
+
+test('una asociación cuyos precios coinciden queda sin cambios y no cuenta como actualización', async () => {
+  const client = {
+    async query(sql) {
+      if (/FROM supplier_product_mappings mapping/.test(sql)) return { rows: [{
+        source_code_key: 'IGUAL', product_id: 'product-1', color_name: null, size_label: null,
+        tone_name: null, variant_rule_id: null, product_code: 'IGUAL', product_name: 'Producto',
+        precio_costo: 80, precio_venta: 100, precio_iva: 121,
+        precio_costo_usd: null, precio_venta_usd: null, precio_iva_usd: null,
+        color_options: [], size_options: [],
+      }] }
+      throw new Error(`Consulta inesperada: ${sql}`)
+    },
+  }
+  const result = await previewSupplierPriceDrafts(client, [{
+    fileName: 'lista.xlsx', supplier: 'PROVEEDOR', currency: 'ARS', totalRows: 1, skipped: 0,
+    rows: [{ codigo: 'IGUAL', descripcion: 'Producto', precio_costo: 80, precio_venta: 100, precio_iva: 121 }],
+  }], 1510)
+
+  assert.equal(result.updated, 0)
+  assert.equal(result.unchanged, 1)
+  assert.equal(result.skipped, 1)
+  assert.equal(result.files[0].items[0].status, 'unchanged')
+})
 
 test('crea borradores, convierte USD y no pisa códigos existentes o repetidos', async () => {
   const insertParams = []

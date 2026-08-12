@@ -49,3 +49,19 @@ test('encuentra la cabecera aunque la planilla tenga filas previas', () => {
     precio_iva: 3.025,
   })
 })
+
+test('ignora filas completamente vacías aunque la hoja esté formateada hasta la fila 1000', () => {
+  const worksheet = XLSX.utils.aoa_to_sheet([
+    ['Código', 'Descripción', 'Costo', 'Venta', 'Precio con IVA'],
+    ['ABC-1', 'Producto', 10, 20, 24.2],
+  ])
+  worksheet['!ref'] = 'A1:E1000'
+  const workbook = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'Precios')
+  const parsed = parseSupplierPrices(XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }))
+
+  assert.equal(parsed.totalRows, 1)
+  assert.equal(parsed.rows.length, 1)
+  assert.equal(parsed.skipped, 0)
+  assert.deepEqual(parsed.invalidRows, [])
+})

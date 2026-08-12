@@ -12,6 +12,7 @@ import { PaymentReconciliationError, reconcileMercadoPagoPayment } from '../serv
 import { sendReviewInvitationForOrder } from '../services/reviewInvitations.js'
 import { isValidEmail, normalizeEmail } from '../utils/email.js'
 import { resolveVariantRule, ruleMatches } from '../services/productVariants.js'
+import { resolvePublicOptionPrice, resolvePublicPrice } from '../services/publicPricing.js'
 import 'dotenv/config'
 
 const router = Router()
@@ -49,8 +50,16 @@ export function combineVariantRowKey(selectedColor, selectedTone) {
 // tono pisa al color, y el color solo se usa si ni el tono ni la medida
 // tienen precio propio.
 export function resolveProductVariantPrice(product, selectedColor, selectedSize, selectedTone) {
-  const basePrice = Number(product?.precio_venta)
-  if (!Number.isFinite(basePrice)) return { error: 'missing_price', price: null }
+  const usdArsRate = Number(product?.usd_ars_rate) || 1510
+  const basePrice = resolvePublicPrice({
+    priceWithTax: product?.precio_iva,
+    priceWithTaxUsd: product?.precio_iva_usd,
+    price: product?.precio_venta,
+    priceUsd: product?.precio_venta_usd,
+    currency: product?.price_currency,
+    usdArsRate,
+  })
+  if (basePrice == null) return { error: 'missing_price', price: null }
   let price = basePrice
   const hasOption = (options, key, selected) => !selected || !options.length || options.some(option =>
     String(option?.[key] || '').localeCompare(String(selected), 'es-AR', { sensitivity: 'base' }) === 0
@@ -61,18 +70,22 @@ export function resolveProductVariantPrice(product, selectedColor, selectedSize,
   if (!hasOption(availableColors, 'name', selectedColor)) return { error: 'invalid_color', price: null }
   if (!hasOption(availableSizes, 'label', selectedSize)) return { error: 'invalid_size', price: null }
   if (!hasOption(availableTones, 'name', selectedTone)) return { error: 'invalid_tone', price: null }
-  const usdArsRate = Number(product?.usd_ars_rate) || 1510
   const normalizedRules = (Array.isArray(product?.variant_rules) ? product.variant_rules : []).map(rule => ({
     ...rule,
-    precio_venta: rule.price_currency === 'USD' && rule.precio_venta_usd != null
-      ? Number(rule.precio_venta_usd) * usdArsRate
-      : rule.precio_venta,
+    precio_publico: resolvePublicPrice({
+      priceWithTax: rule.precio_iva,
+      priceWithTaxUsd: rule.precio_iva_usd,
+      price: rule.precio_venta,
+      priceUsd: rule.precio_venta_usd,
+      currency: rule.price_currency,
+      usdArsRate,
+    }),
   }))
   const priceRule = resolveVariantRule(normalizedRules, {
     color: selectedColor, size: selectedSize, tone: selectedTone,
-  }, 'precio_venta')
+  }, 'precio_publico')
   if (priceRule?.error) return { error: 'invalid_variant', price: null }
-  if (priceRule) return { error: null, price: Number(priceRule.precio_venta), ruleId: priceRule.id }
+  if (priceRule) return { error: null, price: priceRule.precio_publico, ruleId: priceRule.id }
   if (normalizedRules.length && !normalizedRules.some(rule => ruleMatches(rule, {
     color: selectedColor, size: selectedSize, tone: selectedTone,
   }))) return { error: 'invalid_variant', price: null }
@@ -83,8 +96,8 @@ export function resolveProductVariantPrice(product, selectedColor, selectedSize,
       String(color?.name || '').localeCompare(String(selectedColor), 'es-AR', { sensitivity: 'base' }) === 0
     )
     if (colors.length && !variant) return { error: 'invalid_color', price: null }
-    const variantPrice = Number(variant?.price)
-    if (Number.isFinite(variantPrice)) price = variantPrice
+    const variantPrice = resolvePublicOptionPrice(variant, product?.price_currency, usdArsRate)
+    if (variantPrice != null) price = variantPrice
   }
 
   if (selectedTone) {
@@ -93,8 +106,8 @@ export function resolveProductVariantPrice(product, selectedColor, selectedSize,
       String(tone?.name || '').localeCompare(String(selectedTone), 'es-AR', { sensitivity: 'base' }) === 0
     )
     if (tones.length && !variant) return { error: 'invalid_tone', price: null }
-    const variantPrice = Number(variant?.price)
-    if (Number.isFinite(variantPrice)) price = variantPrice
+    const variantPrice = resolvePublicOptionPrice(variant, product?.price_currency, usdArsRate)
+    if (variantPrice != null) price = variantPrice
   }
 
   if (selectedSize) {
@@ -103,8 +116,8 @@ export function resolveProductVariantPrice(product, selectedColor, selectedSize,
       String(size?.label || '').localeCompare(String(selectedSize), 'es-AR', { sensitivity: 'base' }) === 0
     )
     if (sizes.length && !variant) return { error: 'invalid_size', price: null }
-    const variantPrice = Number(variant?.price)
-    if (Number.isFinite(variantPrice)) price = variantPrice
+    const variantPrice = resolvePublicOptionPrice(variant, product?.price_currency, usdArsRate)
+    if (variantPrice != null) price = variantPrice
   }
 
   return { error: null, price }
@@ -216,7 +229,8 @@ router.post('/', attachUserIfPresent, async (req, res) => {
     // en lo que manda el cliente (podría mandar cualquier item.price).
     const productIds = items.map((i) => i.id)
     const { rows: dbProducts } = await pool.query(
-      `SELECT products.id, precio_venta, color_options, size_options, tone_options, variant_stock,
+      `SELECT products.id, precio_venta, precio_iva, precio_venta_usd, precio_iva_usd, price_currency,
+              color_options, size_options, tone_options, variant_stock,
               COALESCE((SELECT usd_ars_rate FROM store_settings WHERE id=1),1510) AS usd_ars_rate,
               COALESCE((SELECT jsonb_agg(to_jsonb(vr)) FROM product_variant_rules vr
                         WHERE vr.product_id=products.id), '[]'::jsonb) AS variant_rules
@@ -228,7 +242,8 @@ router.post('/', attachUserIfPresent, async (req, res) => {
     const itemsSnapshot = []
     for (const i of items) {
       const dbProduct = productMap.get(i.id)
-      if (!dbProduct || dbProduct.precio_venta == null) {
+      if (!dbProduct || (dbProduct.precio_iva == null && dbProduct.precio_iva_usd == null &&
+          dbProduct.precio_venta == null && dbProduct.precio_venta_usd == null)) {
         return res.status(400).json({ error: `Producto no disponible: ${i.name || i.id}` })
       }
       const resolvedPrice = resolveProductVariantPrice(dbProduct, i.color, i.size, i.tone)

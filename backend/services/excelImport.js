@@ -91,17 +91,33 @@ export function parseSupplierPrices(buffer) {
     ? firstHeaderIndex(headers, header => /PRECIO/.test(header) && /IVA/.test(header) && !/COSTO/.test(header), used)
     : 4
 
+  // SheetJS respeta el rango usado de la hoja. Algunos proveedores aplican
+  // formato hasta la fila 1000, aunque después del último producto no haya
+  // ningún dato. Esas filas no forman parte de la lista ni son errores.
   const dataRows = rowsRaw.slice(headerRowIndex + 1)
+    .map((row, dataIndex) => ({ row, rowNumber: headerRowIndex + dataIndex + 2 }))
+    .filter(({ row }) => (row || []).some(cell => cell != null && String(cell).trim() !== ''))
   const rows = []
   let skipped = 0
+  const invalidRows = []
 
-  for (const row of dataRows) {
+  for (const { row, rowNumber } of dataRows) {
     const codigo = normalizeCodigo(row?.[codeIndex])
     const precioCosto = costIndex >= 0 ? toNumber(row?.[costIndex]) : null
     const precioVenta = saleIndex >= 0 ? toNumber(row?.[saleIndex]) : null
     const precioIva = taxIndex >= 0 ? toNumber(row?.[taxIndex]) : null
     if (!codigo || codigo.length > 64 || [precioCosto, precioVenta, precioIva].every(value => value == null)) {
       skipped++
+      invalidRows.push({
+        rowNumber,
+        codigo: codigo || (row?.[codeIndex] == null ? '' : String(row[codeIndex]).trim()),
+        descripcion: row?.[descriptionIndex] == null ? '' : String(row[descriptionIndex]).trim(),
+        reason: !codigo
+          ? 'Falta el código'
+          : codigo.length > 64
+            ? 'El código supera los 64 caracteres'
+            : 'No contiene precios válidos',
+      })
       continue
     }
     rows.push({
@@ -117,6 +133,7 @@ export function parseSupplierPrices(buffer) {
     rows,
     totalRows: dataRows.length,
     skipped,
+    invalidRows,
     columns: { codeIndex, descriptionIndex, costIndex, saleIndex, taxIndex },
   }
 }

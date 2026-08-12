@@ -29,6 +29,7 @@ import {
   upsertCatalogRows,
   matchPriceRows,
   applyPriceUpdates,
+  previewSupplierPriceDrafts,
   createSupplierPriceDrafts,
   applySaleDecrement,
   applyPurchaseIncrement,
@@ -36,9 +37,11 @@ import {
   applyInvoiceLines,
 } from '../services/productsRepo.js'
 import {
+  detachVariantRule,
   findRuleAmbiguity,
   loadMergePreview,
   mergeProducts,
+  normalizeVariantProductData,
   recomputeGroupedProduct,
 } from '../services/productVariants.js'
 
@@ -64,14 +67,6 @@ function normalizePriceSupplier(value) {
   return supplier && supplier.length <= 80 ? supplier : null
 }
 
-function supplierFromPriceFilename(filename) {
-  const supplier = path.parse(path.basename(String(filename || ''))).name
-    .trim()
-    .replace(/\s+/g, ' ')
-    .toUpperCase()
-  return supplier ? supplier.slice(0, 80) : null
-}
-
 function priceCurrencyFromFilename(filename) {
   const name = path.parse(path.basename(String(filename || ''))).name
     .normalize('NFD')
@@ -80,6 +75,39 @@ function priceCurrencyFromFilename(filename) {
   return /(^|[^A-Z])(DOLAR|DOLARES|USD)([^A-Z]|$)/.test(name) || /U\$S/.test(name)
     ? 'USD'
     : 'ARS'
+}
+
+function parseBulkPriceUploads(files, supplier) {
+  const parsedFiles = []
+  const failedFiles = []
+  for (const file of files) {
+    try {
+      const parsed = parseSupplierPrices(file.buffer)
+      if (!parsed.rows.length) throw new Error('No contiene filas de productos reconocibles')
+      parsedFiles.push({
+        fileName: path.basename(file.originalname),
+        supplier,
+        currency: priceCurrencyFromFilename(file.originalname),
+        ...parsed,
+      })
+    } catch (err) {
+      failedFiles.push({
+        fileName: path.basename(file.originalname),
+        error: err.message || 'No se pudo leer el archivo',
+      })
+    }
+  }
+  return { parsedFiles, failedFiles }
+}
+
+async function applySavedSupplierCurrencies(client, parsedFiles) {
+  if (!parsedFiles.length) return
+  const savedCurrencies = await client.query(
+    'SELECT supplier, currency FROM supplier_price_settings WHERE supplier = ANY($1::text[])',
+    [[...new Set(parsedFiles.map(file => file.supplier))]]
+  )
+  const currencyBySupplier = new Map(savedCurrencies.rows.map(row => [row.supplier, row.currency]))
+  for (const file of parsedFiles) file.currency = currencyBySupplier.get(file.supplier) || file.currency
 }
 
 function convertedVariantOptions(products, currency, usdArsRate) {
@@ -498,7 +526,8 @@ router.get('/:id', async (req, res) => {
       `SELECT p.*,
               COALESCE((
                 SELECT jsonb_agg(jsonb_build_object(
-                  'id', vr.id, 'color', vr.color_name, 'size', vr.size_label, 'tone', vr.tone_name,
+                  'id', vr.id, 'color', vr.color_name, 'colorHex', vr.color_hex, 'size', vr.size_label, 'tone', vr.tone_name,
+                  'image', vr.image_url, 'productData', vr.product_data,
                   'precio_costo', vr.precio_costo, 'precio_venta', vr.precio_venta, 'precio_iva', vr.precio_iva,
                   'precio_costo_usd', vr.precio_costo_usd, 'precio_venta_usd', vr.precio_venta_usd,
                   'precio_iva_usd', vr.precio_iva_usd, 'price_currency', vr.price_currency,
@@ -524,22 +553,37 @@ router.patch('/:id/variant-rules', async (req, res) => {
   if (!UUID_PATTERN.test(req.params.id) || !rules.length || rules.length > 500) {
     return res.status(400).json({ error: 'Las reglas enviadas no son válidas' })
   }
+  const supplierCodeKey = value => String(value || '').trim().toUpperCase().replace(/\s+/g, '')
   const normalized = rules.map(rule => ({
     id: UUID_PATTERN.test(String(rule.id || '')) ? String(rule.id) : null,
     color_name: String(rule.color || '').trim() || null,
+    color_hex: /^#[0-9a-f]{6}$/i.test(String(rule.colorHex || '').trim()) ? String(rule.colorHex).trim().toUpperCase() : null,
     size_label: String(rule.size || '').trim() || null,
     tone_name: String(rule.tone || '').trim() || null,
+    image_url: String(rule.image || '').trim() || null,
+    product_data: rule.productData && typeof rule.productData === 'object' && !Array.isArray(rule.productData)
+      ? normalizeVariantProductData(rule.productData)
+      : null,
     precio_costo: toNumber(rule.precio_costo),
     precio_venta: toNumber(rule.precio_venta),
     precio_iva: toNumber(rule.precio_iva),
     stock: rule.stock == null || rule.stock === '' ? null : Number(rule.stock),
+    supplier_codes: [...new Set((Array.isArray(rule.supplierCodes) ? rule.supplierCodes : [])
+      .map(code => String(code || '').trim()).filter(Boolean))],
   }))
   if (normalized.some(rule => [rule.precio_costo, rule.precio_venta, rule.precio_iva].some(value => value != null && value < 0) ||
       (rule.stock != null && (!Number.isInteger(rule.stock) || rule.stock < 0)))) {
     return res.status(400).json({ error: 'Hay precios o cantidades inválidas' })
   }
   if (findRuleAmbiguity(normalized)) {
-    return res.status(409).json({ error: 'Hay reglas que se superponen con la misma precisión' })
+    return res.status(409).json({ error: 'Hay filas que representan la misma variante. Asignales distinto color, tono o medida' })
+  }
+  const submittedCodeKeys = normalized.flatMap(rule => rule.supplier_codes.map(supplierCodeKey))
+  if (normalized.some(rule => rule.supplier_codes.length > 1)) {
+    return res.status(409).json({ error: 'Cada variante puede tener un solo código de proveedor' })
+  }
+  if (new Set(submittedCodeKeys).size !== submittedCodeKeys.length) {
+    return res.status(409).json({ error: 'Un código de proveedor no puede estar asignado a dos variantes' })
   }
   const client = await pool.connect()
   try {
@@ -553,53 +597,71 @@ router.patch('/:id/variant-rules', async (req, res) => {
     if (!current.rows.length) throw new Error('El producto ya no existe')
     const product = current.rows[0]
     const existing = await client.query(
-      `SELECT rule.id, EXISTS(SELECT 1 FROM supplier_product_mappings mapping WHERE mapping.variant_rule_id=rule.id) AS has_code
-       FROM product_variant_rules rule WHERE rule.product_id=$1 FOR UPDATE`,
+      `SELECT rule.id FROM product_variant_rules rule WHERE rule.product_id=$1 FOR UPDATE`,
       [req.params.id]
     )
+    const mappings = await client.query(
+      `SELECT mapping.id, mapping.source_code, mapping.source_code_key, mapping.variant_rule_id
+       FROM supplier_product_mappings mapping
+       INNER JOIN product_variant_rules rule ON rule.id=mapping.variant_rule_id
+       WHERE rule.product_id=$1 FOR UPDATE OF mapping`,
+      [req.params.id]
+    )
+    const mappingByCode = new Map(mappings.rows.map(mapping => [mapping.source_code_key, mapping]))
+    const existingCodeKeys = new Set(mappings.rows.map(mapping => mapping.source_code_key))
+    if (submittedCodeKeys.length !== existingCodeKeys.size || submittedCodeKeys.some(key => !existingCodeKeys.has(key))) {
+      throw new Error('La asignación de códigos cambió mientras editabas. Cerrá y volvé a abrir el producto')
+    }
     const existingById = new Map(existing.rows.map(rule => [rule.id, rule]))
     const submittedIds = new Set(normalized.map(rule => rule.id).filter(Boolean))
     if ([...submittedIds].some(id => !existingById.has(id))) throw new Error('Una de las reglas ya no existe')
-    if (existing.rows.some(rule => rule.has_code && !submittedIds.has(rule.id))) {
-      throw new Error('No se puede eliminar una variante que conserva un código de proveedor')
-    }
-    const removableIds = existing.rows.filter(rule => !rule.has_code && !submittedIds.has(rule.id)).map(rule => rule.id)
+    const removableIds = existing.rows.filter(rule => !submittedIds.has(rule.id)).map(rule => rule.id)
     if (removableIds.length) {
       await client.query('DELETE FROM product_variant_rules WHERE product_id=$1 AND id=ANY($2::uuid[])', [req.params.id, removableIds])
     }
     const rate = Number(product.usd_ars_rate) || 1510
+    const savedRules = []
     for (const rule of normalized) {
       const usd = value => product.price_currency === 'USD' && value != null ? Math.round(value / rate * 100) / 100 : null
+      let savedRuleId = rule.id
       if (rule.id) {
         await client.query(
-          `UPDATE product_variant_rules SET color_name=$1,size_label=$2,tone_name=$3,
-             precio_costo=$4,precio_venta=$5,precio_iva=$6,
-             precio_costo_usd=CASE WHEN price_currency='USD' THEN $7 ELSE precio_costo_usd END,
-             precio_venta_usd=CASE WHEN price_currency='USD' THEN $8 ELSE precio_venta_usd END,
-             precio_iva_usd=CASE WHEN price_currency='USD' THEN $9 ELSE precio_iva_usd END,
-             stock=$10,price_exchange_rate=$11,updated_at=NOW()
-           WHERE id=$12 AND product_id=$13`,
-          [rule.color_name, rule.size_label, rule.tone_name, rule.precio_costo,
+          `UPDATE product_variant_rules SET color_name=$1,color_hex=$2,size_label=$3,tone_name=$4,image_url=$5,
+             product_data=COALESCE($6::jsonb,product_data),precio_costo=$7,precio_venta=$8,precio_iva=$9,
+             precio_costo_usd=CASE WHEN price_currency='USD' THEN $10 ELSE precio_costo_usd END,
+             precio_venta_usd=CASE WHEN price_currency='USD' THEN $11 ELSE precio_venta_usd END,
+             precio_iva_usd=CASE WHEN price_currency='USD' THEN $12 ELSE precio_iva_usd END,
+             stock=$13,price_exchange_rate=$14,updated_at=NOW()
+           WHERE id=$15 AND product_id=$16`,
+          [rule.color_name, rule.color_hex, rule.size_label, rule.tone_name, rule.image_url,
+            rule.product_data ? JSON.stringify(rule.product_data) : null, rule.precio_costo,
             rule.precio_venta, rule.precio_iva, usd(rule.precio_costo), usd(rule.precio_venta),
             usd(rule.precio_iva), rule.stock, rate, rule.id, req.params.id]
         )
-        await client.query(
-          `UPDATE supplier_product_mappings SET color_name=$1,size_label=$2,tone_name=$3,updated_at=NOW()
-           WHERE variant_rule_id=$4`,
-          [rule.color_name, rule.size_label, rule.tone_name, rule.id]
-        )
       } else {
-        await client.query(
+        const inserted = await client.query(
           `INSERT INTO product_variant_rules
-             (product_id,color_name,size_label,tone_name,precio_costo,precio_venta,precio_iva,
-              precio_costo_usd,precio_venta_usd,precio_iva_usd,price_currency,price_exchange_rate,stock)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
-          [req.params.id, rule.color_name, rule.size_label, rule.tone_name,
-            rule.precio_costo, rule.precio_venta, rule.precio_iva,
+             (product_id,color_name,color_hex,size_label,tone_name,image_url,product_data,precio_costo,precio_venta,precio_iva,
+               precio_costo_usd,precio_venta_usd,precio_iva_usd,price_currency,price_exchange_rate,stock)
+            VALUES ($1,$2,$3,$4,$5,$6,COALESCE($7::jsonb,'{}'::jsonb),$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING id`,
+          [req.params.id, rule.color_name, rule.color_hex, rule.size_label, rule.tone_name, rule.image_url,
+            rule.product_data ? JSON.stringify(rule.product_data) : null, rule.precio_costo, rule.precio_venta, rule.precio_iva,
             usd(rule.precio_costo), usd(rule.precio_venta), usd(rule.precio_iva),
             product.price_currency || 'ARS', rate, rule.stock]
         )
+        savedRuleId = inserted.rows[0].id
       }
+      savedRules.push({ ...rule, id: savedRuleId })
+    }
+    for (const rule of savedRules) {
+      const mappingIds = rule.supplier_codes.map(code => mappingByCode.get(supplierCodeKey(code))?.id).filter(Boolean)
+      if (!mappingIds.length) continue
+      await client.query(
+        `UPDATE supplier_product_mappings
+         SET variant_rule_id=$1,color_name=$2,color_hex=$3,size_label=$4,tone_name=$5,updated_at=NOW()
+         WHERE id=ANY($6::uuid[]) AND product_id=$7`,
+        [rule.id, rule.color_name, rule.color_hex, rule.size_label, rule.tone_name, mappingIds, req.params.id]
+      )
     }
     const rebuild = (options, key, values, extra = {}) => {
       const currentOptions = Array.isArray(options) ? options : []
@@ -609,6 +671,10 @@ router.patch('/:id/variant-rules', async (req, res) => {
       })
     }
     const colors = rebuild(product.color_options, 'name', normalized.map(rule => rule.color_name), { hex: '#CCCCCC' })
+      .map(color => ({
+        ...color,
+        hex: normalized.find(rule => rule.color_name && String(rule.color_name).localeCompare(color.name, 'es-AR', { sensitivity: 'base' }) === 0)?.color_hex || color.hex || '#CCCCCC',
+      }))
     const sizes = rebuild(product.size_options, 'label', normalized.map(rule => rule.size_label))
     const tones = rebuild(product.tone_options, 'name', normalized.map(rule => rule.tone_name), { hex: '#CCCCCC' })
     await client.query(
@@ -631,6 +697,23 @@ router.patch('/:id/variant-rules', async (req, res) => {
 // con los del catálogo público (ver columnas agregadas en db/schema.sql:
 // "Catálogo público" para el detalle de cada una).
 // ─────────────────────────────────────────────────────────────────────────────
+router.post('/:id/variant-rules/:ruleId/detach', async (req, res) => {
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+    const result = await detachVariantRule(client, req.params.id, req.params.ruleId)
+    await client.query('COMMIT')
+    res.status(201).json(result)
+  } catch (err) {
+    await client.query('ROLLBACK')
+    const status = /ya no existe|no existe/.test(err.message || '') ? 404
+      : /Ya existe/.test(err.message || '') ? 409 : 400
+    res.status(status).json({ error: err.message || 'No se pudo separar la variante' })
+  } finally {
+    client.release()
+  }
+})
+
 const FIELD_TRANSFORMS = {
   codigo:            (v) => normalizeCodigo(v),
   descripcion:       (v) => v,
@@ -1041,32 +1124,52 @@ router.post('/import/prices/parse', upload.single('file'), async (req, res) => {
   }
 })
 
+router.post('/import/prices/bulk/preview', upload.array('files', 100), async (req, res) => {
+  const files = Array.isArray(req.files) ? req.files : []
+  if (!files.length) return res.status(400).json({ error: 'Elegí al menos un archivo XLS o XLSX' })
+  const supplier = normalizePriceSupplier(req.body.supplier)
+  if (!supplier) return res.status(400).json({ error: 'Elegí el proveedor de la lista de precios' })
+
+  const { parsedFiles, failedFiles } = parseBulkPriceUploads(files, supplier)
+
+  if (!parsedFiles.length) {
+    return res.status(400).json({
+      error: 'Ninguno de los archivos contiene una lista de precios válida',
+      failedFiles,
+    })
+  }
+
+  const client = await pool.connect()
+  try {
+    const settings = await client.query('SELECT usd_ars_rate FROM store_settings WHERE id = 1')
+    const usdArsRate = Number(settings.rows[0]?.usd_ars_rate || 1510)
+    await applySavedSupplierCurrencies(client, parsedFiles)
+    const result = await previewSupplierPriceDrafts(client, parsedFiles, usdArsRate)
+    res.json({
+      fileType: 'bulk-prices',
+      preview: true,
+      totalFiles: files.length,
+      processedFiles: parsedFiles.length,
+      totalRows: parsedFiles.reduce((sum, file) => sum + file.totalRows, 0),
+      exchangeRate: usdArsRate,
+      failedFiles,
+      ...result,
+    })
+  } catch (err) {
+    console.error('[POST /api/products/import/prices/bulk/preview]', err)
+    res.status(500).json({ error: 'No se pudo preparar la vista previa de las listas' })
+  } finally {
+    client.release()
+  }
+})
+
 router.post('/import/prices/bulk', upload.array('files', 100), async (req, res) => {
   const files = Array.isArray(req.files) ? req.files : []
   if (!files.length) return res.status(400).json({ error: 'Elegí al menos un archivo XLS o XLSX' })
+  const supplier = normalizePriceSupplier(req.body.supplier)
+  if (!supplier) return res.status(400).json({ error: 'Elegí el proveedor de la lista de precios' })
 
-  const parsedFiles = []
-  const failedFiles = []
-  for (const file of files) {
-    try {
-      const supplier = supplierFromPriceFilename(file.originalname)
-      if (!supplier) throw new Error('El nombre del archivo no permite identificar al proveedor')
-      const parsed = parseSupplierPrices(file.buffer)
-      if (!parsed.rows.length) throw new Error('No contiene filas de productos reconocibles')
-      parsedFiles.push({
-        fileName: path.basename(file.originalname),
-        supplier,
-        currency: priceCurrencyFromFilename(file.originalname),
-        ...parsed,
-      })
-    } catch (err) {
-      failedFiles.push({
-        fileName: path.basename(file.originalname),
-        error: err.message || 'No se pudo leer el archivo',
-      })
-    }
-  }
-
+  const { parsedFiles, failedFiles } = parseBulkPriceUploads(files, supplier)
   if (!parsedFiles.length) {
     return res.status(400).json({
       error: 'Ninguno de los archivos contiene una lista de precios válida',
@@ -1079,12 +1182,7 @@ router.post('/import/prices/bulk', upload.array('files', 100), async (req, res) 
     await client.query('BEGIN')
     const settings = await client.query('SELECT usd_ars_rate FROM store_settings WHERE id = 1')
     const usdArsRate = Number(settings.rows[0]?.usd_ars_rate || 1510)
-    const savedCurrencies = await client.query(
-      'SELECT supplier, currency FROM supplier_price_settings WHERE supplier = ANY($1::text[])',
-      [[...new Set(parsedFiles.map(file => file.supplier))]]
-    )
-    const currencyBySupplier = new Map(savedCurrencies.rows.map(row => [row.supplier, row.currency]))
-    for (const file of parsedFiles) file.currency = currencyBySupplier.get(file.supplier) || file.currency
+    await applySavedSupplierCurrencies(client, parsedFiles)
     await client.query(
       `INSERT INTO supplier_price_settings (supplier, currency)
        SELECT entry.supplier, entry.currency
@@ -1095,7 +1193,8 @@ router.post('/import/prices/bulk', upload.array('files', 100), async (req, res) 
         currency: file.currency,
       }])).values()])]
     )
-    const result = await createSupplierPriceDrafts(client, parsedFiles, usdArsRate)
+    const preview = await previewSupplierPriceDrafts(client, parsedFiles, usdArsRate)
+    const result = await createSupplierPriceDrafts(client, parsedFiles, usdArsRate, preview)
     await client.query('COMMIT')
     res.json({
       fileType: 'bulk-prices',
@@ -1105,6 +1204,10 @@ router.post('/import/prices/bulk', upload.array('files', 100), async (req, res) 
       exchangeRate: usdArsRate,
       failedFiles,
       ...result,
+      files: result.files.map((file, index) => ({
+        ...file,
+        items: preview.files[index]?.items || [],
+      })),
     })
   } catch (err) {
     await client.query('ROLLBACK')

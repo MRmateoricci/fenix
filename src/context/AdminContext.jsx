@@ -17,7 +17,11 @@ function toBackendPayload(p) {
   if ('category' in p)      out.category          = p.category
   if ('subcategory' in p)   out.subcategory       = p.subcategory
   if ('description' in p)   out.description_larga = p.description
-  if ('price' in p)         out.precio_venta      = p.price
+  // El editor unificado trae ambos importes. Un cambio aislado de `price`
+  // (por ejemplo, desde Ofertas) corresponde al precio público con IVA.
+  if ('price' in p && 'priceWithTax' in p) out.precio_venta = p.price
+  else if ('price' in p)                    out.precio_iva   = p.price
+  if ('priceWithTax' in p)                  out.precio_iva   = p.priceWithTax
   if ('originalPrice' in p) out.original_price    = p.originalPrice ?? null
   if ('image' in p)         out.image_url         = p.image
   if ('hoverImage' in p)    out.hover_image_url    = p.hoverImage
@@ -260,6 +264,16 @@ export function AdminProvider({ children }) {
     })
     const data = await res.json()
     if (!res.ok) throw new Error(data.error || 'No se pudieron guardar las variantes')
+    return data
+  }, [])
+
+  const detachProductVariant = useCallback(async (productId, ruleId) => {
+    const res = await fetch(`${API_BASE}/api/products/${productId}/variant-rules/${ruleId}/detach`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-admin-token': ADMIN_PASSWORD },
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error || 'No se pudo separar la variante')
     return data
   }, [])
 
@@ -588,12 +602,13 @@ export function AdminProvider({ children }) {
     return data
   }, [])
 
-  const uploadPriceFiles = useCallback(async (files) => {
+  const uploadPriceFiles = useCallback(async (files, supplier) => {
     setImportLoading(true)
     setImportError(null)
     try {
       const formData = new FormData()
       for (const file of files) formData.append('files', file)
+      formData.append('supplier', supplier)
       const res = await fetch(`${API_BASE}/api/products/import/prices/bulk`, {
         method: 'POST',
         headers: { 'x-admin-token': ADMIN_PASSWORD },
@@ -614,6 +629,28 @@ export function AdminProvider({ children }) {
       setImportLoading(false)
     }
   }, [fetchSupplierSettings])
+
+  const previewPriceFiles = useCallback(async (files, supplier) => {
+    setImportError(null)
+    const formData = new FormData()
+    for (const file of files) formData.append('files', file)
+    formData.append('supplier', supplier)
+    const res = await fetch(`${API_BASE}/api/products/import/prices/bulk/preview`, {
+      method: 'POST',
+      headers: { 'x-admin-token': ADMIN_PASSWORD },
+      body: formData,
+    })
+    const data = await res.json()
+    if (!res.ok) {
+      const error = new Error(data.error || 'No se pudo preparar la vista previa')
+      setImportError(error.message)
+      throw error
+    }
+    if (data.exchangeRate) {
+      setCurrencySettings(current => ({ ...current, usdArsRate: data.exchangeRate }))
+    }
+    return data
+  }, [])
 
   const rematchPriceLines = useCallback(async (lines, supplier) => {
     const res = await fetch(`${API_BASE}/api/products/import/prices/rematch`, {
@@ -814,9 +851,9 @@ export function AdminProvider({ children }) {
       categoryTree,
       fetchInventory, fetchInventoryItem, createInventoryItem, updateInventoryItem, deleteInventoryItem,
       fetchInventorySelectionIds, applyInventoryBatch,
-      previewProductMerge, mergeInventoryProducts, updateProductVariantRules,
+      previewProductMerge, mergeInventoryProducts, updateProductVariantRules, detachProductVariant,
       adjustInventoryStocks, uploadInventoryFile, uploadProductImage,
-      parsePriceFile, uploadPriceFiles, rematchPriceLines, applyPriceUpdates,
+      parsePriceFile, previewPriceFiles, uploadPriceFiles, rematchPriceLines, applyPriceUpdates,
       searchProducts, parseInvoicePdf, applyInvoiceLines,
       parseCleosCatalogPdf, uploadCleosPreviewImage, applyCleosCatalogProducts,
       parseCatalogImagesPdf, uploadCatalogPreviewImage, applyCatalogImages,

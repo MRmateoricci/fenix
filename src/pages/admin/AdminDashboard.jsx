@@ -36,11 +36,17 @@ const TONE_PRESETS = [
 // Colores predeterminados (típicos de cables) que se pueden agregar con un clic (ver addColorPreset).
 const COLOR_PRESETS = [
   { name: 'Negro',  hex: '#000000' },
-  { name: 'Rojo',   hex: '#CC0000' },
-  { name: 'Azul',   hex: '#1565C0' },
-  { name: 'Verde',  hex: '#2E7D32' },
+  { name: 'Rojo',   hex: '#FF0000' },
+  { name: 'Azul',   hex: '#0000FF' },
+  { name: 'Verde',  hex: '#008000' },
   { name: 'Blanco', hex: '#FFFFFF' },
-  { name: 'Marrón', hex: '#6D4C33' },
+  { name: 'Marrón', hex: '#8B4513' },
+  { name: 'Amarillo', hex: '#FFFF00' },
+  { name: 'Verde/Amarillo', hex: '#9ACD32' },
+  { name: 'Gris', hex: '#808080' },
+  { name: 'Naranja', hex: '#FFA500' },
+  { name: 'Celeste', hex: '#00BFFF' },
+  { name: 'Violeta', hex: '#800080' },
 ]
 
 
@@ -137,7 +143,7 @@ function Toggle({ value, onChange, size = 'md' }) {
 }
 
 // ── ConfirmModal ──────────────────────────────────────────────────────────────
-function ConfirmModal({ message, onConfirm, onCancel }) {
+function ConfirmModal({ message, onConfirm, onCancel, confirmLabel = 'Eliminar' }) {
   return (
     <div style={{
       position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
@@ -155,7 +161,7 @@ function ConfirmModal({ message, onConfirm, onCancel }) {
             onClick={onConfirm}
             style={{ ...solidBtn, background: C.red, color: '#fff' }}
           >
-            Eliminar
+            {confirmLabel}
           </button>
         </div>
       </div>
@@ -352,6 +358,186 @@ function combineVariantRowKey(colorName, toneName) {
   return colorName || toneName || '_'
 }
 
+function VariantImageField({ value, onChange, code }) {
+  const inputRef = useRef(null)
+  const { uploadProductImage } = useAdmin()
+  const [uploading, setUploading] = useState(false)
+  const [error, setError] = useState('')
+
+  const chooseFile = () => {
+    if (!uploading) inputRef.current?.click()
+  }
+  const handleFile = async (file) => {
+    setError('')
+    if (!file?.type.startsWith('image/')) { setError('Elegí un archivo de imagen'); return }
+    if (file.size > MAX_IMAGE_BYTES) { setError('La imagen no puede pesar más de 8 MB'); return }
+    setUploading(true)
+    try {
+      // Sin productId: sube el archivo sin tocar la imagen principal.
+      const { url } = await uploadProductImage(null, file)
+      onChange(url)
+    } catch (uploadError) {
+      setError(uploadError.message || 'No se pudo subir')
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  return (
+    <span style={{ position: 'relative', display: 'inline-grid', width: 46, height: 46 }} title={error || (value ? `Cambiar foto de ${code}` : `Agregar foto a ${code}`)}>
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/*"
+        style={{ display: 'none' }}
+        onChange={event => {
+          const file = event.target.files?.[0]
+          if (file) handleFile(file)
+          event.target.value = ''
+        }}
+      />
+      <button
+        type="button"
+        onClick={chooseFile}
+        disabled={uploading}
+        aria-label={value ? `Cambiar foto de ${code}` : `Agregar foto a ${code}`}
+        style={{
+          width: 46, height: 46, padding: 0, overflow: 'hidden', cursor: uploading ? 'wait' : 'pointer',
+          border: `1px ${value ? 'solid' : 'dashed'} ${error ? C.red : C.border}`,
+          borderRadius: 7, background: '#F8FAFC', color: error ? C.red : C.muted,
+          display: 'grid', placeItems: 'center', fontSize: 9, lineHeight: 1.1,
+        }}
+      >
+        {uploading
+          ? 'Subiendo…'
+          : value
+            ? <img src={value} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            : <span>{error ? 'Error' : '+ Foto'}</span>}
+      </button>
+      {value && !uploading && (
+        <button
+          type="button"
+          onClick={event => { event.stopPropagation(); setError(''); onChange('') }}
+          title="Quitar foto de la variante"
+          aria-label={`Quitar foto de ${code}`}
+          style={{
+            position: 'absolute', top: -5, right: -5, width: 17, height: 17, padding: 0,
+            border: '1px solid #fff', borderRadius: '50%', background: C.red, color: '#fff',
+            display: 'grid', placeItems: 'center', cursor: 'pointer', fontSize: 11, lineHeight: 1,
+          }}
+        >×</button>
+      )}
+    </span>
+  )
+}
+
+function VariantColorField({ name, hex, code, onChange }) {
+  const normalizedHex = String(hex || '#CCCCCC').toUpperCase()
+  const selectedPreset = COLOR_PRESETS.find(preset =>
+    preset.name.localeCompare(String(name || ''), 'es-AR', { sensitivity: 'base' }) === 0 &&
+    preset.hex.toUpperCase() === normalizedHex
+  )
+  return (
+    <span style={{ display: 'grid', gridTemplateColumns: 'minmax(72px,1fr) 76px 30px', gap: 4 }}>
+      <input value={name} onChange={event => onChange({ name: event.target.value, hex: normalizedHex })} placeholder="Cualquiera" aria-label={`Nombre del color de ${code}`} style={{ ...inp, minWidth: 0, height: 32, padding: '5px 7px', fontSize: 10.5 }} />
+      <select
+        value={selectedPreset?.name || ''}
+        onChange={event => {
+          const preset = COLOR_PRESETS.find(item => item.name === event.target.value)
+          if (preset) onChange({ name: preset.name, hex: preset.hex })
+        }}
+        aria-label={`Color predeterminado de ${code}`}
+        title="Elegir un color predeterminado"
+        style={{ ...inp, minWidth: 0, height: 32, padding: '4px 3px', fontSize: 9.5 }}
+      >
+        <option value="">Común</option>
+        {COLOR_PRESETS.map(preset => <option key={preset.name} value={preset.name}>{preset.name}</option>)}
+      </select>
+      <input type="color" value={normalizedHex} onChange={event => onChange({ name, hex: event.target.value.toUpperCase() })} disabled={!String(name || '').trim()} aria-label={`Color visual de ${code}`} title={String(name || '').trim() ? 'Elegir un color personalizado' : 'Primero escribí o seleccioná el nombre del color'} style={{ width: 30, height: 32, padding: 2, border: `1px solid ${C.border}`, borderRadius: 6, background: C.white, cursor: String(name || '').trim() ? 'pointer' : 'not-allowed', opacity: String(name || '').trim() ? 1 : .45 }} />
+    </span>
+  )
+}
+
+function variantProductDataFromSource(source = {}, code = '') {
+  return {
+    codigo: code || source.codigo || '',
+    name: source.name || source.descripcion || source.inventoryDescription || '',
+    description: source.description_larga ?? source.description ?? source.descripcion ?? source.inventoryDescription ?? '',
+    inventoryDescription: source.descripcion ?? source.inventoryDescription ?? '',
+    grupo: source.grupo || '', subgrupo: source.subgrupo || '', medida: source.medida || '',
+    supplier: source.supplier || '', category: source.category || '', subcategory: source.subcategory || '',
+    watts: source.watts ?? '', colorTemp: source.color_temp ?? source.colorTemp ?? '',
+    ipRating: source.ip_rating ?? source.ipRating ?? '', material: source.material || '',
+    cableType: source.cable_type ?? source.cableType ?? '', productType: source.product_type ?? source.productType ?? '',
+    lengthCm: source.length_cm ?? source.lengthCm ?? '', widthCm: source.width_cm ?? source.widthCm ?? '',
+    heightCm: source.height_cm ?? source.heightCm ?? '', weightKg: source.weight_kg ?? source.weightKg ?? '',
+    hoverImage: source.hover_image_url ?? source.hoverImage ?? '',
+  }
+}
+
+function VariantDetailsModal({ code, value, onChange, onClose }) {
+  const data = { ...variantProductDataFromSource({}, code), ...(value || {}), codigo: code || value?.codigo || '' }
+  const set = (field, nextValue) => onChange({ ...data, [field]: nextValue })
+  const fields = [
+    ['Nombre individual', 'name'], ['Categoría', 'category'], ['Subcategoría', 'subcategory'], ['Tipo de producto', 'productType'],
+    ['Grupo / marca', 'grupo'], ['Subgrupo', 'subgrupo'], ['Medida original', 'medida'], ['Proveedor', 'supplier'],
+    ['Potencia (W)', 'watts', 'number'], ['Temperatura de color (K)', 'colorTemp', 'number'], ['Protección IP', 'ipRating'], ['Material', 'material'],
+    ['Tipo de cable', 'cableType'], ['Largo envío (cm)', 'lengthCm', 'number'], ['Ancho envío (cm)', 'widthCm', 'number'],
+    ['Alto envío (cm)', 'heightCm', 'number'], ['Peso (kg)', 'weightKg', 'number'], ['Imagen secundaria', 'hoverImage'],
+  ]
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 2100, background: 'rgba(17,24,39,.58)', display: 'grid', placeItems: 'center', padding: 18 }}>
+      <div style={{ width: 'min(820px,96vw)', maxHeight: '90vh', overflow: 'auto', background: C.white, borderRadius: 12, boxShadow: '0 20px 60px rgba(0,0,0,.28)' }}>
+        <div style={{ position: 'sticky', top: 0, zIndex: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 20px', borderBottom: `1px solid ${C.border}`, background: C.white }}>
+          <div><strong style={{ color: C.ink }}>Datos individuales</strong><div style={{ color: C.muted, fontSize: 11, marginTop: 3 }}>{code}</div></div>
+          <button type="button" onClick={onClose} style={outlineBtn}>Cerrar</button>
+        </div>
+        <div style={{ padding: 20, display: 'grid', gridTemplateColumns: 'repeat(2,minmax(0,1fr))', gap: 12 }}>
+          <label style={{ ...lbl, gridColumn: 'span 2' }}>Descripción individual<textarea value={data.description} onChange={event => set('description', event.target.value)} rows={4} style={{ ...inp, marginTop: 5, resize: 'vertical' }} /></label>
+          <label style={{ ...lbl, gridColumn: 'span 2' }}>Descripción de inventario<textarea value={data.inventoryDescription} onChange={event => set('inventoryDescription', event.target.value)} rows={2} style={{ ...inp, marginTop: 5, resize: 'vertical' }} /></label>
+          {fields.map(([label, field, type]) => <label key={field} style={lbl}>{label}<input type={type || 'text'} min={type === 'number' ? 0 : undefined} step="any" value={data[field] ?? ''} onChange={event => set(field, event.target.value)} style={{ ...inp, marginTop: 5 }} /></label>)}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function priceWithIva(priceWithTax, salePrice) {
+  if (priceWithTax !== '' && priceWithTax != null && Number.isFinite(Number(priceWithTax))) {
+    return Math.round(Number(priceWithTax) * 100) / 100
+  }
+  if (salePrice === '' || salePrice == null || !Number.isFinite(Number(salePrice))) return ''
+  return Math.round(Number(salePrice) * 1.21 * 100) / 100
+}
+
+function splitVariantRulesBySupplierCode(rules, colorOptions = [], product = {}) {
+  return (Array.isArray(rules) ? rules : []).flatMap(rule => {
+    const supplierCodes = [...new Set((rule.supplierCodes || []).filter(Boolean))]
+    const measure = parseMergeMeasure(rule.size)
+    const savedColor = (Array.isArray(colorOptions) ? colorOptions : []).find(option =>
+      String(option?.name || '').localeCompare(String(rule.color || ''), 'es-AR', { sensitivity: 'base' }) === 0
+    )
+    const editable = {
+      ...rule,
+      color: rule.color || '', size: rule.size || '', tone: rule.tone || '', image: rule.image || '',
+      colorHex: rule.colorHex || savedColor?.hex || '#CCCCCC',
+      productData: { ...variantProductDataFromSource(product, supplierCodes[0]), ...(rule.productData || {}) },
+      sizeValue: measure.value || (!measure.unit ? rule.size || '' : ''), sizeUnit: measure.unit,
+      precio_costo: rule.precio_costo ?? '', precio_venta: rule.precio_venta ?? '',
+      precio_iva: rule.precio_iva ?? '', stock: rule.stock ?? '',
+    }
+    if (supplierCodes.length <= 1) return [{ ...editable, supplierCodes }]
+    return supplierCodes.map((code, codeIndex) => ({
+      ...editable,
+      id: codeIndex === 0 ? editable.id : `split-${editable.id || 'rule'}-${codeIndex}`,
+      supplierCodes: [code], productData: { ...editable.productData, codigo: code },
+      // El stock compartido no se puede repartir con seguridad: queda en la
+      // primera fila y las adicionales empiezan en cero para revisión manual.
+      stock: codeIndex === 0 ? editable.stock : 0,
+    }))
+  })
+}
+
 const EMPTY = {
   codigo: '', supplier: 'OTRO', inventoryDescription: '',
   priceCost: '', priceWithTax: '',
@@ -372,7 +558,7 @@ function draftFromInventoryRow(inv) {
     supplier:    inv.supplier || 'OTRO',
     inventoryDescription: inv.descripcion || '',
     priceCost:   inv.precio_costo ?? '',
-    priceWithTax: inv.precio_iva ?? '',
+    priceWithTax: priceWithIva(inv.precio_iva, inv.precio_venta),
     name:        inv.name || inv.descripcion || '',
     description: inv.description_larga || inv.descripcion || '',
     category:    inv.category || guessCategory(inv.grupo, inv.subgrupo),
@@ -439,8 +625,8 @@ function toUnifiedProductPayload(data) {
   return payload
 }
 
-function ProductModal({ product, onSave, onClose, publishOnSave = false }) {
-  const { currencySettings, categoryTree, updateProductVariantRules } = useAdmin()
+function ProductModal({ product, onSave, onClose, onVariantsChanged, publishOnSave = false }) {
+  const { currencySettings, categoryTree, updateProductVariantRules, detachProductVariant } = useAdmin()
   const isNew = !product
   const [form, setForm] = useState(() => isNew ? EMPTY : {
     ...EMPTY,
@@ -458,13 +644,10 @@ function ProductModal({ product, onSave, onClose, publishOnSave = false }) {
     sizes:         product.sizes || [],
     tones:         product.tones || [],
     variantStock:  product.variantStock || {},
-    variantRules:  (product.variantRules || []).map(rule => ({ ...rule,
-      color: rule.color || '', size: rule.size || '', tone: rule.tone || '',
-      precio_costo: rule.precio_costo ?? '', precio_venta: rule.precio_venta ?? '',
-      precio_iva: rule.precio_iva ?? '', stock: rule.stock ?? '',
-    })),
+    variantRules: splitVariantRulesBySupplierCode(product.variantRules, product.colors, product),
   })
   const hasGroupedRules = (product?.variantRules || []).length > 0
+  const hadCombinedSupplierCodes = (product?.variantRules || []).some(rule => (rule.supplierCodes || []).length > 1)
   const [useVariantStock, setUseVariantStock] = useState(
     () => Object.keys(product?.variantStock || {}).length > 0
   )
@@ -481,6 +664,10 @@ function ProductModal({ product, onSave, onClose, publishOnSave = false }) {
       }
     }
   }
+  const groupedConflictCodes = groupedConflict
+    ? groupedConflict.map(index => form.variantRules[index]?.supplierCodes?.[0]).filter(Boolean)
+    : []
+  const groupedGridColumns = 'minmax(205px,1.25fr) 142px 190px 100px 90px 90px 82px 60px 58px'
   const valid = (!isNew || form.codigo.trim()) && !groupedConflict && (!willBePublished || (form.name.trim() && form.price && Number(form.price) > 0))
   const subOptions = getSubcategoryOptions(form.category, categoryTree).map(node => node.label)
   const typeOptions = getProductTypeOptions(form.category, form.subcategory, categoryTree).map(node => node.label)
@@ -560,11 +747,20 @@ function ProductModal({ product, onSave, onClose, publishOnSave = false }) {
     ...current,
     variantRules: current.variantRules.map((rule, ruleIndex) => ruleIndex === index ? { ...rule, [field]: value } : rule),
   }))
+  const setGroupedMeasure = (index, field, value) => setForm(current => ({
+    ...current,
+    variantRules: current.variantRules.map((rule, ruleIndex) => {
+      if (ruleIndex !== index) return rule
+      const next = { ...rule, [field]: value }
+      next.size = formatMergeMeasure(next.sizeValue, next.sizeUnit)
+      return next
+    }),
+  }))
   const addGroupedRule = () => setForm(current => ({
     ...current,
     variantRules: [...current.variantRules, {
-      id: `manual-${Date.now()}`, supplierCodes: [], color: '', size: '', tone: '',
-      precio_costo: '', precio_venta: '', precio_iva: '', stock: '',
+      id: `manual-${Date.now()}`, supplierCodes: [], color: '', colorHex: '#CCCCCC', size: '', sizeValue: '', sizeUnit: '', tone: '',
+      productData: variantProductDataFromSource(product), image: '', precio_costo: '', precio_venta: '', precio_iva: '', stock: '',
     }],
   }))
   const removeGroupedRule = index => setForm(current => ({
@@ -577,6 +773,31 @@ function ProductModal({ product, onSave, onClose, publishOnSave = false }) {
 
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState('')
+  const [variantDetailsIndex, setVariantDetailsIndex] = useState(null)
+  const [detachCandidate, setDetachCandidate] = useState(null)
+  const [detaching, setDetaching] = useState(false)
+
+  const handleDetachVariant = async () => {
+    if (!detachCandidate || detaching) return
+    setDetaching(true)
+    setSaveError('')
+    try {
+      await detachProductVariant(product.id, detachCandidate.id)
+      try {
+        await onVariantsChanged?.()
+      } catch {
+        // La separación ya fue confirmada por el servidor; el próximo refresco
+        // recuperará la lista aunque falle esta actualización visual inmediata.
+      }
+      setDetachCandidate(null)
+      onClose()
+    } catch (error) {
+      setSaveError(error.message || 'No se pudo separar la variante')
+      setDetachCandidate(null)
+    } finally {
+      setDetaching(false)
+    }
+  }
 
   const handleSave = async () => {
     if (!valid || saving) return
@@ -1029,45 +1250,72 @@ function ProductModal({ product, onSave, onClose, publishOnSave = false }) {
               <div>
                 <label style={{ ...lbl, color: C.ink }}>Variantes combinadas</label>
                 <p style={{ fontSize: 11, color: C.muted, margin: '4px 0 0', lineHeight: 1.4 }}>
-                  Cada fila combina Color + Tono + Medida y tiene un único precio. “Cualquiera” es el fallback; la coincidencia más específica siempre gana.
+                  Cada fila representa un único código con su Color + Tono + Medida, precio, foto y stock. “Cualquiera” funciona como opción general.
                 </p>
               </div>
               <button type="button" onClick={addGroupedRule} style={{ ...outlineBtn, padding: '5px 10px', fontSize: 10.5, whiteSpace: 'nowrap' }}>+ Agregar variante</button>
             </div>
             <div style={{ overflowX: 'auto' }}>
-              <div style={{ minWidth: 820 }}>
-                <div style={{ display: 'grid', gridTemplateColumns: '145px minmax(360px,1fr) 110px 95px 78px 28px', gap: 7, padding: '5px 7px', fontSize: 9.5, color: C.text3, fontWeight: 700, textTransform: 'uppercase' }}>
-                  <span>Código proveedor</span>
-                  <span style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 6 }}><span>Color</span><span>Tono</span><span>Medida</span></span>
-                  <span>Precio</span><span>Costo</span><span>Stock</span><span />
+              <div style={{ minWidth: 1080 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: groupedGridColumns, gap: 7, padding: '5px 7px', fontSize: 9.5, color: C.text3, fontWeight: 700, textTransform: 'uppercase' }}>
+                  <span>Producto y código</span><span>Medida</span><span>Color</span><span>Tono</span>
+                  <span>Precio s/IVA</span><span>Precio c/IVA</span><span>Costo</span><span>Stock</span><span />
                 </div>
                 {form.variantRules.map((rule, index) => {
                   const specificity = mergeRuleSpecificity(rule)
                   const inConflict = groupedConflict?.includes(index)
                   const hasSupplierCode = Boolean(rule.supplierCodes?.length)
                   return (
-                    <div key={rule.id || index} style={{ display: 'grid', gridTemplateColumns: '145px minmax(360px,1fr) 110px 95px 78px 28px', gap: 7, alignItems: 'center', padding: 7, border: `1px solid ${inConflict ? C.red : C.border}`, borderRadius: 7, background: inConflict ? C.redLight : C.white, marginBottom: 5 }}>
-                      <span title={rule.supplierCodes?.join(', ') || 'Regla manual sin código de proveedor'} style={{ minWidth: 0, fontSize: 10.5, fontWeight: 700, color: C.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {rule.supplierCodes?.join(', ') || 'Regla manual'}
-                        <small style={{ display: 'block', marginTop: 2, color: specificity === 3 ? C.green : C.muted, fontSize: 9, fontWeight: 600 }}>{specificity === 3 ? 'Exacta' : `Fallback · ${specificity}/3`}</small>
+                    <div key={rule.id || index} style={{ display: 'grid', gridTemplateColumns: groupedGridColumns, gap: 7, alignItems: 'center', padding: 7, border: `1px solid ${inConflict ? C.red : C.border}`, borderRadius: 7, background: C.white, marginBottom: 5 }}>
+                      <span style={{ minWidth: 0, display: 'flex', alignItems: 'center', gap: 9 }}>
+                        <VariantImageField
+                          value={rule.image}
+                          code={rule.supplierCodes?.[0] || `variante ${index + 1}`}
+                          onChange={value => setGroupedRule(index, 'image', value)}
+                        />
+                        <span style={{ minWidth: 0, display: 'grid', gap: 5, fontSize: 10.5, color: C.ink }}>
+                          {hasSupplierCode
+                            ? rule.supplierCodes.map(code => <strong key={code} title={code} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{code}</strong>)
+                            : <strong>Regla manual</strong>}
+                          <small style={{ color: specificity === 3 ? C.green : C.muted, fontSize: 9, fontWeight: 600 }}>{specificity === 3 ? 'Exacta' : `Fallback · ${specificity}/3`}</small>
+                          <button type="button" onClick={() => setVariantDetailsIndex(index)} style={{ border: 'none', background: 'none', padding: 0, color: '#2563EB', cursor: 'pointer', textAlign: 'left', fontSize: 9.5 }}>Editar detalles</button>
+                        </span>
                       </span>
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,minmax(0,1fr))', gap: 6 }}>
-                        <input value={rule.color} onChange={event => setGroupedRule(index, 'color', event.target.value)} placeholder="Cualquiera" aria-label="Color" style={{ ...inp, height: 32, padding: '5px 7px', fontSize: 10.5 }} />
-                        <input value={rule.tone} onChange={event => setGroupedRule(index, 'tone', event.target.value)} placeholder="Cualquiera" aria-label="Tono" style={{ ...inp, height: 32, padding: '5px 7px', fontSize: 10.5 }} />
-                        <input value={rule.size} onChange={event => setGroupedRule(index, 'size', event.target.value)} placeholder="Cualquiera" aria-label="Medida" style={{ ...inp, height: 32, padding: '5px 7px', fontSize: 10.5 }} />
-                      </div>
+                      <span style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) 64px', gap: 5 }}>
+                        <input inputMode="decimal" value={rule.sizeValue ?? ''} onChange={event => setGroupedMeasure(index, 'sizeValue', event.target.value)} placeholder="Cantidad" aria-label="Cantidad de la medida" style={{ ...inp, minWidth: 0, height: 32, padding: '5px 7px', fontSize: 10.5 }} />
+                        <select value={rule.sizeUnit ?? ''} onChange={event => setGroupedMeasure(index, 'sizeUnit', event.target.value)} aria-label="Unidad de medida" style={{ ...inp, minWidth: 0, height: 32, padding: '5px 4px', fontSize: 10.5 }}>
+                          <option value="">Unidad</option>
+                          {MEASURE_UNITS.map(unit => <option key={unit} value={unit}>{unit}</option>)}
+                        </select>
+                      </span>
+                      <VariantColorField
+                        name={rule.color}
+                        hex={rule.colorHex}
+                        code={rule.supplierCodes?.[0] || `variante ${index + 1}`}
+                        onChange={color => setForm(current => ({
+                          ...current,
+                          variantRules: current.variantRules.map((item, ruleIndex) => ruleIndex === index ? { ...item, color: color.name, colorHex: color.hex } : item),
+                        }))}
+                      />
+                      <input value={rule.tone} onChange={event => setGroupedRule(index, 'tone', event.target.value)} placeholder="Cualquiera" aria-label="Tono" style={{ ...inp, height: 32, padding: '5px 7px', fontSize: 10.5 }} />
                       <input type="number" min="0" value={rule.precio_venta} onChange={event => setGroupedRule(index, 'precio_venta', event.target.value)} aria-label="Precio de venta" style={{ ...inp, height: 32, padding: '5px 7px', fontSize: 10.5 }} />
+                      <input type="number" min="0" value={priceWithIva(rule.precio_iva, rule.precio_venta)} onChange={event => setGroupedRule(index, 'precio_iva', event.target.value)} aria-label="Precio con IVA" style={{ ...inp, height: 32, padding: '5px 7px', fontSize: 10.5 }} />
                       <input type="number" min="0" value={rule.precio_costo} onChange={event => setGroupedRule(index, 'precio_costo', event.target.value)} aria-label="Precio de costo" style={{ ...inp, height: 32, padding: '5px 7px', fontSize: 10.5 }} />
                       <input type="number" min="0" step="1" value={rule.stock} onChange={event => setGroupedRule(index, 'stock', event.target.value)} aria-label="Stock" style={{ ...inp, height: 32, padding: '5px 7px', fontSize: 10.5 }} />
                       {hasSupplierCode
-                        ? <span title="No se puede borrar porque conserva un código de proveedor" style={{ textAlign: 'center', color: C.muted, fontSize: 12 }}>●</span>
+                        ? <button type="button" onClick={() => setDetachCandidate(rule)} disabled={saving || detaching} title="Sacar del grupo y crear un producto individual" style={{ ...outlineBtn, height: 27, padding: '3px 6px', color: C.red, borderColor: '#FCA5A5', fontSize: 9.5 }}>Separar</button>
                         : <button type="button" onClick={() => removeGroupedRule(index)} title="Eliminar regla manual" aria-label="Eliminar regla manual" style={{ ...iconBtn, width: 26, height: 26, color: C.red }}>×</button>}
                     </div>
                   )
                 })}
               </div>
             </div>
-            {groupedConflict && <div style={{ marginTop: 8, padding: '7px 9px', borderRadius: 6, background: C.redLight, color: C.red, fontSize: 10.5 }}>Estas dos filas se superponen con la misma precisión. Completá otro eje en una de ellas.</div>}
+            {hadCombinedSupplierCodes && <div style={{ marginTop: 8, color: C.muted, fontSize: 10.5 }}>Se separaron automáticamente los códigos que estaban juntos. Diferenciá sus atributos y revisá el stock antes de guardar.</div>}
+            {groupedConflict && <div style={{ marginTop: 8, color: C.red, fontSize: 10.5 }}>
+              {groupedConflictCodes.length === 2
+                ? <>Los códigos <strong>{groupedConflictCodes[0]}</strong> y <strong>{groupedConflictCodes[1]}</strong> quedarían como la misma variante y el sistema no sabría qué precio usar. Diferencialos completando Medida, Color o Tono.</>
+                : <>Estas filas quedarían como la misma variante y el sistema no sabría qué precio usar. Diferencialas completando Medida, Color o Tono.</>}
+            </div>}
           </div>
         )}
 
@@ -1151,6 +1399,22 @@ function ProductModal({ product, onSave, onClose, publishOnSave = false }) {
             {saving ? 'Guardando...' : publishOnSave ? 'Publicar producto' : isNew ? '+ Agregar producto' : 'Guardar cambios'}
           </button>
         </div>
+        {detachCandidate && (
+          <ConfirmModal
+            message={<>Se creará un producto individual con el código <strong>{detachCandidate.supplierCodes?.[0]}</strong>, conservando su foto, medida, precios, costo y stock. La variante se quitará del grupo y este editor se cerrará. Los cambios que todavía no guardaste en otras filas no se aplicarán.</>}
+            confirmLabel={detaching ? 'Separando...' : 'Separar producto'}
+            onConfirm={handleDetachVariant}
+            onCancel={() => { if (!detaching) setDetachCandidate(null) }}
+          />
+        )}
+        {variantDetailsIndex != null && form.variantRules[variantDetailsIndex] && (
+          <VariantDetailsModal
+            code={form.variantRules[variantDetailsIndex].supplierCodes?.[0] || 'Regla manual'}
+            value={form.variantRules[variantDetailsIndex].productData}
+            onChange={productData => setGroupedRule(variantDetailsIndex, 'productData', productData)}
+            onClose={() => setVariantDetailsIndex(null)}
+          />
+        )}
       </div>
     </div>
   )
@@ -1460,7 +1724,7 @@ function OverviewTab({ products }) {
 
 // ── StoreTab ──────────────────────────────────────────────────────────────────
 function StoreTab({ products, onUpdate, onDelete }) {
-  const { fetchInventoryItem, categoryTree } = useAdmin()
+  const { fetchInventoryItem, fetchCatalog, categoryTree } = useAdmin()
   const categoryOptions = categoryTree.map(node => ({ value: getCategoryValue(node), label: node.label }))
   const [search, setSearch]     = useState('')
   const [catFilter, setCat]     = useState('Todas')
@@ -1650,6 +1914,7 @@ function StoreTab({ products, onUpdate, onDelete }) {
           onSave={publishCandidate
             ? (data) => onUpdate(publishCandidate.id, { ...data, published: true })
             : (data) => onUpdate(editProduct.id, data)}
+          onVariantsChanged={fetchCatalog}
           onClose={() => { setEdit(null); setPublishCandidate(null) }}
         />
       )}
@@ -5695,6 +5960,36 @@ function mergeRulesOverlap(left, right) {
   return ['color', 'size', 'tone'].every(key => !left[key]?.trim() || !right[key]?.trim() || same(left[key], right[key]))
 }
 
+const MEASURE_UNITS = ['mm', 'cm', 'm', 'mm²', 'cm²', 'm²', 'pulg']
+
+function parseMergeMeasure(rawValue, description = '') {
+  const raw = String(rawValue || '').trim()
+  const normalized = raw.replace(/\s+/g, '').replace(/2$/i, '²')
+  const direct = normalized.match(/^(\d+(?:[.,]\d+)?)(mm²|cm²|m²|mm|cm|m|pulg)$/i)
+  let value = direct?.[1]?.replace(',', '.') || (raw.match(/^\d+(?:[.,]\d+)?/)?.[0] || '').replace(',', '.')
+  let unit = direct?.[2]?.toLowerCase() || ''
+  if (unit) unit = unit.replace('2', '²')
+
+  // En cables la columna puede traer "10MM", mientras la descripción aclara
+  // "10 MM2". Esa mención más precisa define que se trata de una sección.
+  const measures = [...String(description || '').matchAll(/(\d+(?:[.,]\d+)?)\s*(mm2|cm2|m2|mm²|cm²|m²|mm|cm|m|pulg)/gi)]
+  const described = measures.find(match => !value || Number(match[1].replace(',', '.')) === Number(value))
+  if (described) {
+    value ||= described[1].replace(',', '.')
+    const describedUnit = described[2].toLowerCase().replace('2', '²')
+    if (describedUnit.includes('²') || !unit) unit = describedUnit
+  }
+  return { value, unit: MEASURE_UNITS.includes(unit) ? unit : '' }
+}
+
+function formatMergeMeasure(value, unit) {
+  const normalized = String(value || '').trim().replace(',', '.')
+  if (!normalized) return ''
+  const numeric = Number(normalized)
+  const displayValue = Number.isFinite(numeric) ? String(numeric) : normalized
+  return unit ? `${displayValue} ${unit}` : displayValue
+}
+
 function ProductMergeModal({ preview, onConfirm, onClose }) {
   const products = preview.products || []
   const existingGroup = products.find(product => product.isGrouped)
@@ -5706,28 +6001,93 @@ function ProductMergeModal({ preview, onConfirm, onClose }) {
     return prefix.slice(0, index).replace(/[-_/\s]+$/, '')
   }, String(products[0]?.codigo || '').toUpperCase())
   const [generalName, setGeneralName] = useState(base?.name || base?.descripcion || '')
-  const [generalCode, setGeneralCode] = useState(`${suggestedPrefix || 'GRUPO'}-GRP`)
-  const [assignments, setAssignments] = useState(() => Object.fromEntries(products.map(product => [product.id, {
-    productId: product.id, color: '', size: product.medida || '', tone: '',
-  }])))
+  const [generalCode, setGeneralCode] = useState(existingGroup?.codigo || `${suggestedPrefix || 'GRUPO'}-GRP`)
+  const sourceProducts = products.filter(product => !(product.id === baseProductId && product.isGrouped))
+  const existingRuleRows = existingGroup ? (existingGroup.variant_rules || []).map(rule => {
+    const codes = Array.isArray(rule.supplierCodes) ? rule.supplierCodes.filter(Boolean) : []
+    const codigo = codes.join(', ') || 'Regla manual'
+    return {
+      rowKey: `rule:${rule.id}`,
+      productId: existingGroup.id,
+      variantRuleId: rule.id,
+      codigo,
+      description: `${existingGroup.name || existingGroup.descripcion || existingGroup.codigo} · Variante actual`,
+      product: { ...existingGroup, codigo, image_url: rule.image || existingGroup.image_url },
+      rule,
+      isExisting: true,
+    }
+  }) : []
+  const reviewRows = [
+    ...existingRuleRows,
+    ...sourceProducts.map(product => ({
+      rowKey: `product:${product.id}`,
+      productId: product.id,
+      codigo: product.codigo,
+      description: product.name || product.descripcion,
+      product,
+      rule: null,
+      isExisting: false,
+    })),
+  ]
+  const [assignments, setAssignments] = useState(() => Object.fromEntries(reviewRows.map(row => {
+    const source = row.rule || row.product
+    const measure = parseMergeMeasure(row.rule?.size ?? row.product.medida, `${row.product.name || ''} ${row.product.descripcion || ''}`)
+    const savedColor = (existingGroup?.color_options || []).find(option =>
+      String(option?.name || '').localeCompare(String(row.rule?.color || ''), 'es-AR', { sensitivity: 'base' }) === 0
+    )
+    return [row.rowKey, {
+      rowKey: row.rowKey,
+      productId: row.productId,
+      ...(row.variantRuleId ? { variantRuleId: row.variantRuleId } : {}),
+      color: row.rule?.color || '', colorHex: row.rule?.colorHex || savedColor?.hex || '#CCCCCC', tone: row.rule?.tone || '', sizeValue: measure.value, sizeUnit: measure.unit,
+      productData: { ...variantProductDataFromSource(row.product, row.codigo), ...(row.rule?.productData || {}) },
+      precioVenta: source.precio_venta ?? '',
+      precioIva: priceWithIva(source.precio_iva, source.precio_venta),
+      stock: source.stock ?? 0,
+    }]
+  })))
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
-  const sourceProducts = products.filter(product => !(product.id === baseProductId && product.isGrouped))
-  const activeRules = sourceProducts.map(product => assignments[product.id]).filter(Boolean)
+  const [detailsRowKey, setDetailsRowKey] = useState(null)
+  const activeRules = reviewRows.map(row => {
+    const assignment = assignments[row.rowKey]
+    return assignment ? { ...assignment, size: formatMergeMeasure(assignment.sizeValue, assignment.sizeUnit) } : null
+  }).filter(Boolean)
+  const invalidValues = activeRules.some(rule =>
+    (rule.precioVenta !== '' && (!Number.isFinite(Number(rule.precioVenta)) || Number(rule.precioVenta) < 0)) ||
+    (rule.precioIva !== '' && (!Number.isFinite(Number(rule.precioIva)) || Number(rule.precioIva) < 0)) ||
+    !Number.isInteger(Number(rule.stock)) || Number(rule.stock) < 0
+  )
   let conflict = null
   for (let left = 0; left < activeRules.length && !conflict; left++) {
     for (let right = left + 1; right < activeRules.length; right++) {
       if (mergeRuleSpecificity(activeRules[left]) === mergeRuleSpecificity(activeRules[right]) && mergeRulesOverlap(activeRules[left], activeRules[right])) {
-        conflict = [activeRules[left].productId, activeRules[right].productId]
+        conflict = [activeRules[left].rowKey, activeRules[right].rowKey]
         break
       }
     }
   }
+  const conflictingCodes = conflict?.map(rowKey =>
+    reviewRows.find(row => row.rowKey === rowKey)?.codigo || 'Sin código'
+  )
   const setAssignment = (id, field, value) => setAssignments(current => ({
     ...current, [id]: { ...current[id], [field]: value },
   }))
+  const setSalePrice = (id, value) => setAssignments(current => {
+    const rule = current[id]
+    const followedCalculatedIva = rule.precioIva === '' ||
+      Number(rule.precioIva) === Number(priceWithIva('', rule.precioVenta))
+    return {
+      ...current,
+      [id]: {
+        ...rule,
+        precioVenta: value,
+        precioIva: followedCalculatedIva ? priceWithIva('', value) : rule.precioIva,
+      },
+    }
+  })
   const submit = async () => {
-    if (!generalName.trim() || !generalCode.trim() || conflict || saving) return
+    if (!generalName.trim() || !generalCode.trim() || conflict || invalidValues || saving) return
     setSaving(true)
     setError('')
     try {
@@ -5743,14 +6103,14 @@ function ProductMergeModal({ preview, onConfirm, onClose }) {
   }
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 2400, background: 'rgba(17,24,39,.62)', display: 'grid', placeItems: 'center', padding: 18 }}>
-      <div style={{ width: 'min(980px, 96vw)', maxHeight: '92vh', overflow: 'auto', background: C.white, borderRadius: 12, boxShadow: '0 24px 70px rgba(0,0,0,.3)' }}>
+      <div style={{ width: 'min(1240px, 96vw)', maxHeight: '92vh', overflow: 'auto', background: C.white, borderRadius: 12, boxShadow: '0 24px 70px rgba(0,0,0,.3)' }}>
         <div style={{ position: 'sticky', top: 0, zIndex: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 20px', background: C.white, borderBottom: `1px solid ${C.border}` }}>
           <div><strong style={{ fontSize: 16, color: C.ink }}>Unir productos</strong><div style={{ fontSize: 11.5, color: C.muted, marginTop: 3 }}>{products.length} registros de {preview.supplier}</div></div>
           <button type="button" onClick={onClose} disabled={saving} style={outlineBtn}>Cerrar</button>
         </div>
         <div style={{ padding: 20, display: 'grid', gap: 18 }}>
-          <div style={{ padding: 12, borderRadius: 8, background: C.amberLight, color: C.amberDark, fontSize: 12, lineHeight: 1.45 }}>
-            El resultado quedará como borrador. Los registros originales se consolidarán, pero cada código seguirá guardado para las próximas listas de precios.
+          <div style={{ color: C.muted, fontSize: 12, lineHeight: 1.45 }}>
+            El producto general nuevo se guardará sin publicar.
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 12 }}>
             <label style={lbl}>Tomar datos generales de<select value={baseProductId} disabled={Boolean(existingGroup)} onChange={event => setBaseProductId(event.target.value)} style={{ ...inp, marginTop: 6 }}>
@@ -5759,29 +6119,211 @@ function ProductMergeModal({ preview, onConfirm, onClose }) {
             <label style={lbl}>Nombre general<input value={generalName} maxLength={200} onChange={event => setGeneralName(event.target.value)} placeholder="Cable Tipo Taller Argenplas 4" style={{ ...inp, marginTop: 6 }} /></label>
             <label style={lbl}>Código general nuevo<input value={generalCode} maxLength={64} onChange={event => setGeneralCode(event.target.value.toUpperCase())} placeholder="ARG-T4-GRP" style={{ ...inp, marginTop: 6 }} /></label>
           </div>
-          {existingGroup && <div style={{ fontSize: 11.5, color: '#4338CA', background: '#EEF2FF', borderRadius: 7, padding: '9px 11px' }}>Las {existingGroup.variant_rule_count || 'variantes'} reglas actuales de <strong>{existingGroup.codigo}</strong> se conservarán.</div>}
-          <div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(230px,1.4fr) repeat(3,minmax(120px,.7fr)) 100px 90px', gap: 8, padding: '7px 9px', color: C.text3, fontSize: 10, fontWeight: 700, textTransform: 'uppercase' }}>
-              <span>Producto y código</span><span>Medida</span><span>Color</span><span>Tono</span><span>Precio</span><span>Stock</span>
-            </div>
-            {sourceProducts.map(product => {
-              const rule = assignments[product.id]
-              const inConflict = conflict?.includes(product.id)
-              return <div key={product.id} style={{ display: 'grid', gridTemplateColumns: 'minmax(230px,1.4fr) repeat(3,minmax(120px,.7fr)) 100px 90px', gap: 8, alignItems: 'center', padding: 9, border: `1px solid ${inConflict ? C.red : C.border}`, borderRadius: 8, marginBottom: 7, background: inConflict ? C.redLight : C.white }}>
-                <span style={{ minWidth: 0, fontSize: 11.5 }}><strong style={{ display: 'block', color: C.ink }}>{product.codigo}</strong><span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: C.muted }}>{product.name || product.descripcion}</span></span>
-                <input value={rule.size} onChange={event => setAssignment(product.id, 'size', event.target.value)} placeholder="Cualquiera" style={{ ...inp, padding: '7px 8px', fontSize: 11 }} />
-                <input value={rule.color} onChange={event => setAssignment(product.id, 'color', event.target.value)} placeholder="Cualquiera" style={{ ...inp, padding: '7px 8px', fontSize: 11 }} />
-                <input value={rule.tone} onChange={event => setAssignment(product.id, 'tone', event.target.value)} placeholder="Cualquiera" style={{ ...inp, padding: '7px 8px', fontSize: 11 }} />
-                <span style={{ fontSize: 11.5, color: C.ink }}>{product.precio_venta != null ? fmt(Number(product.precio_venta)) : '—'}</span>
-                <span style={{ fontSize: 11.5, color: C.ink }}>{product.stock ?? 0}</span>
+          {existingGroup && <div style={{ fontSize: 11.5, color: '#4338CA', background: '#EEF2FF', borderRadius: 7, padding: '9px 11px' }}>Se muestran las {existingRuleRows.length} variantes actuales de <strong>{existingGroup.codigo}</strong> junto con {sourceProducts.length === 1 ? 'la variante nueva' : `las ${sourceProducts.length} variantes nuevas`}. Revisá toda la configuración antes de unir.</div>}
+          <div style={{ overflowX: 'auto' }}>
+            <div style={{ minWidth: 1200 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'minmax(230px,1.35fr) 180px 190px 110px 105px 105px 76px', gap: 8, padding: '7px 9px', color: C.text3, fontSize: 10, fontWeight: 700, textTransform: 'uppercase' }}>
+                <span>Producto y código</span><span>Medida</span><span>Color</span><span>Tono</span><span>Precio s/IVA</span><span>Precio c/IVA</span><span>Stock</span>
               </div>
-            })}
+              {reviewRows.map(row => {
+                const rule = assignments[row.rowKey]
+                const inConflict = conflict?.includes(row.rowKey)
+                return <div key={row.rowKey} style={{ display: 'grid', gridTemplateColumns: 'minmax(230px,1.35fr) 180px 190px 110px 105px 105px 76px', gap: 8, alignItems: 'center', padding: 9, border: `1px solid ${inConflict ? C.red : C.border}`, borderRadius: 8, marginBottom: 7, background: C.white }}>
+                  <span style={{ minWidth: 0, display: 'flex', alignItems: 'center', gap: 9, fontSize: 11.5 }}>
+                    <ProductThumb product={row.product} size={44} />
+                    <span style={{ minWidth: 0 }}>
+                      <strong style={{ display: 'block', color: C.ink }}>{row.codigo}</strong>
+                      <span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: C.muted }}>{row.description}</span>
+                      <button type="button" onClick={() => setDetailsRowKey(row.rowKey)} style={{ border: 'none', background: 'none', padding: '3px 0 0', color: '#2563EB', cursor: 'pointer', fontSize: 10 }}>Revisar todos los datos</button>
+                    </span>
+                  </span>
+                  <span style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) 76px', gap: 5 }}>
+                    <input inputMode="decimal" value={rule.sizeValue} onChange={event => setAssignment(row.rowKey, 'sizeValue', event.target.value)} placeholder="Cualquiera" aria-label={`Valor de medida de ${row.codigo}`} style={{ ...inp, minWidth: 0, padding: '7px 8px', fontSize: 11 }} />
+                    <select value={rule.sizeUnit} onChange={event => setAssignment(row.rowKey, 'sizeUnit', event.target.value)} aria-label={`Unidad de medida de ${row.codigo}`} style={{ ...inp, minWidth: 0, padding: '7px 5px', fontSize: 11 }}>
+                      <option value="">Unidad</option>
+                      {MEASURE_UNITS.map(unit => <option key={unit} value={unit}>{unit}</option>)}
+                    </select>
+                  </span>
+                  <VariantColorField
+                    name={rule.color}
+                    hex={rule.colorHex}
+                    code={row.codigo}
+                    onChange={color => setAssignments(current => ({
+                      ...current,
+                      [row.rowKey]: { ...current[row.rowKey], color: color.name, colorHex: color.hex },
+                    }))}
+                  />
+                  <input value={rule.tone} onChange={event => setAssignment(row.rowKey, 'tone', event.target.value)} placeholder="Cualquiera" style={{ ...inp, padding: '7px 8px', fontSize: 11 }} />
+                  <input type="number" min="0" step="0.01" value={rule.precioVenta} onChange={event => setSalePrice(row.rowKey, event.target.value)} aria-label={`Precio sin IVA de ${row.codigo}`} title="Al cambiarlo, el precio con IVA se recalcula mientras no haya sido editado manualmente." style={{ ...inp, padding: '7px 8px', fontSize: 11 }} />
+                  <input type="number" min="0" step="0.01" value={rule.precioIva} onChange={event => setAssignment(row.rowKey, 'precioIva', event.target.value)} aria-label={`Precio con IVA de ${row.codigo}`} style={{ ...inp, padding: '7px 8px', fontSize: 11 }} />
+                  <input type="number" min="0" step="1" value={rule.stock} onChange={event => setAssignment(row.rowKey, 'stock', event.target.value)} aria-label={`Stock de ${row.codigo}`} style={{ ...inp, padding: '7px 8px', fontSize: 11 }} />
+                </div>
+              })}
+            </div>
           </div>
-          {conflict && <div style={{ color: C.red, fontSize: 12, background: C.redLight, borderRadius: 7, padding: 10 }}>Hay dos códigos que pueden ganar con la misma precisión. Completá otro atributo en una de esas filas.</div>}
+          {conflict && (
+            <div style={{ color: C.red, fontSize: 12 }}>
+              Los códigos <strong>{conflictingCodes[0]}</strong> y <strong>{conflictingCodes[1]}</strong> quedarían como la misma variante y el sistema no sabría qué precio usar. Diferencialos completando Medida, Color o Tono.
+            </div>
+          )}
+          {invalidValues && <div style={{ color: C.red, fontSize: 12 }}>Revisá los precios y el stock: los precios no pueden ser negativos y el stock debe ser un número entero mayor o igual a cero.</div>}
           {error && <DismissibleErrorNotice key={error}>{error}</DismissibleErrorNotice>}
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 9 }}>
             <button type="button" onClick={onClose} disabled={saving} style={outlineBtn}>Cancelar</button>
-            <button type="button" onClick={submit} disabled={saving || conflict || !generalName.trim() || !generalCode.trim()} style={{ ...solidBtn, background: C.red, color: C.white, opacity: saving || conflict ? .6 : 1 }}>{saving ? 'Uniendo...' : `Unir ${products.length} productos`}</button>
+            <button type="button" onClick={submit} disabled={saving || conflict || invalidValues || !generalName.trim() || !generalCode.trim()} style={{ ...solidBtn, background: C.red, color: C.white, opacity: saving || conflict || invalidValues ? .6 : 1 }}>{saving ? 'Uniendo...' : `Unir ${products.length} productos`}</button>
+          </div>
+        </div>
+        {detailsRowKey && assignments[detailsRowKey] && (
+          <VariantDetailsModal
+            code={reviewRows.find(row => row.rowKey === detailsRowKey)?.codigo || ''}
+            value={assignments[detailsRowKey].productData}
+            onChange={productData => setAssignment(detailsRowKey, 'productData', productData)}
+            onClose={() => setDetailsRowKey(null)}
+          />
+        )}
+      </div>
+    </div>
+  )
+}
+
+const BULK_PRICE_STATUS = {
+  create: { label: 'Crear', color: C.green, background: C.greenLight },
+  update: { label: 'Actualizar', color: C.amberDark, background: C.amberLight },
+  unchanged: { label: 'Sin cambios', color: '#0369A1', background: '#E0F2FE' },
+  skipped: { label: 'Omitir', color: C.text3, background: '#F3F4F6' },
+  duplicate: { label: 'Repetido', color: '#4338CA', background: '#EEF2FF' },
+  invalid: { label: 'Inválido', color: C.red, background: C.redLight },
+}
+
+function BulkPriceReviewModal({ preview, saving = false, readOnly = false, error = '', onConfirm, onClose }) {
+  const initialFilter = preview.updated ? 'update' : preview.created ? 'create' : preview.unchanged ? 'unchanged' : 'all'
+  const [filter, setFilter] = useState(initialFilter)
+  const [search, setSearch] = useState('')
+  const rows = useMemo(() => (preview.files || []).flatMap(file =>
+    (file.items || []).map((item, index) => ({
+      ...item,
+      fileName: file.fileName,
+      supplier: file.supplier,
+      fileCurrency: file.currency,
+      rowKey: `${file.fileName}:${index}:${item.status}:${item.codigo || item.rowNumber || ''}`,
+    }))
+  ), [preview.files])
+  const normalizedSearch = search.trim().toLocaleLowerCase('es-AR')
+  const visibleRows = rows.filter(row => {
+    if (filter !== 'all' && row.status !== filter) return false
+    if (!normalizedSearch) return true
+    return [row.codigo, row.descripcion, row.targetCode, row.targetName, row.supplier, row.reason]
+      .some(value => String(value || '').toLocaleLowerCase('es-AR').includes(normalizedSearch))
+  })
+  const statusCounts = rows.reduce((counts, row) => {
+    counts[row.status] = (counts[row.status] || 0) + 1
+    return counts
+  }, {})
+  const priceText = (value, currency) => {
+    if (value == null) return '—'
+    return currency === 'USD' ? fmtUsd(value) : fmt(value)
+  }
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 2600, background: 'rgba(17,24,39,.62)', display: 'grid', placeItems: 'center', padding: 18 }}>
+      <div style={{ width: 'min(1380px, 97vw)', height: 'min(900px, 94vh)', display: 'flex', flexDirection: 'column', overflow: 'hidden', background: C.white, borderRadius: 12, boxShadow: '0 24px 70px rgba(0,0,0,.3)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'start', padding: '17px 20px', borderBottom: `1px solid ${C.border}` }}>
+          <div>
+            <strong style={{ display: 'block', fontSize: 17, color: C.ink }}>{readOnly ? 'Detalle de la importación' : 'Vista previa de listas de precios'}</strong>
+            <span style={{ display: 'block', marginTop: 4, fontSize: 11.5, color: C.muted }}>
+              {readOnly ? 'Este es el comprobante de lo procesado.' : 'Revisá altas, cambios y omisiones. Nada se modifica hasta confirmar.'}
+            </span>
+          </div>
+          <button type="button" onClick={onClose} disabled={saving} style={outlineBtn}>Cerrar</button>
+        </div>
+
+        <div style={{ padding: '14px 20px 12px', borderBottom: `1px solid ${C.border}`, background: '#FAFBFC' }}>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+            <span style={pill('#EEF2FF', '#4338CA')}>{preview.processedFiles} de {preview.totalFiles} archivos</span>
+            <span style={pill('#F3F4F6', C.text3)}>{preview.totalRows} filas leídas</span>
+            <span style={pill(C.greenLight, C.green)}>{preview.created || 0} a crear</span>
+            <span style={pill(C.amberLight, C.amberDark)}>{preview.updated || 0} a actualizar</span>
+            {!!preview.unchanged && <span style={pill('#E0F2FE', '#0369A1')}>{preview.unchanged} sin cambios</span>}
+            <span style={pill('#F3F4F6', C.text3)}>{preview.skipped || 0} omitidas</span>
+            <span style={{ marginLeft: 'auto', color: C.muted, fontSize: 11 }}>Cotización: US$ 1 = {fmt(preview.exchangeRate)}</span>
+          </div>
+          {!!preview.failedFiles?.length && (
+            <div style={{ marginTop: 10, padding: '8px 10px', borderRadius: 7, background: C.redLight, color: C.red, fontSize: 11.5 }}>
+              {preview.failedFiles.map(file => <div key={file.fileName}><strong>{file.fileName}:</strong> {file.error}</div>)}
+            </div>
+          )}
+          <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', alignItems: 'center', marginTop: 12 }}>
+            {[
+              ['all', 'Todos', rows.length],
+              ['update', 'Actualizaciones', statusCounts.update || 0],
+              ['create', 'Creaciones', statusCounts.create || 0],
+              ['unchanged', 'Sin cambios', statusCounts.unchanged || 0],
+              ['skipped', 'Omitidos', statusCounts.skipped || 0],
+              ['duplicate', 'Repetidos', statusCounts.duplicate || 0],
+              ['invalid', 'Inválidos', statusCounts.invalid || 0],
+            ].map(([value, label, count]) => (
+              <button key={value} type="button" onClick={() => setFilter(value)} style={{ ...outlineBtn, padding: '6px 9px', fontSize: 10.5, background: filter === value ? C.dark : C.white, borderColor: filter === value ? C.dark : C.border, color: filter === value ? C.white : C.text2 }}>
+                {label} ({count})
+              </button>
+            ))}
+            <input value={search} onChange={event => setSearch(event.target.value)} placeholder="Buscar código, producto o proveedor..." aria-label="Buscar en la vista previa" style={{ ...inp, width: 280, marginLeft: 'auto', padding: '7px 9px', fontSize: 11 }} />
+          </div>
+        </div>
+
+        <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
+          <table style={{ width: '100%', minWidth: 1040, borderCollapse: 'collapse', fontSize: 11.5 }}>
+            <thead style={{ position: 'sticky', top: 0, zIndex: 1, background: C.white }}>
+              <tr style={{ color: C.text3, textAlign: 'left', borderBottom: `1px solid ${C.border}` }}>
+                {['Acción', 'Archivo / proveedor', 'Código de lista', 'Producto destino', 'Cambios de precio', 'Motivo / detalle'].map(label => (
+                  <th key={label} style={{ padding: '9px 10px', fontSize: 9.5, textTransform: 'uppercase', letterSpacing: '.05em' }}>{label}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {visibleRows.map(row => {
+                const status = BULK_PRICE_STATUS[row.status] || BULK_PRICE_STATUS.skipped
+                const changed = (row.changes || []).filter(change => change.changed)
+                return (
+                  <tr key={row.rowKey} style={{ borderBottom: `1px solid ${C.hairline}`, verticalAlign: 'top' }}>
+                    <td style={{ padding: 10 }}><span style={pill(status.background, status.color)}>{status.label}</span></td>
+                    <td style={{ padding: 10, maxWidth: 190 }}>
+                      <strong title={row.fileName} style={{ display: 'block', color: C.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.fileName}</strong>
+                      <span style={{ display: 'block', color: C.muted, marginTop: 3 }}>{row.supplier} · {row.fileCurrency}</span>
+                    </td>
+                    <td style={{ padding: 10, maxWidth: 230 }}>
+                      <strong style={{ color: C.ink, fontFamily: 'monospace' }}>{row.codigo || `Fila ${row.rowNumber}`}</strong>
+                      {row.descripcion && <span title={row.descripcion} style={{ display: 'block', marginTop: 3, color: C.muted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.descripcion}</span>}
+                    </td>
+                    <td style={{ padding: 10, maxWidth: 230 }}>
+                      {row.targetCode ? <><strong style={{ display: 'block', color: C.ink }}>{row.targetCode}</strong><span style={{ display: 'block', marginTop: 3, color: C.muted }}>{row.targetName}{row.variant ? ` · ${row.variant}` : ''}</span></> : <span style={{ color: C.muted }}>{row.status === 'create' ? 'Producto nuevo sin publicar' : '—'}</span>}
+                    </td>
+                    <td style={{ padding: 10, minWidth: 260 }}>
+                      {(row.changes || []).length ? (row.changes || []).map(change => (
+                        <div key={change.field} style={{ display: 'grid', gridTemplateColumns: '88px 1fr', gap: 6, marginBottom: 3, color: change.changed ? C.text2 : C.muted }}>
+                          <span>{change.label}</span>
+                          <span>{row.status === 'create' ? priceText(change.next, row.currency) : <>{priceText(change.previous, row.currency)} <strong style={{ color: change.changed ? status.color : C.muted }}>→ {priceText(change.next, row.currency)}</strong></>}</span>
+                        </div>
+                      )) : <span style={{ color: C.muted }}>—</span>}
+                    </td>
+                    <td style={{ padding: 10, color: row.status === 'invalid' ? C.red : C.text3, maxWidth: 250 }}>
+                      {row.reason || (row.status === 'update' ? `${changed.length} ${changed.length === 1 ? 'campo cambia' : 'campos cambian'}` : row.status === 'create' ? 'Se creará como borrador.' : '—')}
+                    </td>
+                  </tr>
+                )
+              })}
+              {!visibleRows.length && <tr><td colSpan="6" style={{ padding: 28, textAlign: 'center', color: C.muted }}>No hay filas para este filtro.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '13px 20px', borderTop: `1px solid ${C.border}`, background: C.white }}>
+          <span style={{ color: error ? C.red : C.muted, fontSize: 11.5 }}>{error || `${visibleRows.length} de ${rows.length} filas visibles`}</span>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {!readOnly && <button type="button" onClick={onClose} disabled={saving} style={outlineBtn}>Cancelar</button>}
+            {!readOnly && <button type="button" onClick={onConfirm} disabled={saving || !(preview.created || preview.updated)} style={{ ...solidBtn, background: C.green, color: C.white, opacity: saving || !(preview.created || preview.updated) ? .55 : 1 }}>
+              {saving ? 'Importando...' : `Confirmar ${Number(preview.created || 0) + Number(preview.updated || 0)} cambios`}
+            </button>}
+            {readOnly && <button type="button" onClick={onClose} style={{ ...solidBtn, background: C.dark, color: C.white }}>Cerrar detalle</button>}
           </div>
         </div>
       </div>
@@ -5799,7 +6341,7 @@ function UnifiedProductsTab() {
     fetchInventorySelectionIds, applyInventoryBatch,
     previewProductMerge, mergeInventoryProducts,
     adjustInventoryStocks, uploadInventoryFile,
-    uploadPriceFiles,
+    previewPriceFiles, uploadPriceFiles,
     parseInvoicePdf, applyInvoiceLines,
     parseCatalogImagesPdf, uploadCatalogPreviewImage, applyCatalogImages,
   } = useAdmin()
@@ -5825,6 +6367,10 @@ function UnifiedProductsTab() {
   const [invoiceError, setInvoiceError]     = useState(null)
   const [invoiceParsed, setInvoiceParsed]   = useState(null)
   const [priceParsing, setPriceParsing]     = useState(false)
+  const [priceSupplier, setPriceSupplier]   = useState('')
+  const [pricePreview, setPricePreview]     = useState(null)
+  const [pricePreviewError, setPricePreviewError] = useState('')
+  const [resultDetailOpen, setResultDetailOpen] = useState(false)
   const [catalogSupplier, setCatalogSupplier] = useState('')
   const [catalogParsing, setCatalogParsing]   = useState(false)
   const [catalogError, setCatalogError]       = useState(null)
@@ -5867,8 +6413,7 @@ function UnifiedProductsTab() {
   useEffect(() => {
     if (!importResult) return undefined
     setShowResult(true)
-    if (importResult.fileType !== 'catalog-images') return undefined
-    const timeout = setTimeout(() => setShowResult(false), 6000)
+    const timeout = setTimeout(() => setShowResult(false), 8000)
     return () => clearTimeout(timeout)
   }, [importResult])
 
@@ -5918,17 +6463,35 @@ function UnifiedProductsTab() {
     }
   }
 
-  async function handlePriceFilesUpload(files) {
+  async function handlePriceFileUpload(file) {
+    if (!priceSupplier) {
+      setPricePreviewError('Elegí el proveedor antes de subir la lista de precios.')
+      return
+    }
+    setPricePreviewError('')
     setPriceParsing(true)
     try {
-      await uploadPriceFiles(files)
+      const files = [file]
+      const data = await previewPriceFiles(files, priceSupplier)
+      setPricePreview({ data, files, supplier: priceSupplier })
+    } catch (err) {
+      setPricePreviewError(err.message || 'No se pudo preparar la vista previa')
+    } finally {
+      setPriceParsing(false)
+    }
+  }
+
+  async function handlePriceFilesConfirm() {
+    if (!pricePreview) return
+    setPricePreviewError('')
+    try {
+      await uploadPriceFiles(pricePreview.files, pricePreview.supplier)
+      setPricePreview(null)
       await fetchCatalog()
       setPage(1)
       await fetchInventory({ ...inventoryFilters, page: 1 })
-    } catch {
-      // El contexto muestra el error de importación en el panel.
-    } finally {
-      setPriceParsing(false)
+    } catch (err) {
+      setPricePreviewError(err.message || 'No se pudieron importar las listas')
     }
   }
 
@@ -6237,13 +6800,26 @@ function UnifiedProductsTab() {
         {/* Importaciones temporalmente ocultas: stock general, ventas del local y compras a proveedor. */}
         <ImportUploadCard
           label="Precios proveedor"
-          hint="Subí varios Excel o una carpeta completa. Los productos nuevos se crean sin publicar y los códigos ya unidos actualizan su color o medida."
-          disabled={importLoading || priceParsing}
-          busyLabel={priceParsing ? 'Procesando precios...' : 'Importando...'}
-          onFiles={handlePriceFilesUpload}
-          multiple
-          allowDirectory
-        />
+          hint="Elegí el proveedor y subí un Excel. Primero vas a revisar qué se crea y qué precios cambian antes de confirmar."
+          disabled={importLoading || priceParsing || !priceSupplier}
+          busyLabel={priceParsing ? 'Procesando precios...' : !priceSupplier ? 'Elegí un proveedor' : 'Importando...'}
+          onFile={handlePriceFileUpload}
+        >
+          <select
+            value={priceSupplier}
+            onChange={event => { setPriceSupplier(event.target.value); setPricePreviewError('') }}
+            aria-label="Proveedor de la lista de precios"
+            style={{ ...inp, padding: '6px 8px', fontSize: 11, marginTop: 2 }}
+          >
+            <option value="">Seleccionar proveedor...</option>
+            {[...new Set([
+              ...inventorySuppliers,
+              ...supplierSettings.map(setting => setting.supplier),
+            ].filter(Boolean))].sort(PRICE_CODE_COLLATOR.compare).map(supplier => (
+              <option key={supplier} value={supplier}>{supplier}</option>
+            ))}
+          </select>
+        </ImportUploadCard>
         <ImportUploadCard
           label="Catálogo con imágenes"
           hint="Elegí el proveedor y subí su PDF. Vas a revisar qué foto se insertará en cada producto antes de guardar."
@@ -6302,30 +6878,40 @@ function UnifiedProductsTab() {
         </DismissibleErrorNotice>
       )}
 
+      {pricePreview && (
+        <BulkPriceReviewModal
+          preview={pricePreview.data}
+          saving={importLoading}
+          error={pricePreviewError}
+          onConfirm={handlePriceFilesConfirm}
+          onClose={() => { if (!importLoading) { setPricePreview(null); setPricePreviewError('') } }}
+        />
+      )}
+
+      {resultDetailOpen && importResult?.files?.some(file => file.items?.length) && (
+        <BulkPriceReviewModal
+          preview={importResult}
+          readOnly
+          onClose={() => setResultDetailOpen(false)}
+        />
+      )}
+
       {showResult && importResult && (
         <div
+          className="adm-import-toast"
           role="status"
           aria-live="polite"
-          style={importResult.fileType === 'catalog-images'
-            ? {
-                position: 'fixed', top: 20, left: '50%', zIndex: 2200,
-                width: 'min(720px, calc(100vw - 32px))', boxSizing: 'border-box',
-                transform: 'translateX(-50%)', padding: '14px 16px', margin: 0,
-                background: '#166534', color: C.white, border: '1px solid #14532D', borderRadius: 9,
-                boxShadow: '0 14px 38px rgba(17, 24, 39, 0.28)',
-                animation: 'fnx-notice-in .22s ease-out both',
-              }
-            : { background: C.greenLight, border: `1px solid ${C.green}`, borderRadius: 8, padding: '14px 18px', marginBottom: 20 }}
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-            <span style={{ fontSize: 13, fontWeight: 700, color: importResult.fileType === 'catalog-images' ? C.white : C.green }}>Importación completa</span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 700, color: C.green }}>
+              <span className="adm-import-toast__check" aria-hidden="true">✓</span>
+              Importación completa
+            </span>
             <button
               type="button"
               onClick={() => setShowResult(false)}
               aria-label="Cerrar notificación"
-              style={importResult.fileType === 'catalog-images'
-                ? { width: 25, height: 25, padding: 0, border: '1px solid #fff', borderRadius: 5, background: C.white, color: C.dark, cursor: 'pointer', fontSize: 13 }
-                : { background: 'none', border: 'none', cursor: 'pointer', color: C.text3, fontSize: 14 }}
+              className="adm-import-toast__close"
             >✕</button>
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -6333,6 +6919,7 @@ function UnifiedProductsTab() {
             {importResult.totalRows !== undefined && <span style={pill('#F3F4F6', C.text3)}>{importResult.totalRows} filas leídas</span>}
             {importResult.created !== undefined && <span style={pill(C.greenLight, C.green)}>{importResult.created} creados</span>}
             {importResult.updated !== undefined && <span style={pill(importResult.fileType === 'catalog-images' ? C.white : C.amberLight, importResult.fileType === 'catalog-images' ? C.dark : C.amberDark)}>{importResult.updated} actualizados</span>}
+            {!!importResult.unchanged && <span style={pill('#E0F2FE', '#0369A1')}>{importResult.unchanged} sin cambios</span>}
             {importResult.imagesSaved !== undefined && <span style={pill(importResult.fileType === 'catalog-images' ? C.white : '#EEF2FF', importResult.fileType === 'catalog-images' ? C.dark : '#4338CA')}>{importResult.imagesSaved} imágenes guardadas</span>}
             {!!importResult.merged && <span style={pill(C.dark, C.white)}>{importResult.merged} productos unidos</span>}
             {!!importResult.deleted && <span style={pill(C.red, C.white)}>{importResult.deleted} productos eliminados</span>}
@@ -6344,12 +6931,23 @@ function UnifiedProductsTab() {
               {importResult.files.map(file => (
                 <div key={file.fileName} style={{ fontSize: 11.5, color: C.text2 }}>
                   <strong>{file.fileName}</strong> → {file.supplier} · {file.currency} · {file.created} creados
+                  {file.updated ? ` · ${file.updated} actualizados` : ''}
+                  {file.unchanged ? ` · ${file.unchanged} sin cambios` : ''}
                   {file.existingCount ? ` · ${file.existingCount} ya existían` : ''}
                   {file.duplicateRows ? ` · ${file.duplicateRows} repetidos` : ''}
                   {file.invalidRows ? ` · ${file.invalidRows} filas inválidas` : ''}
                 </div>
               ))}
             </div>
+          )}
+          {importResult.files?.some(file => file.items?.length) && (
+            <button
+              type="button"
+              onClick={() => setResultDetailOpen(true)}
+              style={{ ...outlineBtn, marginTop: 10, padding: '6px 9px', background: C.white, borderColor: C.green, color: C.green, fontSize: 10.5 }}
+            >
+              Ver detalle de creaciones y actualizaciones
+            </button>
           )}
           {!!importResult.failedFiles?.length && (
             <div style={{ marginTop: 10, color: C.red, fontSize: 11.5 }}>
@@ -6373,6 +6971,7 @@ function UnifiedProductsTab() {
               Datos informativos del pedido: {Object.entries(importResult.header).filter(([, v]) => v != null).map(([k, v]) => `${k}: ${v}`).join(' · ') || 'sin datos'}
             </p>
           )}
+          <span className="adm-import-toast__timer" aria-hidden="true" />
         </div>
       )}
 
@@ -6705,6 +7304,10 @@ function UnifiedProductsTab() {
         <ProductModal
           product={addOpen ? null : draftFromInventoryRow(editItem)}
           onSave={handleSave}
+          onVariantsChanged={async () => {
+            await fetchCatalog()
+            await fetchInventory(inventoryFilters)
+          }}
           onClose={() => { setEditItem(null); setAddOpen(false) }}
         />
       )}

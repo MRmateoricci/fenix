@@ -221,6 +221,88 @@
   to { opacity: 1; transform: translate(-50%, 0); }
 }
 
+/* Confirmación flotante de las importaciones del panel */
+.adm-import-toast {
+  position: fixed;
+  z-index: 2200;
+  top: 18px;
+  left: 50%;
+  width: min(920px, calc(100vw - 32px));
+  max-height: min(70vh, 520px);
+  box-sizing: border-box;
+  overflow: auto;
+  padding: 15px 18px 18px;
+  border: 1px solid #1a7a3d;
+  border-radius: 10px;
+  background: #eaf7ef;
+  color: #374151;
+  box-shadow: 0 18px 48px rgba(17, 24, 39, .24);
+  transform: translateX(-50%);
+  animation: adm-import-toast-lifecycle 8s cubic-bezier(.22, 1, .36, 1) both;
+}
+
+.adm-import-toast__check {
+  display: inline-grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border-radius: 50%;
+  background: #1a7a3d;
+  color: #fff;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.adm-import-toast__close {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #4b5563;
+  cursor: pointer;
+  font-size: 15px;
+}
+
+.adm-import-toast__close:hover { background: rgba(26, 122, 61, .1); }
+.adm-import-toast__close:focus-visible { outline: 2px solid #1a7a3d; outline-offset: 2px; }
+
+.adm-import-toast__timer {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 3px;
+  background: #1a7a3d;
+  transform-origin: left;
+  animation: adm-import-toast-timer 8s linear both;
+}
+
+@keyframes adm-import-toast-timer {
+  from { transform: scaleX(1); }
+  to { transform: scaleX(0); }
+}
+
+@keyframes adm-import-toast-lifecycle {
+  0% { opacity: 0; transform: translate(-50%, -18px); }
+  3.5%, 96% { opacity: 1; transform: translate(-50%, 0); }
+  100% { opacity: 0; transform: translate(-50%, -18px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .adm-import-toast,
+  .adm-import-toast__timer { animation: none; }
+}
+
+@media (max-width: 520px) {
+  .adm-import-toast {
+    top: 10px;
+    width: calc(100vw - 20px);
+    padding: 13px 14px 17px;
+  }
+}
+
 @media (max-width: 520px) {
   .fnx-added-notice__title span { display: none; }
   .fnx-added-notice__body { padding-inline: 18px; }

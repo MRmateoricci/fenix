@@ -1,5 +1,6 @@
 import { Router } from 'express'
 import { pool } from '../db/pool.js'
+import { resolvePublicOptionPrice, resolvePublicPrice } from '../services/publicPricing.js'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Catálogo público — sin auth, solo lectura. Expone los productos de la tabla
@@ -11,7 +12,7 @@ import { pool } from '../db/pool.js'
 const router = Router()
 
 const SELECT_FIELDS = `
-  id, name, category, subcategory, precio_venta, precio_venta_usd,
+  id, name, category, subcategory, precio_venta, precio_venta_usd, precio_iva, precio_iva_usd,
   original_price, original_price_usd, price_currency,
   COALESCE((SELECT usd_ars_rate FROM store_settings WHERE id = 1), 1510) AS usd_ars_rate,
   description_larga,
@@ -20,8 +21,10 @@ const SELECT_FIELDS = `
   is_new, best_seller,
   COALESCE((
     SELECT jsonb_agg(jsonb_build_object(
-      'id', vr.id, 'color', vr.color_name, 'size', vr.size_label, 'tone', vr.tone_name,
+      'id', vr.id, 'color', vr.color_name, 'colorHex', vr.color_hex, 'size', vr.size_label, 'tone', vr.tone_name,
+      'image', vr.image_url, 'productData', vr.product_data,
       'price', vr.precio_venta, 'priceUsd', vr.precio_venta_usd,
+      'priceWithTax', vr.precio_iva, 'priceWithTaxUsd', vr.precio_iva_usd,
       'currency', vr.price_currency, 'stock', vr.stock
     ) ORDER BY vr.created_at)
     FROM product_variant_rules vr WHERE vr.product_id=products.id
@@ -31,20 +34,33 @@ const SELECT_FIELDS = `
 export function mapRow(r) {
   const usdArsRate = Number(r.usd_ars_rate) || 1510
   const sourceIsUsd = r.price_currency === 'USD'
-  const salePrice = sourceIsUsd && r.precio_venta_usd != null
-    ? Number(r.precio_venta_usd) * usdArsRate
-    : r.precio_venta
+  const publicPrice = resolvePublicPrice({
+    priceWithTax: r.precio_iva,
+    priceWithTaxUsd: r.precio_iva_usd,
+    price: r.precio_venta,
+    priceUsd: r.precio_venta_usd,
+    currency: r.price_currency,
+    usdArsRate,
+  })
   const originalPrice = sourceIsUsd && r.original_price_usd != null
     ? Number(r.original_price_usd) * usdArsRate
     : r.original_price
   const variantRules = (r.variant_rules || []).map(rule => ({
     id: rule.id,
     color: rule.color || null,
+    colorHex: rule.colorHex || null,
     size: rule.size || null,
     tone: rule.tone || null,
-    price: rule.currency === 'USD' && rule.priceUsd != null
-      ? Math.round(Number(rule.priceUsd) * usdArsRate * 100) / 100
-      : rule.price == null ? null : Number(rule.price),
+    image: rule.image || null,
+    productData: rule.productData && typeof rule.productData === 'object' ? rule.productData : {},
+    price: resolvePublicPrice({
+      priceWithTax: rule.priceWithTax,
+      priceWithTaxUsd: rule.priceWithTaxUsd,
+      price: rule.price,
+      priceUsd: rule.priceUsd,
+      currency: rule.currency,
+      usdArsRate,
+    }),
     stock: rule.stock == null ? null : Number(rule.stock),
   }))
   return {
@@ -52,7 +68,7 @@ export function mapRow(r) {
     name: r.name,
     category: r.category,
     subcategory: r.subcategory,
-    price: salePrice != null ? Math.round(Number(salePrice) * 100) / 100 : null,
+    price: publicPrice,
     originalPrice: originalPrice != null ? Math.round(Number(originalPrice) * 100) / 100 : null,
     description: r.description_larga,
     image: r.image_url,
@@ -71,9 +87,7 @@ export function mapRow(r) {
     weightKg: r.weight_kg != null ? Number(r.weight_kg) : null,
     colors: (r.color_options || []).map(color => ({
       ...color,
-      price: sourceIsUsd && color.priceUsd != null
-        ? Math.round(Number(color.priceUsd) * usdArsRate * 100) / 100
-        : color.price == null ? null : Number(color.price),
+      price: resolvePublicOptionPrice(color, r.price_currency, usdArsRate),
       priceCost: sourceIsUsd && color.priceCostUsd != null
         ? Math.round(Number(color.priceCostUsd) * usdArsRate * 100) / 100
         : color.priceCost == null ? null : Number(color.priceCost),
@@ -86,9 +100,7 @@ export function mapRow(r) {
     })),
     sizes: (r.size_options || []).map(size => ({
       ...size,
-      price: sourceIsUsd && size.priceUsd != null
-        ? Math.round(Number(size.priceUsd) * usdArsRate * 100) / 100
-        : size.price == null || size.price === '' ? null : Number(size.price),
+      price: resolvePublicOptionPrice(size, r.price_currency, usdArsRate),
       priceCost: sourceIsUsd && size.priceCostUsd != null
         ? Math.round(Number(size.priceCostUsd) * usdArsRate * 100) / 100
         : size.priceCost == null ? null : Number(size.priceCost),
@@ -101,9 +113,7 @@ export function mapRow(r) {
     })),
     tones: (r.tone_options || []).map(tone => ({
       ...tone,
-      price: sourceIsUsd && tone.priceUsd != null
-        ? Math.round(Number(tone.priceUsd) * usdArsRate * 100) / 100
-        : tone.price == null ? null : Number(tone.price),
+      price: resolvePublicOptionPrice(tone, r.price_currency, usdArsRate),
       priceCost: sourceIsUsd && tone.priceCostUsd != null
         ? Math.round(Number(tone.priceCostUsd) * usdArsRate * 100) / 100
         : tone.priceCost == null ? null : Number(tone.priceCost),
