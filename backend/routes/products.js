@@ -550,7 +550,7 @@ router.get('/:id', async (req, res) => {
 
 router.patch('/:id/variant-rules', async (req, res) => {
   const rules = Array.isArray(req.body.rules) ? req.body.rules : []
-  if (!UUID_PATTERN.test(req.params.id) || !rules.length || rules.length > 500) {
+  if (!UUID_PATTERN.test(req.params.id) || rules.length > 500) {
     return res.status(400).json({ error: 'Las reglas enviadas no son válidas' })
   }
   const supplierCodeKey = value => String(value || '').trim().toUpperCase().replace(/\s+/g, '')
