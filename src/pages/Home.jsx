@@ -424,7 +424,7 @@ function CategoriasSection() {
     <section
       id="categorias"
       style={{
-        maxWidth: 1440, margin: '0 auto', padding: '90px 40px 120px', position: 'relative', zIndex: 3, scrollMarginTop: 90,
+        maxWidth: 1440, margin: '0 auto', padding: '90px 40px 56px', position: 'relative', zIndex: 3, scrollMarginTop: 90,
       }}
     >
       <div
@@ -652,7 +652,7 @@ function MostSearchedSection() {
     <section
       id="mas-buscados"
       style={{
-        margin: '18px 0 0',
+        margin: 0,
         padding: '14px 24px',
         scrollMarginTop: 90,
       }}
