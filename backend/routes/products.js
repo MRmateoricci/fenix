@@ -35,6 +35,12 @@ import {
   matchInvoiceLines,
   applyInvoiceLines,
 } from '../services/productsRepo.js'
+import {
+  findRuleAmbiguity,
+  loadMergePreview,
+  mergeProducts,
+  recomputeGroupedProduct,
+} from '../services/productVariants.js'
 
 const router = Router()
 router.use(requireAdmin)
@@ -240,7 +246,9 @@ router.get('/', async (req, res) => {
 
     const [data, countResult, suppliersResult] = await Promise.all([
       pool.query(
-        `SELECT * FROM products ${where}
+        `SELECT products.*,
+                (SELECT COUNT(*)::integer FROM product_variant_rules vr WHERE vr.product_id=products.id) AS variant_rule_count
+         FROM products ${where}
          ORDER BY ${orderColumn} ${orderDirection} NULLS LAST, updated_at DESC
          LIMIT $${idx} OFFSET $${idx + 1}`,
         [...params, cappedLimit, offset]
@@ -280,6 +288,33 @@ router.get('/selection/ids', async (req, res) => {
   } catch (err) {
     console.error('[GET /api/products/selection/ids]', err)
     res.status(500).json({ error: 'No se pudieron seleccionar los productos' })
+  }
+})
+
+// Vista previa y confirmación de la unión masiva. Los dos pasos validan los
+// productos del lado del servidor; la confirmación repite todo bajo locks.
+router.post('/merge/preview', async (req, res) => {
+  try {
+    const products = await loadMergePreview(pool, req.body.productIds)
+    res.json({ products, supplier: products[0]?.supplier || null })
+  } catch (err) {
+    res.status(400).json({ error: err.message || 'No se pudo preparar la unión' })
+  }
+})
+
+router.post('/merge', async (req, res) => {
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+    const result = await mergeProducts(client, req.body)
+    await client.query('COMMIT')
+    res.json(result)
+  } catch (err) {
+    await client.query('ROLLBACK')
+    const status = /ya existe|superponen/.test(err.message || '') ? 409 : 400
+    res.status(status).json({ error: err.message || 'No se pudieron unir los productos' })
+  } finally {
+    client.release()
   }
 })
 
@@ -459,12 +494,135 @@ router.patch('/supplier-settings/:supplier', async (req, res) => {
 
 router.get('/:id', async (req, res) => {
   try {
-    const { rows } = await pool.query('SELECT * FROM products WHERE id = $1', [req.params.id])
+    const { rows } = await pool.query(
+      `SELECT p.*,
+              COALESCE((
+                SELECT jsonb_agg(jsonb_build_object(
+                  'id', vr.id, 'color', vr.color_name, 'size', vr.size_label, 'tone', vr.tone_name,
+                  'precio_costo', vr.precio_costo, 'precio_venta', vr.precio_venta, 'precio_iva', vr.precio_iva,
+                  'precio_costo_usd', vr.precio_costo_usd, 'precio_venta_usd', vr.precio_venta_usd,
+                  'precio_iva_usd', vr.precio_iva_usd, 'price_currency', vr.price_currency,
+                  'stock', vr.stock,
+                  'supplierCodes', COALESCE((SELECT jsonb_agg(m.source_code ORDER BY m.source_code)
+                    FROM supplier_product_mappings m WHERE m.variant_rule_id=vr.id), '[]'::jsonb)
+                ) ORDER BY vr.created_at)
+                FROM product_variant_rules vr WHERE vr.product_id=p.id
+              ), '[]'::jsonb) AS variant_rules
+       FROM products p WHERE p.id=$1`,
+      [req.params.id]
+    )
     if (!rows.length) return res.status(404).json({ error: 'Producto no encontrado' })
     res.json(rows[0])
   } catch (err) {
     console.error('[GET /api/products/:id]', err)
     res.status(500).json({ error: 'Error interno' })
+  }
+})
+
+router.patch('/:id/variant-rules', async (req, res) => {
+  const rules = Array.isArray(req.body.rules) ? req.body.rules : []
+  if (!UUID_PATTERN.test(req.params.id) || !rules.length || rules.length > 500) {
+    return res.status(400).json({ error: 'Las reglas enviadas no son válidas' })
+  }
+  const normalized = rules.map(rule => ({
+    id: UUID_PATTERN.test(String(rule.id || '')) ? String(rule.id) : null,
+    color_name: String(rule.color || '').trim() || null,
+    size_label: String(rule.size || '').trim() || null,
+    tone_name: String(rule.tone || '').trim() || null,
+    precio_costo: toNumber(rule.precio_costo),
+    precio_venta: toNumber(rule.precio_venta),
+    precio_iva: toNumber(rule.precio_iva),
+    stock: rule.stock == null || rule.stock === '' ? null : Number(rule.stock),
+  }))
+  if (normalized.some(rule => [rule.precio_costo, rule.precio_venta, rule.precio_iva].some(value => value != null && value < 0) ||
+      (rule.stock != null && (!Number.isInteger(rule.stock) || rule.stock < 0)))) {
+    return res.status(400).json({ error: 'Hay precios o cantidades inválidas' })
+  }
+  if (findRuleAmbiguity(normalized)) {
+    return res.status(409).json({ error: 'Hay reglas que se superponen con la misma precisión' })
+  }
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+    const current = await client.query(
+      `SELECT color_options,size_options,tone_options,price_currency,price_exchange_rate,
+              COALESCE((SELECT usd_ars_rate FROM store_settings WHERE id=1),1510) AS usd_ars_rate
+       FROM products WHERE id=$1 FOR UPDATE`,
+      [req.params.id]
+    )
+    if (!current.rows.length) throw new Error('El producto ya no existe')
+    const product = current.rows[0]
+    const existing = await client.query(
+      `SELECT rule.id, EXISTS(SELECT 1 FROM supplier_product_mappings mapping WHERE mapping.variant_rule_id=rule.id) AS has_code
+       FROM product_variant_rules rule WHERE rule.product_id=$1 FOR UPDATE`,
+      [req.params.id]
+    )
+    const existingById = new Map(existing.rows.map(rule => [rule.id, rule]))
+    const submittedIds = new Set(normalized.map(rule => rule.id).filter(Boolean))
+    if ([...submittedIds].some(id => !existingById.has(id))) throw new Error('Una de las reglas ya no existe')
+    if (existing.rows.some(rule => rule.has_code && !submittedIds.has(rule.id))) {
+      throw new Error('No se puede eliminar una variante que conserva un código de proveedor')
+    }
+    const removableIds = existing.rows.filter(rule => !rule.has_code && !submittedIds.has(rule.id)).map(rule => rule.id)
+    if (removableIds.length) {
+      await client.query('DELETE FROM product_variant_rules WHERE product_id=$1 AND id=ANY($2::uuid[])', [req.params.id, removableIds])
+    }
+    const rate = Number(product.usd_ars_rate) || 1510
+    for (const rule of normalized) {
+      const usd = value => product.price_currency === 'USD' && value != null ? Math.round(value / rate * 100) / 100 : null
+      if (rule.id) {
+        await client.query(
+          `UPDATE product_variant_rules SET color_name=$1,size_label=$2,tone_name=$3,
+             precio_costo=$4,precio_venta=$5,precio_iva=$6,
+             precio_costo_usd=CASE WHEN price_currency='USD' THEN $7 ELSE precio_costo_usd END,
+             precio_venta_usd=CASE WHEN price_currency='USD' THEN $8 ELSE precio_venta_usd END,
+             precio_iva_usd=CASE WHEN price_currency='USD' THEN $9 ELSE precio_iva_usd END,
+             stock=$10,price_exchange_rate=$11,updated_at=NOW()
+           WHERE id=$12 AND product_id=$13`,
+          [rule.color_name, rule.size_label, rule.tone_name, rule.precio_costo,
+            rule.precio_venta, rule.precio_iva, usd(rule.precio_costo), usd(rule.precio_venta),
+            usd(rule.precio_iva), rule.stock, rate, rule.id, req.params.id]
+        )
+        await client.query(
+          `UPDATE supplier_product_mappings SET color_name=$1,size_label=$2,tone_name=$3,updated_at=NOW()
+           WHERE variant_rule_id=$4`,
+          [rule.color_name, rule.size_label, rule.tone_name, rule.id]
+        )
+      } else {
+        await client.query(
+          `INSERT INTO product_variant_rules
+             (product_id,color_name,size_label,tone_name,precio_costo,precio_venta,precio_iva,
+              precio_costo_usd,precio_venta_usd,precio_iva_usd,price_currency,price_exchange_rate,stock)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+          [req.params.id, rule.color_name, rule.size_label, rule.tone_name,
+            rule.precio_costo, rule.precio_venta, rule.precio_iva,
+            usd(rule.precio_costo), usd(rule.precio_venta), usd(rule.precio_iva),
+            product.price_currency || 'ARS', rate, rule.stock]
+        )
+      }
+    }
+    const rebuild = (options, key, values, extra = {}) => {
+      const currentOptions = Array.isArray(options) ? options : []
+      return [...new Set(values.filter(Boolean))].map(value => {
+        const previous = currentOptions.find(option => String(option?.[key] || '').localeCompare(value, 'es-AR', { sensitivity: 'base' }) === 0)
+        return previous ? { ...previous, [key]: value } : { [key]: value, ...extra }
+      })
+    }
+    const colors = rebuild(product.color_options, 'name', normalized.map(rule => rule.color_name), { hex: '#CCCCCC' })
+    const sizes = rebuild(product.size_options, 'label', normalized.map(rule => rule.size_label))
+    const tones = rebuild(product.tone_options, 'name', normalized.map(rule => rule.tone_name), { hex: '#CCCCCC' })
+    await client.query(
+      'UPDATE products SET color_options=$1::jsonb,size_options=$2::jsonb,tone_options=$3::jsonb WHERE id=$4',
+      [JSON.stringify(colors), JSON.stringify(sizes), JSON.stringify(tones), req.params.id]
+    )
+    const updatedProduct = await recomputeGroupedProduct(client, req.params.id)
+    await client.query('COMMIT')
+    res.json({ product: updatedProduct, updated: normalized.length })
+  } catch (err) {
+    await client.query('ROLLBACK')
+    res.status(400).json({ error: err.message || 'No se pudieron guardar las variantes' })
+  } finally {
+    client.release()
   }
 })
 
@@ -1053,18 +1211,20 @@ router.post('/import/prices/apply', async (req, res) => {
     .map(action => String(action.sourceCode).trim().toUpperCase().replace(/\s+/g, ''))
   if (mappedSourceCodes.length) {
     const { rows: savedVariants } = await pool.query(
-      `SELECT source_code_key, color_name, color_hex, size_label
+      `SELECT source_code_key, color_name, color_hex, size_label, tone_name, variant_rule_id
        FROM supplier_product_mappings
        WHERE supplier = $1 AND source_code_key = ANY($2::text[])`,
       [supplier, mappedSourceCodes]
     )
     const bySourceCode = new Map(savedVariants.map(mapping => [mapping.source_code_key, mapping]))
     normalized.forEach(action => {
-      if (action.type !== 'update' || action.colorVariant) return
+      if (action.type !== 'update') return
       const key = String(action.sourceCode || '').trim().toUpperCase().replace(/\s+/g, '')
       const saved = bySourceCode.get(key)
-      if (saved?.color_name) action.colorVariant = { name: saved.color_name, hex: saved.color_hex || '#CCCCCC' }
+      if (!action.colorVariant && saved?.color_name) action.colorVariant = { name: saved.color_name, hex: saved.color_hex || '#CCCCCC' }
       if (saved?.size_label) action.sizeVariant = { label: saved.size_label }
+      if (saved?.tone_name) action.toneVariant = { name: saved.tone_name }
+      if (saved?.variant_rule_id) action.variantRuleId = saved.variant_rule_id
     })
   }
 
@@ -1075,10 +1235,11 @@ router.post('/import/prices/apply', async (req, res) => {
   }
   for (const group of assignmentsByProduct.values()) {
     if (group.length <= 1) continue
-    const variants = group.map(action => action.colorVariant
-      ? `color:${action.colorVariant.name.toLocaleLowerCase('es-AR')}`
-      : action.sizeVariant
-        ? `size:${action.sizeVariant.label.toLocaleLowerCase('es-AR')}`
+    const variants = group.map(action => action.variantRuleId
+      ? `rule:${action.variantRuleId}`
+      : [action.colorVariant?.name, action.sizeVariant?.label, action.toneVariant?.name].some(Boolean)
+        ? [action.colorVariant?.name, action.sizeVariant?.label, action.toneVariant?.name]
+          .map(value => String(value || '*').toLocaleLowerCase('es-AR')).join('|')
         : null)
     if (variants.some(value => !value) || new Set(variants).size !== group.length) {
       return res.status(400).json({ error: 'Las filas asignadas al mismo producto deben tener variantes diferentes' })

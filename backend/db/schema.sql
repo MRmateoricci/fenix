@@ -283,6 +283,42 @@ CREATE TRIGGER supplier_product_mappings_updated_at
   BEFORE UPDATE ON supplier_product_mappings
   FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 
+-- Reglas normalizadas para productos agrupados. Un atributo NULL significa
+-- "cualquiera". Precio y stock se resuelven por separado tomando la regla
+-- coincidente con mayor cantidad de atributos específicos.
+CREATE TABLE IF NOT EXISTS product_variant_rules (
+  id                 UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
+  product_id         UUID          NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  color_name         VARCHAR(100),
+  size_label         VARCHAR(100),
+  tone_name          VARCHAR(100),
+  precio_costo       NUMERIC(14,2),
+  precio_venta       NUMERIC(14,2),
+  precio_iva         NUMERIC(14,2),
+  precio_costo_usd   NUMERIC(14,2),
+  precio_venta_usd   NUMERIC(14,2),
+  precio_iva_usd     NUMERIC(14,2),
+  price_currency     VARCHAR(3)     NOT NULL DEFAULT 'ARS'
+                     CHECK (price_currency IN ('ARS','USD')),
+  price_exchange_rate NUMERIC(14,4),
+  stock              INTEGER       CHECK (stock IS NULL OR stock >= 0),
+  created_at         TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+  updated_at         TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_product_variant_rules_product
+  ON product_variant_rules(product_id);
+
+DROP TRIGGER IF EXISTS product_variant_rules_updated_at ON product_variant_rules;
+CREATE TRIGGER product_variant_rules_updated_at
+  BEFORE UPDATE ON product_variant_rules
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+ALTER TABLE supplier_product_mappings
+  ADD COLUMN IF NOT EXISTS tone_name VARCHAR(100);
+ALTER TABLE supplier_product_mappings
+  ADD COLUMN IF NOT EXISTS variant_rule_id UUID REFERENCES product_variant_rules(id) ON DELETE SET NULL;
+
 -- Configuracion administrativa compartida. La tienda sigue cobrando en ARS;
 -- esta cotizacion permite ingresar y visualizar precios de proveedor en USD.
 CREATE TABLE IF NOT EXISTS store_settings (

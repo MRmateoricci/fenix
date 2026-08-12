@@ -17,7 +17,15 @@ const SELECT_FIELDS = `
   description_larga,
   image_url, hover_image_url, stock, watts, ip_rating, color_temp, material, cable_type, product_type,
   color_options, size_options, tone_options, variant_stock, length_cm, width_cm, height_cm, weight_kg,
-  is_new, best_seller
+  is_new, best_seller,
+  COALESCE((
+    SELECT jsonb_agg(jsonb_build_object(
+      'id', vr.id, 'color', vr.color_name, 'size', vr.size_label, 'tone', vr.tone_name,
+      'price', vr.precio_venta, 'priceUsd', vr.precio_venta_usd,
+      'currency', vr.price_currency, 'stock', vr.stock
+    ) ORDER BY vr.created_at)
+    FROM product_variant_rules vr WHERE vr.product_id=products.id
+  ), '[]'::jsonb) AS variant_rules
 `
 
 export function mapRow(r) {
@@ -29,6 +37,16 @@ export function mapRow(r) {
   const originalPrice = sourceIsUsd && r.original_price_usd != null
     ? Number(r.original_price_usd) * usdArsRate
     : r.original_price
+  const variantRules = (r.variant_rules || []).map(rule => ({
+    id: rule.id,
+    color: rule.color || null,
+    size: rule.size || null,
+    tone: rule.tone || null,
+    price: rule.currency === 'USD' && rule.priceUsd != null
+      ? Math.round(Number(rule.priceUsd) * usdArsRate * 100) / 100
+      : rule.price == null ? null : Number(rule.price),
+    stock: rule.stock == null ? null : Number(rule.stock),
+  }))
   return {
     id: r.id,
     name: r.name,
@@ -97,6 +115,8 @@ export function mapRow(r) {
       priceWithTaxUsd: tone.priceWithTaxUsd == null ? null : Number(tone.priceWithTaxUsd),
     })),
     variantStock: r.variant_stock || {},
+    variantRules,
+    priceFrom: variantRules.filter(rule => rule.price != null).length > 1,
     isNew: Boolean(r.is_new),
     bestSeller: Boolean(r.best_seller),
     published: true,

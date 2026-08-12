@@ -359,7 +359,7 @@ const EMPTY = {
   price: '', originalPrice: '',
   description: '', image: '', hoverImage: '',
   lengthCm: '', widthCm: '', heightCm: '', weightKg: '',
-  inStock: true, stock: '', colors: [], sizes: [], tones: [], variantStock: {},
+  inStock: true, stock: '', colors: [], sizes: [], tones: [], variantStock: {}, variantRules: [],
   published: true, isNew: false, bestSeller: false,
 }
 
@@ -396,6 +396,7 @@ function draftFromInventoryRow(inv) {
     sizes:       inv.size_options || [],
     tones:       inv.tone_options || [],
     variantStock: inv.variant_stock || {},
+    variantRules: inv.variant_rules || [],
     published:   Boolean(inv.published),
     isNew:       Boolean(inv.is_new),
     bestSeller:  Boolean(inv.best_seller),
@@ -403,14 +404,13 @@ function draftFromInventoryRow(inv) {
 }
 
 function toUnifiedProductPayload(data) {
-  return {
+  const payload = {
     codigo: data.codigo,
     supplier: data.supplier || 'OTRO',
     descripcion: data.inventoryDescription || null,
     precio_costo: data.priceCost,
     precio_venta: data.price,
     precio_iva: data.priceWithTax,
-    stock: data.stock === '' ? 0 : Number(data.stock),
     name: data.name?.trim() || null,
     category: data.category || null,
     subcategory: data.subcategory || null,
@@ -435,10 +435,12 @@ function toUnifiedProductPayload(data) {
     is_new: Boolean(data.isNew),
     best_seller: Boolean(data.bestSeller),
   }
+  if (data.stock !== undefined) payload.stock = data.stock === '' ? 0 : Number(data.stock)
+  return payload
 }
 
 function ProductModal({ product, onSave, onClose, publishOnSave = false }) {
-  const { currencySettings, categoryTree } = useAdmin()
+  const { currencySettings, categoryTree, updateProductVariantRules } = useAdmin()
   const isNew = !product
   const [form, setForm] = useState(() => isNew ? EMPTY : {
     ...EMPTY,
@@ -456,14 +458,30 @@ function ProductModal({ product, onSave, onClose, publishOnSave = false }) {
     sizes:         product.sizes || [],
     tones:         product.tones || [],
     variantStock:  product.variantStock || {},
+    variantRules:  (product.variantRules || []).map(rule => ({ ...rule,
+      color: rule.color || '', size: rule.size || '', tone: rule.tone || '',
+      precio_costo: rule.precio_costo ?? '', precio_venta: rule.precio_venta ?? '',
+      precio_iva: rule.precio_iva ?? '', stock: rule.stock ?? '',
+    })),
   })
+  const hasGroupedRules = (product?.variantRules || []).length > 0
   const [useVariantStock, setUseVariantStock] = useState(
     () => Object.keys(product?.variantStock || {}).length > 0
   )
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
   const willBePublished = publishOnSave || form.published
-  const valid = (!isNew || form.codigo.trim()) && (!willBePublished || (form.name.trim() && form.price && Number(form.price) > 0))
+  let groupedConflict = null
+  for (let left = 0; left < form.variantRules.length && !groupedConflict; left++) {
+    for (let right = left + 1; right < form.variantRules.length; right++) {
+      if (mergeRuleSpecificity(form.variantRules[left]) === mergeRuleSpecificity(form.variantRules[right]) &&
+          mergeRulesOverlap(form.variantRules[left], form.variantRules[right])) {
+        groupedConflict = [left, right]
+        break
+      }
+    }
+  }
+  const valid = (!isNew || form.codigo.trim()) && !groupedConflict && (!willBePublished || (form.name.trim() && form.price && Number(form.price) > 0))
   const subOptions = getSubcategoryOptions(form.category, categoryTree).map(node => node.label)
   const typeOptions = getProductTypeOptions(form.category, form.subcategory, categoryTree).map(node => node.label)
   const categoryOptions = categoryTree.map(node => ({ value: getCategoryValue(node), label: node.label }))
@@ -538,15 +556,32 @@ function ProductModal({ product, onSave, onClose, publishOnSave = false }) {
       [rowKey]: { ...(f.variantStock[rowKey] || {}), [colKey]: value },
     },
   }))
+  const setGroupedRule = (index, field, value) => setForm(current => ({
+    ...current,
+    variantRules: current.variantRules.map((rule, ruleIndex) => ruleIndex === index ? { ...rule, [field]: value } : rule),
+  }))
+  const addGroupedRule = () => setForm(current => ({
+    ...current,
+    variantRules: [...current.variantRules, {
+      id: `manual-${Date.now()}`, supplierCodes: [], color: '', size: '', tone: '',
+      precio_costo: '', precio_venta: '', precio_iva: '', stock: '',
+    }],
+  }))
+  const removeGroupedRule = index => setForm(current => ({
+    ...current,
+    variantRules: current.variantRules.filter((_, ruleIndex) => ruleIndex !== index),
+  }))
   const variantStockTotal = Object.values(form.variantStock)
     .flatMap(row => Object.values(row || {}))
     .reduce((sum, v) => sum + (Number(v) || 0), 0)
 
   const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState('')
 
   const handleSave = async () => {
     if (!valid || saving) return
     setSaving(true)
+    setSaveError('')
     const out = { ...form, price: form.price === '' ? null : Number(form.price) }
     out.codigo = form.codigo.trim()
     out.supplier = form.supplier.trim().toUpperCase() || 'OTRO'
@@ -559,7 +594,7 @@ function ProductModal({ product, onSave, onClose, publishOnSave = false }) {
     out.priceWithTax = form.priceWithTax === '' ? null : Number(form.priceWithTax)
     out.originalPrice = form.originalPrice ? Number(form.originalPrice) : null
     if (publishOnSave) out.published = true
-    if (form.stock !== '') {
+    if (!hasGroupedRules && form.stock !== '') {
       out.stock   = Number(form.stock)
       out.inStock = out.stock > 0
     } else {
@@ -569,7 +604,10 @@ function ProductModal({ product, onSave, onClose, publishOnSave = false }) {
     out.sizes  = form.sizes.filter(s => s.label.trim()).map(s => ({ ...s, price: s.price === '' || s.price == null ? null : Number(s.price) }))
     out.tones  = form.tones.filter(t => t.name?.trim()).map(t => ({ ...t, price: t.price === '' || t.price == null ? null : Number(t.price) }))
 
-    if (useVariantStock) {
+    if (hasGroupedRules) {
+      delete out.stock
+      out.variantStock = {}
+    } else if (useVariantStock) {
       const colorNames = out.colors.length ? out.colors.map(c => c.name) : ['']
       const toneNames = out.tones.length ? out.tones.map(t => t.name) : ['']
       const rowKeys = colorNames.flatMap(color => toneNames.map(tone => combineVariantRowKey(color, tone)))
@@ -593,7 +631,10 @@ function ProductModal({ product, onSave, onClose, publishOnSave = false }) {
     }
     try {
       await onSave(out)
+      if (hasGroupedRules) await updateProductVariantRules(product.id, out.variantRules)
       onClose()
+    } catch (error) {
+      setSaveError(error.message || 'No se pudieron guardar los cambios')
     } finally {
       setSaving(false)
     }
@@ -639,11 +680,11 @@ function ProductModal({ product, onSave, onClose, publishOnSave = false }) {
           </div>
           <FormField label="Descripción interna" value={form.inventoryDescription} onChange={v => set('inventoryDescription', v)} span={2} />
           <FormField
-            label={useVariantStock ? 'Stock (suma de las variantes)' : 'Stock'}
-            value={useVariantStock ? String(variantStockTotal) : form.stock}
+            label={hasGroupedRules ? 'Stock (suma de códigos)' : useVariantStock ? 'Stock (suma de las variantes)' : 'Stock'}
+            value={hasGroupedRules ? form.stock : useVariantStock ? String(variantStockTotal) : form.stock}
             onChange={v => set('stock', v)}
             type="number"
-            disabled={useVariantStock}
+            disabled={hasGroupedRules || useVariantStock}
           />
           <div style={{ gridColumn: 'span 2', marginTop: 4 }}>
             <label style={lbl}>Dimensiones para envío</label>
@@ -655,12 +696,12 @@ function ProductModal({ product, onSave, onClose, publishOnSave = false }) {
               <FormField label="Peso aprox. (kg)" value={form.weightKg} onChange={v => set('weightKg', v)} type="number" step="0.001" />
             </div>
           </div>
-          <FormField label="Precio costo (ARS)" value={form.priceCost} onChange={v => set('priceCost', v)} type="number" />
-          <FormField label="Precio de venta (ARS)" value={form.price} onChange={v => set('price', v)} type="number" />
-          <FormField label="Precio con IVA (ARS)" value={form.priceWithTax} onChange={v => set('priceWithTax', v)} type="number" />
-          <div style={{ gridColumn: 'span 2', color: C.muted, fontSize: 11.5, marginTop: -4 }}>
+          <FormField label={hasGroupedRules ? 'Costo mínimo (calculado)' : 'Precio costo (ARS)'} value={form.priceCost} onChange={v => set('priceCost', v)} type="number" disabled={hasGroupedRules} />
+          <FormField label={hasGroupedRules ? 'Precio desde (calculado)' : 'Precio de venta (ARS)'} value={form.price} onChange={v => set('price', v)} type="number" disabled={hasGroupedRules} />
+          <FormField label={hasGroupedRules ? 'IVA mínimo (calculado)' : 'Precio con IVA (ARS)'} value={form.priceWithTax} onChange={v => set('priceWithTax', v)} type="number" disabled={hasGroupedRules} />
+          {!hasGroupedRules && <div style={{ gridColumn: 'span 2', color: C.muted, fontSize: 11.5, marginTop: -4 }}>
             Equivalentes con US$ 1 = {fmt(usdArsRate)}: costo {form.priceCost !== '' ? fmtUsd(Number(form.priceCost) / usdArsRate) : '—'} · venta {form.price !== '' ? fmtUsd(Number(form.price) / usdArsRate) : '—'} · con IVA {form.priceWithTax !== '' ? fmtUsd(Number(form.priceWithTax) / usdArsRate) : '—'}
-          </div>
+          </div>}
           </div>
           </section>
 
@@ -754,6 +795,7 @@ function ProductModal({ product, onSave, onClose, publishOnSave = false }) {
           </section>
         </div>
 
+        {!hasGroupedRules && <>
         {/* Variantes de color */}
         <div style={{ marginTop: 20 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
@@ -979,9 +1021,58 @@ function ProductModal({ product, onSave, onClose, publishOnSave = false }) {
             </div>
           )}
         </div>
+        </>}
+
+        {hasGroupedRules && (
+          <div style={{ marginTop: 18, padding: 14, border: `1px solid ${C.border}`, borderRadius: 10, background: '#F8FAFC' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 10 }}>
+              <div>
+                <label style={{ ...lbl, color: C.ink }}>Variantes combinadas</label>
+                <p style={{ fontSize: 11, color: C.muted, margin: '4px 0 0', lineHeight: 1.4 }}>
+                  Cada fila combina Color + Tono + Medida y tiene un único precio. “Cualquiera” es el fallback; la coincidencia más específica siempre gana.
+                </p>
+              </div>
+              <button type="button" onClick={addGroupedRule} style={{ ...outlineBtn, padding: '5px 10px', fontSize: 10.5, whiteSpace: 'nowrap' }}>+ Agregar variante</button>
+            </div>
+            <div style={{ overflowX: 'auto' }}>
+              <div style={{ minWidth: 820 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '145px minmax(360px,1fr) 110px 95px 78px 28px', gap: 7, padding: '5px 7px', fontSize: 9.5, color: C.text3, fontWeight: 700, textTransform: 'uppercase' }}>
+                  <span>Código proveedor</span>
+                  <span style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 6 }}><span>Color</span><span>Tono</span><span>Medida</span></span>
+                  <span>Precio</span><span>Costo</span><span>Stock</span><span />
+                </div>
+                {form.variantRules.map((rule, index) => {
+                  const specificity = mergeRuleSpecificity(rule)
+                  const inConflict = groupedConflict?.includes(index)
+                  const hasSupplierCode = Boolean(rule.supplierCodes?.length)
+                  return (
+                    <div key={rule.id || index} style={{ display: 'grid', gridTemplateColumns: '145px minmax(360px,1fr) 110px 95px 78px 28px', gap: 7, alignItems: 'center', padding: 7, border: `1px solid ${inConflict ? C.red : C.border}`, borderRadius: 7, background: inConflict ? C.redLight : C.white, marginBottom: 5 }}>
+                      <span title={rule.supplierCodes?.join(', ') || 'Regla manual sin código de proveedor'} style={{ minWidth: 0, fontSize: 10.5, fontWeight: 700, color: C.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {rule.supplierCodes?.join(', ') || 'Regla manual'}
+                        <small style={{ display: 'block', marginTop: 2, color: specificity === 3 ? C.green : C.muted, fontSize: 9, fontWeight: 600 }}>{specificity === 3 ? 'Exacta' : `Fallback · ${specificity}/3`}</small>
+                      </span>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,minmax(0,1fr))', gap: 6 }}>
+                        <input value={rule.color} onChange={event => setGroupedRule(index, 'color', event.target.value)} placeholder="Cualquiera" aria-label="Color" style={{ ...inp, height: 32, padding: '5px 7px', fontSize: 10.5 }} />
+                        <input value={rule.tone} onChange={event => setGroupedRule(index, 'tone', event.target.value)} placeholder="Cualquiera" aria-label="Tono" style={{ ...inp, height: 32, padding: '5px 7px', fontSize: 10.5 }} />
+                        <input value={rule.size} onChange={event => setGroupedRule(index, 'size', event.target.value)} placeholder="Cualquiera" aria-label="Medida" style={{ ...inp, height: 32, padding: '5px 7px', fontSize: 10.5 }} />
+                      </div>
+                      <input type="number" min="0" value={rule.precio_venta} onChange={event => setGroupedRule(index, 'precio_venta', event.target.value)} aria-label="Precio de venta" style={{ ...inp, height: 32, padding: '5px 7px', fontSize: 10.5 }} />
+                      <input type="number" min="0" value={rule.precio_costo} onChange={event => setGroupedRule(index, 'precio_costo', event.target.value)} aria-label="Precio de costo" style={{ ...inp, height: 32, padding: '5px 7px', fontSize: 10.5 }} />
+                      <input type="number" min="0" step="1" value={rule.stock} onChange={event => setGroupedRule(index, 'stock', event.target.value)} aria-label="Stock" style={{ ...inp, height: 32, padding: '5px 7px', fontSize: 10.5 }} />
+                      {hasSupplierCode
+                        ? <span title="No se puede borrar porque conserva un código de proveedor" style={{ textAlign: 'center', color: C.muted, fontSize: 12 }}>●</span>
+                        : <button type="button" onClick={() => removeGroupedRule(index)} title="Eliminar regla manual" aria-label="Eliminar regla manual" style={{ ...iconBtn, width: 26, height: 26, color: C.red }}>×</button>}
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+            {groupedConflict && <div style={{ marginTop: 8, padding: '7px 9px', borderRadius: 6, background: C.redLight, color: C.red, fontSize: 10.5 }}>Estas dos filas se superponen con la misma precisión. Completá otro eje en una de ellas.</div>}
+          </div>
+        )}
 
         {/* Stock por combinación exacta color×tono×medida */}
-        {(form.colors.length > 0 || form.sizes.length > 0 || form.tones.length > 0) && (
+        {!hasGroupedRules && (form.colors.length > 0 || form.sizes.length > 0 || form.tones.length > 0) && (
           <div style={{ marginTop: 20 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
               <Toggle value={useVariantStock} onChange={setUseVariantStock} />
@@ -1050,6 +1141,7 @@ function ProductModal({ product, onSave, onClose, publishOnSave = false }) {
           display: 'flex', gap: 10, justifyContent: 'flex-end',
           padding: '16px 28px', borderTop: `1px solid ${C.border}`, flexShrink: 0,
         }}>
+          {saveError && <span style={{ marginRight: 'auto', alignSelf: 'center', color: C.red, fontSize: 11.5 }}>{saveError}</span>}
           <button onClick={onClose} style={outlineBtn}>Cancelar</button>
           <button
             onClick={handleSave}
@@ -5594,14 +5686,118 @@ const headerFilterControl = {
 }
 const headerRangeRow = { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }
 
+function mergeRuleSpecificity(rule) {
+  return ['color', 'size', 'tone'].reduce((total, key) => total + (rule[key]?.trim() ? 1 : 0), 0)
+}
+
+function mergeRulesOverlap(left, right) {
+  const same = (a, b) => String(a || '').localeCompare(String(b || ''), 'es-AR', { sensitivity: 'base' }) === 0
+  return ['color', 'size', 'tone'].every(key => !left[key]?.trim() || !right[key]?.trim() || same(left[key], right[key]))
+}
+
+function ProductMergeModal({ preview, onConfirm, onClose }) {
+  const products = preview.products || []
+  const existingGroup = products.find(product => product.isGrouped)
+  const [baseProductId, setBaseProductId] = useState(existingGroup?.id || products[0]?.id || '')
+  const base = products.find(product => product.id === baseProductId) || products[0]
+  const suggestedPrefix = products.map(product => String(product.codigo || '').toUpperCase()).reduce((prefix, code) => {
+    let index = 0
+    while (index < prefix.length && index < code.length && prefix[index] === code[index]) index++
+    return prefix.slice(0, index).replace(/[-_/\s]+$/, '')
+  }, String(products[0]?.codigo || '').toUpperCase())
+  const [generalName, setGeneralName] = useState(base?.name || base?.descripcion || '')
+  const [generalCode, setGeneralCode] = useState(`${suggestedPrefix || 'GRUPO'}-GRP`)
+  const [assignments, setAssignments] = useState(() => Object.fromEntries(products.map(product => [product.id, {
+    productId: product.id, color: '', size: product.medida || '', tone: '',
+  }])))
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const sourceProducts = products.filter(product => !(product.id === baseProductId && product.isGrouped))
+  const activeRules = sourceProducts.map(product => assignments[product.id]).filter(Boolean)
+  let conflict = null
+  for (let left = 0; left < activeRules.length && !conflict; left++) {
+    for (let right = left + 1; right < activeRules.length; right++) {
+      if (mergeRuleSpecificity(activeRules[left]) === mergeRuleSpecificity(activeRules[right]) && mergeRulesOverlap(activeRules[left], activeRules[right])) {
+        conflict = [activeRules[left].productId, activeRules[right].productId]
+        break
+      }
+    }
+  }
+  const setAssignment = (id, field, value) => setAssignments(current => ({
+    ...current, [id]: { ...current[id], [field]: value },
+  }))
+  const submit = async () => {
+    if (!generalName.trim() || !generalCode.trim() || conflict || saving) return
+    setSaving(true)
+    setError('')
+    try {
+      await onConfirm({
+        productIds: products.map(product => product.id), baseProductId,
+        generalName: generalName.trim(), generalCode: generalCode.trim().toUpperCase(),
+        assignments: activeRules,
+      })
+    } catch (err) {
+      setError(err.message || 'No se pudieron unir los productos')
+      setSaving(false)
+    }
+  }
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 2400, background: 'rgba(17,24,39,.62)', display: 'grid', placeItems: 'center', padding: 18 }}>
+      <div style={{ width: 'min(980px, 96vw)', maxHeight: '92vh', overflow: 'auto', background: C.white, borderRadius: 12, boxShadow: '0 24px 70px rgba(0,0,0,.3)' }}>
+        <div style={{ position: 'sticky', top: 0, zIndex: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 20px', background: C.white, borderBottom: `1px solid ${C.border}` }}>
+          <div><strong style={{ fontSize: 16, color: C.ink }}>Unir productos</strong><div style={{ fontSize: 11.5, color: C.muted, marginTop: 3 }}>{products.length} registros de {preview.supplier}</div></div>
+          <button type="button" onClick={onClose} disabled={saving} style={outlineBtn}>Cerrar</button>
+        </div>
+        <div style={{ padding: 20, display: 'grid', gap: 18 }}>
+          <div style={{ padding: 12, borderRadius: 8, background: C.amberLight, color: C.amberDark, fontSize: 12, lineHeight: 1.45 }}>
+            El resultado quedará como borrador. Los registros originales se consolidarán, pero cada código seguirá guardado para las próximas listas de precios.
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 12 }}>
+            <label style={lbl}>Tomar datos generales de<select value={baseProductId} disabled={Boolean(existingGroup)} onChange={event => setBaseProductId(event.target.value)} style={{ ...inp, marginTop: 6 }}>
+              {products.map(product => <option key={product.id} value={product.id}>{product.codigo} — {product.name || product.descripcion}</option>)}
+            </select></label>
+            <label style={lbl}>Nombre general<input value={generalName} maxLength={200} onChange={event => setGeneralName(event.target.value)} placeholder="Cable Tipo Taller Argenplas 4" style={{ ...inp, marginTop: 6 }} /></label>
+            <label style={lbl}>Código general nuevo<input value={generalCode} maxLength={64} onChange={event => setGeneralCode(event.target.value.toUpperCase())} placeholder="ARG-T4-GRP" style={{ ...inp, marginTop: 6 }} /></label>
+          </div>
+          {existingGroup && <div style={{ fontSize: 11.5, color: '#4338CA', background: '#EEF2FF', borderRadius: 7, padding: '9px 11px' }}>Las {existingGroup.variant_rule_count || 'variantes'} reglas actuales de <strong>{existingGroup.codigo}</strong> se conservarán.</div>}
+          <div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(230px,1.4fr) repeat(3,minmax(120px,.7fr)) 100px 90px', gap: 8, padding: '7px 9px', color: C.text3, fontSize: 10, fontWeight: 700, textTransform: 'uppercase' }}>
+              <span>Producto y código</span><span>Medida</span><span>Color</span><span>Tono</span><span>Precio</span><span>Stock</span>
+            </div>
+            {sourceProducts.map(product => {
+              const rule = assignments[product.id]
+              const inConflict = conflict?.includes(product.id)
+              return <div key={product.id} style={{ display: 'grid', gridTemplateColumns: 'minmax(230px,1.4fr) repeat(3,minmax(120px,.7fr)) 100px 90px', gap: 8, alignItems: 'center', padding: 9, border: `1px solid ${inConflict ? C.red : C.border}`, borderRadius: 8, marginBottom: 7, background: inConflict ? C.redLight : C.white }}>
+                <span style={{ minWidth: 0, fontSize: 11.5 }}><strong style={{ display: 'block', color: C.ink }}>{product.codigo}</strong><span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: C.muted }}>{product.name || product.descripcion}</span></span>
+                <input value={rule.size} onChange={event => setAssignment(product.id, 'size', event.target.value)} placeholder="Cualquiera" style={{ ...inp, padding: '7px 8px', fontSize: 11 }} />
+                <input value={rule.color} onChange={event => setAssignment(product.id, 'color', event.target.value)} placeholder="Cualquiera" style={{ ...inp, padding: '7px 8px', fontSize: 11 }} />
+                <input value={rule.tone} onChange={event => setAssignment(product.id, 'tone', event.target.value)} placeholder="Cualquiera" style={{ ...inp, padding: '7px 8px', fontSize: 11 }} />
+                <span style={{ fontSize: 11.5, color: C.ink }}>{product.precio_venta != null ? fmt(Number(product.precio_venta)) : '—'}</span>
+                <span style={{ fontSize: 11.5, color: C.ink }}>{product.stock ?? 0}</span>
+              </div>
+            })}
+          </div>
+          {conflict && <div style={{ color: C.red, fontSize: 12, background: C.redLight, borderRadius: 7, padding: 10 }}>Hay dos códigos que pueden ganar con la misma precisión. Completá otro atributo en una de esas filas.</div>}
+          {error && <DismissibleErrorNotice key={error}>{error}</DismissibleErrorNotice>}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 9 }}>
+            <button type="button" onClick={onClose} disabled={saving} style={outlineBtn}>Cancelar</button>
+            <button type="button" onClick={submit} disabled={saving || conflict || !generalName.trim() || !generalCode.trim()} style={{ ...solidBtn, background: C.red, color: C.white, opacity: saving || conflict ? .6 : 1 }}>{saving ? 'Uniendo...' : `Unir ${products.length} productos`}</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function UnifiedProductsTab() {
   const {
     inventory, inventoryTotal, inventorySuppliers, inventoryLoading, inventoryError,
     importResult, importLoading, importError,
     currencySettings, updateCurrencySettings,
     supplierSettings, updateSupplierCurrency,
-    fetchInventory, createInventoryItem, updateInventoryItem, deleteInventoryItem, fetchCatalog,
+    fetchInventory, fetchInventoryItem, createInventoryItem, updateInventoryItem, deleteInventoryItem, fetchCatalog,
     fetchInventorySelectionIds, applyInventoryBatch,
+    previewProductMerge, mergeInventoryProducts,
     adjustInventoryStocks, uploadInventoryFile,
     uploadPriceFiles,
     parseInvoicePdf, applyInvoiceLines,
@@ -5643,6 +5839,8 @@ function UnifiedProductsTab() {
   const [bulkSaving, setBulkSaving]         = useState(false)
   const [bulkError, setBulkError]           = useState('')
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false)
+  const [mergePreview, setMergePreview] = useState(null)
+  const [mergeLoading, setMergeLoading] = useState(false)
   const selectPageRef = useRef(null)
 
   const inventoryFilters = useMemo(() => ({
@@ -5811,9 +6009,14 @@ function UnifiedProductsTab() {
     })
   }
 
-  function openProduct(product) {
+  async function openProduct(product) {
     const stockDraft = stockDrafts[product.id]
-    setEditItem(stockDraft ? { ...product, stock: stockDraft.value } : product)
+    try {
+      const detail = Number(product.variant_rule_count) > 0 ? await fetchInventoryItem(product.id) : product
+      setEditItem(stockDraft ? { ...detail, stock: stockDraft.value } : detail)
+    } catch (err) {
+      setBulkError(err.message || 'No se pudo cargar el producto')
+    }
   }
 
   async function handleSaveStockChanges() {
@@ -5952,6 +6155,25 @@ function UnifiedProductsTab() {
     } finally {
       setBulkSaving(false)
     }
+  }
+
+  async function openMerge() {
+    if (selectedCount < 2 || mergeLoading) return
+    setMergeLoading(true)
+    setBulkError('')
+    try {
+      setMergePreview(await previewProductMerge([...selectedIds]))
+    } catch (err) {
+      setBulkError(err.message || 'No se pudo preparar la unión')
+    } finally {
+      setMergeLoading(false)
+    }
+  }
+
+  async function confirmMerge(payload) {
+    await mergeInventoryProducts(payload)
+    setMergePreview(null)
+    await refreshAfterBulkAction()
   }
 
   function changeSort(column) {
@@ -6241,6 +6463,9 @@ function UnifiedProductsTab() {
           <button type="button" onClick={handleApplyBulkAction} disabled={bulkSaving} style={{ ...solidBtn, background: C.green, color: '#fff', opacity: bulkSaving ? 0.65 : 1 }}>
             {bulkSaving ? 'Aplicando...' : 'Aplicar'}
           </button>
+          <button type="button" onClick={openMerge} disabled={bulkSaving || mergeLoading || selectedCount < 2} style={{ ...solidBtn, background: C.dark, color: C.white, opacity: mergeLoading ? .65 : 1 }}>
+            {mergeLoading ? 'Preparando...' : 'Unir productos'}
+          </button>
           <button type="button" onClick={() => setBulkDeleteOpen(true)} disabled={bulkSaving} style={{ ...outlineBtn, marginLeft: 'auto', borderColor: C.red, color: C.red }}>
             Eliminar seleccionados
           </button>
@@ -6384,6 +6609,7 @@ function UnifiedProductsTab() {
                     </div>
                     <div style={{ fontSize: 10.5, color: C.muted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {p.codigo}{p.category ? ` · ${p.category}` : ''}
+                      {Number(p.variant_rule_count) > 0 ? ` · ${p.variant_rule_count} códigos unidos` : ''}
                     </div>
                   </div>
                   <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11.5, color: C.text3, overflow: 'hidden', whiteSpace: 'nowrap' }}>
@@ -6412,9 +6638,9 @@ function UnifiedProductsTab() {
                       step="1"
                       inputMode="numeric"
                       value={displayedStock}
-                      disabled={stockSaving}
+                      disabled={stockSaving || Number(p.variant_rule_count) > 0}
                       aria-label={`Stock de ${p.name || p.descripcion || p.codigo}`}
-                      onChange={event => queueStockValue(p, event.target.value)}
+                      onChange={event => { if (!Number(p.variant_rule_count)) queueStockValue(p, event.target.value) }}
                       onBlur={() => restoreEmptyStockDraft(p)}
                       onKeyDown={event => {
                         event.stopPropagation()
@@ -6427,7 +6653,7 @@ function UnifiedProductsTab() {
                       style={{
                         width: 78, height: 31, boxSizing: 'border-box', padding: '4px 7px',
                         border: `1px solid ${stockDraft ? C.amber : C.border}`, borderRadius: 6,
-                        background: stockDraft ? C.amberLight : C.white, color: C.ink,
+                        background: Number(p.variant_rule_count) > 0 ? C.paper : stockDraft ? C.amberLight : C.white, color: C.ink,
                         font: `600 12px ${ADMIN_FONT}`, textAlign: 'center', outline: 'none',
                       }}
                     />
@@ -6497,6 +6723,10 @@ function UnifiedProductsTab() {
           onConfirm={handleBulkDelete}
           onCancel={() => setBulkDeleteOpen(false)}
         />
+      )}
+
+      {mergePreview && (
+        <ProductMergeModal preview={mergePreview} onConfirm={confirmMerge} onClose={() => setMergePreview(null)} />
       )}
     </div>
   )

@@ -1,3 +1,5 @@
+import { updateVariantRulePrice } from './productVariants.js'
+
 const CHUNK_SIZE = 500
 
 function chunk(array, size = CHUNK_SIZE) {
@@ -388,7 +390,7 @@ export async function applyPriceUpdates(client, actions, usdArsRate, supplier = 
       .filter(Boolean)
     if (sourceKeys.length) {
       const { rows } = await client.query(
-        `SELECT source_code_key, color_name, color_hex, size_label
+        `SELECT source_code_key, color_name, color_hex, size_label, tone_name, variant_rule_id
          FROM supplier_product_mappings
          WHERE supplier = $1 AND source_code_key = ANY($2::text[])`,
         [supplier, sourceKeys]
@@ -438,6 +440,10 @@ export async function applyPriceUpdates(client, actions, usdArsRate, supplier = 
       )
       mappedProductId = rows[0]?.id || null
       created++
+    } else if (savedVariant?.variant_rule_id) {
+      updated += await updateVariantRulePrice(client, savedVariant.variant_rule_id, {
+        costArs, saleArs, taxArs, costUsd, saleUsd, taxUsd, currency, usdArsRate,
+      })
     } else if (colorVariant) {
       const { rows } = await client.query(
         `SELECT color_options, precio_costo, precio_venta, precio_iva,

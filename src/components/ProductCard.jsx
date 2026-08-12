@@ -71,7 +71,9 @@ export default function ProductCard({ product }) {
 
   const favorite = isFavorite(product.id)
   const displayImage = selectedColor?.image || product.image
-  const displayPrice = selectedTone?.price != null
+  const displayPrice = product.variantRules?.length
+    ? product.price
+    : selectedTone?.price != null
     ? Number(selectedTone.price)
     : selectedColor?.price != null
       ? Number(selectedColor.price)
@@ -82,6 +84,10 @@ export default function ProductCard({ product }) {
     e.preventDefault()
     e.stopPropagation()
     if (!product.inStock || added) return
+    if (product.variantRules?.length) {
+      navigate(`/products/${product.id}`)
+      return
+    }
     const defaultSize = product.sizes?.[0]
     addItem({
       id: product.id,
@@ -230,7 +236,7 @@ export default function ProductCard({ product }) {
           type="button"
           onClick={handleAdd}
           disabled={!product.inStock || added}
-          aria-label={added ? 'Agregado al carrito' : product.inStock ? 'Agregar al carrito' : 'Sin stock'}
+          aria-label={product.variantRules?.length ? 'Elegir opciones' : added ? 'Agregado al carrito' : product.inStock ? 'Agregar al carrito' : 'Sin stock'}
           style={{
             position: 'absolute', bottom: -18, right: 14, zIndex: 3,
             width: 40, height: 40, borderRadius: '50%',
@@ -346,6 +352,7 @@ export default function ProductCard({ product }) {
             fontFamily: "'Inter', system-ui, sans-serif",
             fontSize: 19, fontWeight: 600, color: T.ink,
           }}>
+            {product.priceFrom && <span style={{ fontSize: '0.72em', fontWeight: 500, marginRight: 5 }}>Desde</span>}
             {fmt(displayPrice)}
           </span>
           <span style={{ fontFamily: "'Inter', system-ui, sans-serif", fontSize: 12, color: T.text3 }}>

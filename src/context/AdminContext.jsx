@@ -230,6 +230,39 @@ export function AdminProvider({ children }) {
     return data
   }, [])
 
+  const previewProductMerge = useCallback(async (productIds) => {
+    const res = await fetch(`${API_BASE}/api/products/merge/preview`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-admin-token': ADMIN_PASSWORD },
+      body: JSON.stringify({ productIds }),
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error || 'No se pudo preparar la unión')
+    return data
+  }, [])
+
+  const mergeInventoryProducts = useCallback(async (payload) => {
+    const res = await fetch(`${API_BASE}/api/products/merge`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-admin-token': ADMIN_PASSWORD },
+      body: JSON.stringify(payload),
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error || 'No se pudieron unir los productos')
+    return data
+  }, [])
+
+  const updateProductVariantRules = useCallback(async (productId, rules) => {
+    const res = await fetch(`${API_BASE}/api/products/${productId}/variant-rules`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', 'x-admin-token': ADMIN_PASSWORD },
+      body: JSON.stringify({ rules }),
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error || 'No se pudieron guardar las variantes')
+    return data
+  }, [])
+
   // ── updateProduct / addProduct / deleteProduct — panel "Productos": editan
   // el mismo registro de Inventario, mapeando la forma del catálogo público
   // (name/price/image/...) a la del backend (name/precio_venta/image_url/...)
@@ -781,6 +814,7 @@ export function AdminProvider({ children }) {
       categoryTree,
       fetchInventory, fetchInventoryItem, createInventoryItem, updateInventoryItem, deleteInventoryItem,
       fetchInventorySelectionIds, applyInventoryBatch,
+      previewProductMerge, mergeInventoryProducts, updateProductVariantRules,
       adjustInventoryStocks, uploadInventoryFile, uploadProductImage,
       parsePriceFile, uploadPriceFiles, rematchPriceLines, applyPriceUpdates,
       searchProducts, parseInvoicePdf, applyInvoiceLines,

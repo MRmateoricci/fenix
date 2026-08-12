@@ -15,7 +15,24 @@ export class InsufficientStockError extends Error {
 // misma orden queda aplicado a medias.
 export async function reserveStock(client, items) {
   for (const item of items) {
-    const { rows } = item.colorKey != null && item.sizeKey != null
+    let rows
+    if (item.variantRuleId) {
+      const result = await client.query(
+        `UPDATE product_variant_rules vr
+         SET stock=stock-$1,updated_at=NOW()
+         WHERE vr.id=$2 AND vr.product_id=$3 AND vr.stock >= $1
+         RETURNING vr.product_id`,
+        [item.quantity, item.variantRuleId, item.id]
+      )
+      rows = result.rows
+      if (rows.length) {
+        await client.query(
+          `UPDATE products SET stock=stock-$1,stock_updated_at=NOW() WHERE id=$2`,
+          [item.quantity, item.id]
+        )
+      }
+    } else {
+      const result = item.colorKey != null && item.sizeKey != null
       ? await client.query(
           `UPDATE products
            SET variant_stock = jsonb_set(variant_stock, $3::text[], to_jsonb((variant_stock #>> $3::text[])::int - $1)),
@@ -32,6 +49,8 @@ export async function reserveStock(client, items) {
            RETURNING stock`,
           [item.quantity, item.id]
         )
+      rows = result.rows
+    }
     if (!rows.length) throw new InsufficientStockError(item.name)
   }
 }
@@ -61,7 +80,17 @@ export async function releaseOrderStock(orderId) {
         // pudo haber sido editado desde la compra). Si no aplica o ya no
         // existe, reponemos solo el total, igual que siempre.
         let released = false
-        if (item.colorKey != null && item.sizeKey != null) {
+        if (item.variantRuleId) {
+          const { rowCount } = await client.query(
+            `UPDATE product_variant_rules SET stock=stock+$1,updated_at=NOW()
+             WHERE id=$2 AND product_id=$3`,
+            [item.quantity, item.variantRuleId, item.id]
+          )
+          if (rowCount) {
+            await client.query('UPDATE products SET stock=stock+$1,stock_updated_at=NOW() WHERE id=$2', [item.quantity, item.id])
+            released = true
+          }
+        } else if (item.colorKey != null && item.sizeKey != null) {
           const { rowCount } = await client.query(
             `UPDATE products
              SET variant_stock = jsonb_set(variant_stock, $3::text[], to_jsonb((variant_stock #>> $3::text[])::int + $1)),

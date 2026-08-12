@@ -8,6 +8,12 @@ import ProductCard from '../components/ProductCard'
 import PageSEO from '../components/SEO'
 import FenixLogo from '../assets/FenixLogo'
 import { SEO as seoCfg } from '../config/seo'
+import {
+  hasMatchingPublicRule,
+  hasPublicAxisFallback,
+  isPublicAxisValueAvailable,
+  resolvePublicVariantRule,
+} from '../utils/productVariants'
 
 const fmt = (n) =>
   new Intl.NumberFormat('es-AR', {
@@ -81,7 +87,13 @@ export default function ProductDetail() {
   const [selectedSize, setSelectedSize] = useState(product?.sizes?.[0] ?? null)
   const [selectedTone, setSelectedTone] = useState(product?.tones?.[0] ?? null)
   const [imgError, setImgError] = useState(false)
-  const selectedPrice = selectedSize?.price != null
+  const hasDefaultColorOption = hasPublicAxisFallback(product?.variantRules, 'color')
+  const ruleSelection = { color: selectedColor?.name, size: selectedSize?.label, tone: selectedTone?.name }
+  const selectedPriceRule = resolvePublicVariantRule(product?.variantRules, ruleSelection, 'price')
+  const selectedStockRule = resolvePublicVariantRule(product?.variantRules, ruleSelection, 'stock')
+  const selectedPrice = selectedPriceRule?.price != null
+    ? Number(selectedPriceRule.price)
+    : selectedSize?.price != null
     ? Number(selectedSize.price)
     : selectedTone?.price != null
       ? Number(selectedTone.price)
@@ -92,17 +104,36 @@ export default function ProductDetail() {
   // Si el producto carga stock por combinación exacta (variantStock no
   // vacío), la disponibilidad depende del color/tono/medida elegidos; si no,
   // sigue siendo el stock único de siempre.
+  const hasRuleStock = (product?.variantRules || []).some(rule => rule.stock != null)
   const hasVariantStock = Object.keys(product?.variantStock || {}).length > 0
   const variantRowKey = combineVariantRowKey(selectedColor?.name, selectedTone?.name)
-  const availableStock = hasVariantStock
+  const availableStock = hasRuleStock
+    ? Number(selectedStockRule?.stock ?? 0)
+    : hasVariantStock
     ? Number(product.variantStock[variantRowKey]?.[selectedSize?.label ?? '_'] ?? 0)
     : (product?.stock ?? 0)
   const variantInStock = availableStock > 0
 
   useEffect(() => {
-    setSelectedColor(product?.colors?.[0] ?? null)
-    setSelectedSize(product?.sizes?.[0] ?? null)
-    setSelectedTone(product?.tones?.[0] ?? null)
+    let nextColor = product?.colors?.[0] ?? null
+    let nextSize = product?.sizes?.[0] ?? null
+    let nextTone = product?.tones?.[0] ?? null
+    if (product?.variantRules?.length) {
+      const colors = hasPublicAxisFallback(product.variantRules, 'color')
+        ? [null, ...(product.colors || [])]
+        : (product.colors?.length ? product.colors : [null])
+      const sizes = product.sizes?.length ? product.sizes : [null]
+      const tones = product.tones?.length ? product.tones : [null]
+      outer: for (const color of colors) for (const size of sizes) for (const tone of tones) {
+        if (hasMatchingPublicRule(product.variantRules, { color: color?.name, size: size?.label, tone: tone?.name })) {
+          nextColor = color; nextSize = size; nextTone = tone
+          break outer
+        }
+      }
+    }
+    setSelectedColor(nextColor)
+    setSelectedSize(nextSize)
+    setSelectedTone(nextTone)
     setImgError(false)
   }, [product?.id])
 
@@ -371,23 +402,52 @@ export default function ProductDetail() {
               </p>
 
               {/* Selector de color */}
-              {product.colors?.length > 0 && (
+              {(product.colors?.length > 0 || hasDefaultColorOption) && (
                 <div>
                   <span style={{
                     fontSize: 14, fontWeight: 500,
                     color: 'var(--color-text)', fontFamily: 'var(--font-sans)',
                     display: 'block', marginBottom: 10,
                   }}>
-                    Color{selectedColor ? `: ${selectedColor.name}` : ''}
+                    Color: {selectedColor?.name || 'Sin color'}
                   </span>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
-                    {product.colors.map((c) => {
+                    {hasDefaultColorOption && (
+                      <button
+                        type="button"
+                        onClick={() => { setSelectedColor(null); setImgError(false) }}
+                        title="Sin color (opción predeterminada)"
+                        aria-label="Sin color"
+                        aria-pressed={!selectedColor}
+                        style={{
+                          width: 34, height: 34, borderRadius: '50%', position: 'relative',
+                          backgroundColor: 'var(--color-bg)', overflow: 'hidden',
+                          border: !selectedColor
+                            ? '2px solid var(--color-text)'
+                            : '2px solid var(--color-border)',
+                          outline: !selectedColor ? '2px solid var(--color-bg)' : 'none',
+                          outlineOffset: !selectedColor ? '-4px' : '0',
+                          boxShadow: !selectedColor ? '0 0 0 1.5px var(--color-text)' : 'none',
+                          cursor: 'pointer', padding: 0,
+                          transition: 'box-shadow .15s, border-color .15s',
+                        }}
+                      >
+                        <span aria-hidden="true" style={{
+                          position: 'absolute', left: '50%', top: 3, bottom: 3, width: 2,
+                          backgroundColor: 'var(--color-text-muted)',
+                          transform: 'translateX(-50%) rotate(45deg)', transformOrigin: 'center',
+                        }} />
+                      </button>
+                    )}
+                    {(product.colors || []).map((c) => {
                       const isSelected = selectedColor?.name === c.name
+                      const enabled = !product.variantRules?.length || isPublicAxisValueAvailable(product.variantRules, 'color', c.name)
                       return (
                         <button
                           key={c.name}
                           type="button"
-                          onClick={() => { setSelectedColor(c); setImgError(false) }}
+                          onClick={() => { if (enabled) { setSelectedColor(c); setImgError(false) } }}
+                          disabled={!enabled}
                           title={c.name}
                           aria-label={c.name}
                           aria-pressed={isSelected}
@@ -400,7 +460,7 @@ export default function ProductDetail() {
                             outline: isSelected ? '2px solid var(--color-bg)' : 'none',
                             outlineOffset: isSelected ? '-4px' : '0',
                             boxShadow: isSelected ? '0 0 0 1.5px var(--color-text)' : 'none',
-                            cursor: 'pointer', padding: 0,
+                            cursor: enabled ? 'pointer' : 'not-allowed', padding: 0, opacity: enabled ? 1 : 0.28,
                             transition: 'box-shadow .15s, border-color .15s',
                           }}
                         />
@@ -423,11 +483,13 @@ export default function ProductDetail() {
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
                     {product.tones.map((t) => {
                       const isSelected = selectedTone?.name === t.name
+                      const enabled = !product.variantRules?.length || isPublicAxisValueAvailable(product.variantRules, 'tone', t.name)
                       return (
                         <button
                           key={t.name}
                           type="button"
-                          onClick={() => setSelectedTone(t)}
+                          onClick={() => { if (enabled) setSelectedTone(t) }}
+                          disabled={!enabled}
                           title={t.name}
                           aria-label={t.name}
                           aria-pressed={isSelected}
@@ -440,7 +502,7 @@ export default function ProductDetail() {
                             outline: isSelected ? '2px solid var(--color-bg)' : 'none',
                             outlineOffset: isSelected ? '-4px' : '0',
                             boxShadow: isSelected ? '0 0 0 1.5px var(--color-text)' : 'none',
-                            cursor: 'pointer', padding: 0,
+                            cursor: enabled ? 'pointer' : 'not-allowed', padding: 0, opacity: enabled ? 1 : 0.28,
                             transition: 'box-shadow .15s, border-color .15s',
                           }}
                         />
@@ -463,11 +525,13 @@ export default function ProductDetail() {
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
                     {product.sizes.map((s) => {
                       const isSelected = selectedSize?.label === s.label
+                      const enabled = !product.variantRules?.length || isPublicAxisValueAvailable(product.variantRules, 'size', s.label)
                       return (
                         <button
                           key={s.label}
                           type="button"
-                          onClick={() => setSelectedSize(s)}
+                          onClick={() => { if (enabled) setSelectedSize(s) }}
+                          disabled={!enabled}
                           aria-pressed={isSelected}
                           style={{
                             padding: '8px 16px', borderRadius: 4,
@@ -475,7 +539,7 @@ export default function ProductDetail() {
                             color: isSelected ? '#fff' : 'var(--color-text)',
                             backgroundColor: isSelected ? 'var(--color-text)' : 'transparent',
                             border: `1.5px solid ${isSelected ? 'var(--color-text)' : 'var(--color-border)'}`,
-                            cursor: 'pointer',
+                            cursor: enabled ? 'pointer' : 'not-allowed', opacity: enabled ? 1 : 0.42,
                             transition: 'background-color .15s, border-color .15s, color .15s',
                           }}
                         >

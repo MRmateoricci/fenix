@@ -11,6 +11,7 @@ import { sendOrderConfirmationNotifications } from '../services/orderNotificatio
 import { PaymentReconciliationError, reconcileMercadoPagoPayment } from '../services/mercadopagoPayments.js'
 import { sendReviewInvitationForOrder } from '../services/reviewInvitations.js'
 import { isValidEmail, normalizeEmail } from '../utils/email.js'
+import { resolveVariantRule, ruleMatches } from '../services/productVariants.js'
 import 'dotenv/config'
 
 const router = Router()
@@ -51,6 +52,30 @@ export function resolveProductVariantPrice(product, selectedColor, selectedSize,
   const basePrice = Number(product?.precio_venta)
   if (!Number.isFinite(basePrice)) return { error: 'missing_price', price: null }
   let price = basePrice
+  const hasOption = (options, key, selected) => !selected || !options.length || options.some(option =>
+    String(option?.[key] || '').localeCompare(String(selected), 'es-AR', { sensitivity: 'base' }) === 0
+  )
+  const availableColors = Array.isArray(product.color_options) ? product.color_options : []
+  const availableSizes = Array.isArray(product.size_options) ? product.size_options : []
+  const availableTones = Array.isArray(product.tone_options) ? product.tone_options : []
+  if (!hasOption(availableColors, 'name', selectedColor)) return { error: 'invalid_color', price: null }
+  if (!hasOption(availableSizes, 'label', selectedSize)) return { error: 'invalid_size', price: null }
+  if (!hasOption(availableTones, 'name', selectedTone)) return { error: 'invalid_tone', price: null }
+  const usdArsRate = Number(product?.usd_ars_rate) || 1510
+  const normalizedRules = (Array.isArray(product?.variant_rules) ? product.variant_rules : []).map(rule => ({
+    ...rule,
+    precio_venta: rule.price_currency === 'USD' && rule.precio_venta_usd != null
+      ? Number(rule.precio_venta_usd) * usdArsRate
+      : rule.precio_venta,
+  }))
+  const priceRule = resolveVariantRule(normalizedRules, {
+    color: selectedColor, size: selectedSize, tone: selectedTone,
+  }, 'precio_venta')
+  if (priceRule?.error) return { error: 'invalid_variant', price: null }
+  if (priceRule) return { error: null, price: Number(priceRule.precio_venta), ruleId: priceRule.id }
+  if (normalizedRules.length && !normalizedRules.some(rule => ruleMatches(rule, {
+    color: selectedColor, size: selectedSize, tone: selectedTone,
+  }))) return { error: 'invalid_variant', price: null }
 
   if (selectedColor) {
     const colors = Array.isArray(product.color_options) ? product.color_options : []
@@ -93,6 +118,13 @@ export function resolveProductVariantPrice(product, selectedColor, selectedSize,
 // producto sí lo usa pero la combinación pedida no es una celda cargada,
 // devuelve error 'invalid_variant'.
 export function resolveVariantStockPath(product, selectedColor, selectedSize, selectedTone) {
+  const normalizedRules = Array.isArray(product?.variant_rules) ? product.variant_rules : []
+  const stockRule = resolveVariantRule(normalizedRules, {
+    color: selectedColor, size: selectedSize, tone: selectedTone,
+  }, 'stock')
+  if (stockRule?.error) return { error: 'invalid_variant' }
+  if (stockRule) return { error: null, variantRuleId: stockRule.id }
+  if (normalizedRules.length) return { error: 'invalid_variant' }
   const variantStock = product?.variant_stock
   const colorKeys = variantStock && typeof variantStock === 'object' ? Object.keys(variantStock) : []
   if (!colorKeys.length) return null
@@ -184,7 +216,11 @@ router.post('/', attachUserIfPresent, async (req, res) => {
     // en lo que manda el cliente (podría mandar cualquier item.price).
     const productIds = items.map((i) => i.id)
     const { rows: dbProducts } = await pool.query(
-      `SELECT id, precio_venta, color_options, size_options, tone_options, variant_stock FROM products WHERE id = ANY($1::uuid[])`,
+      `SELECT products.id, precio_venta, color_options, size_options, tone_options, variant_stock,
+              COALESCE((SELECT usd_ars_rate FROM store_settings WHERE id=1),1510) AS usd_ars_rate,
+              COALESCE((SELECT jsonb_agg(to_jsonb(vr)) FROM product_variant_rules vr
+                        WHERE vr.product_id=products.id), '[]'::jsonb) AS variant_rules
+       FROM products WHERE id = ANY($1::uuid[])`,
       [productIds]
     )
     const productMap = new Map(dbProducts.map((p) => [p.id, p]))
@@ -205,6 +241,9 @@ router.post('/', attachUserIfPresent, async (req, res) => {
       if (resolvedPrice.error === 'invalid_size') {
         return res.status(400).json({ error: `Medida no disponible para ${i.name || i.id}` })
       }
+      if (resolvedPrice.error === 'invalid_variant') {
+        return res.status(400).json({ error: `Combinación ambigua o no disponible para ${i.name || i.id}` })
+      }
       const variantPath = resolveVariantStockPath(dbProduct, i.color, i.size, i.tone)
       if (variantPath?.error === 'invalid_variant') {
         return res.status(400).json({ error: `Combinación no disponible para ${i.name || i.id}` })
@@ -224,6 +263,7 @@ router.post('/', attachUserIfPresent, async (req, res) => {
         tone:     i.tone || null,
         colorKey: variantPath ? variantPath.colorKey : null,
         sizeKey:  variantPath ? variantPath.sizeKey : null,
+        variantRuleId: variantPath?.variantRuleId || null,
       })
     }
     const productsTotal = itemsSnapshot.reduce((sum, i) => sum + i.subtotal, 0)
