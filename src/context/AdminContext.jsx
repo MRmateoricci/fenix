@@ -83,6 +83,11 @@ export function AdminProvider({ children }) {
   const [productTypes, setProductTypes]          = useState([])
   const [categoryCustomizations, setCategoryCustomizations] = useState([])
 
+  // ── Cupones de descuento ──────────────────────────────────────────────────
+  const [coupons, setCoupons]           = useState([])
+  const [couponsLoading, setCouponsLoading] = useState(false)
+  const [couponsError, setCouponsError] = useState(null)
+
   // ── fetchCatalog — trae el catálogo público publicado (sin auth) ─────────
   const fetchCatalog = useCallback(async () => {
     setProductsLoading(true)
@@ -834,6 +839,62 @@ export function AdminProvider({ children }) {
     }
   }, [])
 
+  // ── fetchCoupons/createCoupon/updateCoupon/deleteCoupon ──────────────────
+  const fetchCoupons = useCallback(async () => {
+    setCouponsLoading(true)
+    setCouponsError(null)
+    try {
+      const res = await fetch(`${API_BASE}/api/coupons`, {
+        headers: { 'x-admin-token': ADMIN_PASSWORD },
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'No se pudieron cargar los cupones')
+      setCoupons(data)
+      return data
+    } catch (err) {
+      setCouponsError(err.message)
+      return []
+    } finally {
+      setCouponsLoading(false)
+    }
+  }, [])
+
+  const createCoupon = useCallback(async (payload) => {
+    const res = await fetch(`${API_BASE}/api/coupons`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-admin-token': ADMIN_PASSWORD },
+      body: JSON.stringify(payload),
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error || 'No se pudo crear el cupón')
+    setCoupons(current => [data, ...current])
+    return data
+  }, [])
+
+  const updateCoupon = useCallback(async (id, changes) => {
+    const res = await fetch(`${API_BASE}/api/coupons/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', 'x-admin-token': ADMIN_PASSWORD },
+      body: JSON.stringify(changes),
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error || 'No se pudo editar el cupón')
+    setCoupons(current => current.map(c => c.id === id ? data : c))
+    return data
+  }, [])
+
+  const deleteCoupon = useCallback(async (id) => {
+    const res = await fetch(`${API_BASE}/api/coupons/${id}`, {
+      method: 'DELETE',
+      headers: { 'x-admin-token': ADMIN_PASSWORD },
+    })
+    if (!res.ok && res.status !== 204) {
+      const data = await res.json().catch(() => ({}))
+      throw new Error(data.error || 'No se pudo eliminar el cupón')
+    }
+    setCoupons(current => current.filter(c => c.id !== id))
+  }, [])
+
   return (
     <AdminContext.Provider value={{
       isAdmin, products, productsLoading, productsError, fetchCatalog,
@@ -849,6 +910,7 @@ export function AdminProvider({ children }) {
       productTypes, fetchProductTypes, createProductType, updateProductType, deleteProductType,
       categoryCustomizations, saveCategoryCustomization,
       categoryTree,
+      coupons, couponsLoading, couponsError, fetchCoupons, createCoupon, updateCoupon, deleteCoupon,
       fetchInventory, fetchInventoryItem, createInventoryItem, updateInventoryItem, deleteInventoryItem,
       fetchInventorySelectionIds, applyInventoryBatch,
       previewProductMerge, mergeInventoryProducts, updateProductVariantRules, detachProductVariant,

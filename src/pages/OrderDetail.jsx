@@ -75,6 +75,9 @@ export default function OrderDetail() {
             </div>
             <div className="fnx-order-totals">
               <div><span>Subtotal</span><strong>{fmt(productsSubtotal)}</strong></div>
+              {Number(order.discount_amount) > 0 && (
+                <div><span>Descuento{order.coupon_code ? ` · ${order.coupon_code}` : ''}</span><strong>-{fmt(order.discount_amount)}</strong></div>
+              )}
               <div><span>{order.delivery_type === 'pickup' ? 'Retiro en el local' : `Envío${order.shipping_service ? ` · ${order.shipping_service}` : ''}`}</span><strong>{Number(order.shipping_cost) ? fmt(order.shipping_cost) : 'Gratis'}</strong></div>
               <div className="total"><span>Total</span><strong>{fmt(order.total_amount)}</strong></div>
             </div>

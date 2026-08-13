@@ -3,21 +3,23 @@ import { useNavigate } from 'react-router-dom'
 import { useCart } from '../context/CartContext'
 
 const T = {
-  paper:    '#F7F4EF',
-  panel:    '#FBF8F3',
-  hairline: '#DED6C7',
+  paper:         '#F7F4EF',
+  panel:         '#FBF8F3',
+  hairline:      '#DED6C7',
+  hairlineStrong: '#C9BFAF',
   ink:      '#16110B',
   ink2:     '#2A2118',
   muted:    '#8A8175',
   muted2:   '#9A917F',
   red:      '#CC0000',
+  green:    '#1E8A4C',
 }
 
 const fmt = (n) =>
   new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(n)
 
 export default function CartDrawer({ open, onClose }) {
-  const { items, removeItem, updateQuantity, totalPrice, dni, setDni } = useCart()
+  const { items, removeItem, updateQuantity, totalPrice, dni, setDni, shippingConfig } = useCart()
   const navigate = useNavigate()
   const [dniTouched, setDniTouched] = useState(false)
   const validDni = /^\d{7,8}$/.test(dni)
@@ -98,6 +100,10 @@ export default function CartDrawer({ open, onClose }) {
             </svg>
           </button>
         </div>
+
+        {items.length > 0 && (
+          <FreeShippingProgress totalPrice={totalPrice} shippingConfig={shippingConfig} onViewZones={() => goTo('/policies/shipping')} />
+        )}
 
         {/* Items */}
         <div style={{ flex: 1, overflowY: 'auto' }}>
@@ -218,6 +224,125 @@ export default function CartDrawer({ open, onClose }) {
         )}
       </aside>
     </>
+  )
+}
+
+function FreeShippingProgress({ totalPrice, shippingConfig, onViewZones }) {
+  if (!shippingConfig) return null
+  const { freeShippingThreshold: threshold } = shippingConfig
+  if (!threshold) return null
+
+  const reached = totalPrice >= threshold
+  const pct = Math.min(100, (totalPrice / threshold) * 100)
+  const routeColor = reached ? T.green : T.red
+
+  return (
+    <div style={{ padding: '16px 28px 0', flexShrink: 0 }}>
+      <style>{`
+        @media (prefers-reduced-motion: reduce) {
+          .fnx-ship-truck, .fnx-ship-fill { transition: none !important; }
+        }
+      `}</style>
+
+      <div aria-live="polite">
+        <p style={{
+          margin: '0 0 9px', fontFamily: 'var(--font-sans)', fontSize: 12,
+          color: reached ? T.ink : T.ink2, lineHeight: 1.4,
+          display: 'flex', alignItems: 'center', gap: 6,
+        }}>
+          {reached ? (
+            <>
+              <CheckIcon color={T.green} />
+              <span style={{ fontWeight: 500 }}>Tenés envío gratis</span>
+              ·{' '}
+              <button
+                type="button"
+                onClick={onViewZones}
+                style={{
+                  background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+                  color: T.red, fontSize: 12, textDecoration: 'underline',
+                  fontFamily: 'var(--font-sans)',
+                }}
+              >
+                Ver zonas de envío
+              </button>
+            </>
+          ) : (
+            <>Te faltan <strong>{fmt(threshold - totalPrice)}</strong> para el envío gratis</>
+          )}
+        </p>
+      </div>
+
+      <div
+        role="progressbar"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={Math.round(pct)}
+        aria-label={reached ? 'Envío gratis alcanzado' : `Progreso hacia el envío gratis: ${Math.round(pct)}%`}
+        style={{ position: 'relative', height: 30, marginBottom: 16 }}
+      >
+        {/* Ruta de fondo */}
+        <div aria-hidden="true" style={{
+          position: 'absolute', top: 21, left: 0, width: '100%',
+          height: 3, borderRadius: 2, background: T.hairlineStrong, opacity: .45,
+        }} />
+
+        {/* Tramo recorrido */}
+        <div className="fnx-ship-fill" aria-hidden="true" style={{
+          position: 'absolute', top: 21, left: 0, height: 3, borderRadius: 2,
+          width: `${pct}%`, background: routeColor,
+          transition: 'width 450ms cubic-bezier(.34,1.2,.64,1)',
+        }} />
+
+        {/* Camión */}
+        <div className="fnx-ship-truck" aria-hidden="true" style={{
+          position: 'absolute', top: 0, left: `${pct}%`, transform: 'translateX(-50%)',
+          color: routeColor, transition: 'left 450ms cubic-bezier(.34,1.2,.64,1)',
+          display: 'flex',
+        }}>
+          <TruckIcon />
+        </div>
+
+        {/* Pin de destino */}
+        <div aria-hidden="true" style={{
+          position: 'absolute', top: 12, right: -2, color: reached ? T.green : T.muted,
+        }}>
+          <PinIcon />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function TruckIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="1" y="4" width="14" height="12" />
+      <path d="M15 8h4l3 3v5h-7V8Z" />
+      <circle cx="5.5" cy="18.5" r="2" />
+      <circle cx="17.5" cy="18.5" r="2" />
+    </svg>
+  )
+}
+
+function PinIcon() {
+  return (
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0Z" />
+      <circle cx="12" cy="10" r="3" />
+    </svg>
+  )
+}
+
+function CheckIcon({ color }) {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"
+      stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="10" />
+      <path d="m8.5 12.5 2.5 2.5 5-5.5" />
+    </svg>
   )
 }
 

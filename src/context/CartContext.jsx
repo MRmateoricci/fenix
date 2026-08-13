@@ -4,6 +4,7 @@ const CartContext = createContext(null)
 
 const STORAGE_KEY = 'fenix_cart'
 const DNI_STORAGE_KEY = 'fenix_checkout_dni'
+const API_BASE = import.meta.env.VITE_API_URL || ''
 
 // Dos líneas de carrito son "la misma" si comparten producto, color, tono y
 // medida elegidos. Productos sin color/tono/medida (undefined/null) siguen
@@ -56,6 +57,9 @@ export function CartProvider({ children }) {
   })
   const [dni, setDniState] = useState(() => localStorage.getItem(DNI_STORAGE_KEY) || '')
   const [lastAdded, setLastAdded] = useState(null)
+  // Umbral y zonas de envío gratis: nunca hardcodeados en el frontend, se
+  // reciben del backend (única fuente de verdad, configurable por env var).
+  const [shippingConfig, setShippingConfig] = useState(null)
 
   useEffect(() => {
     try {
@@ -64,6 +68,15 @@ export function CartProvider({ children }) {
       // storage quota exceeded — ignore
     }
   }, [items])
+
+  useEffect(() => {
+    let cancelled = false
+    fetch(`${API_BASE}/api/shipping/config`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => { if (!cancelled && data) setShippingConfig(data) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [])
 
   function addItem(product) {
     dispatch({ type: 'ADD_ITEM', product })
@@ -95,6 +108,7 @@ export function CartProvider({ children }) {
     <CartContext.Provider value={{
       items, addItem, removeItem, updateQuantity, clearCart, totalItems, totalPrice,
       dni, setDni, lastAdded, dismissAddedNotification: () => setLastAdded(null),
+      shippingConfig,
     }}>
       {children}
     </CartContext.Provider>

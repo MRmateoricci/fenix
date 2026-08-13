@@ -6,20 +6,57 @@ export const SHIPPING_SERVICES = [
   { id: 'expreso', label: 'Expreso' },
 ]
 
+// Zonas por rango de CP — misma tabla que backend/config/shipping.js. Si
+// cambiás precios/zonas acá, replicá el cambio ahí también.
 export const SHIPPING_ZONES = [
   {
-    id: 'local',
-    label: 'Envío local',
-    description: 'Código postal 1894',
+    id: 'gran_la_plata',
+    label: 'Envío local · Gran La Plata',
+    description: 'La Plata y alrededores',
     prices: { expreso: 13219, clasico: 12020 },
-    postalCodes: ['1894'],
+    postalCodeRanges: [[1884, 1936]],
   },
   {
-    id: 'nacional_estandar',
-    label: 'Envío nacional estándar',
-    description: 'Tarifa nacional para paquete estándar',
+    id: 'caba',
+    label: 'Envío CABA',
+    description: 'Ciudad Autónoma de Buenos Aires',
+    prices: { expreso: 18600, clasico: 13500 },
+    postalCodeRanges: [[1000, 1499]],
+  },
+  {
+    id: 'gba',
+    label: 'Envío GBA',
+    description: 'Gran Buenos Aires',
+    prices: { expreso: 19700, clasico: 14300 },
+    postalCodeRanges: [[1500, 1883], [1937, 1999]],
+  },
+  {
+    id: 'centro_litoral_cuyo',
+    label: 'Envío Centro, Litoral y Cuyo',
+    description: 'Córdoba, Santa Fe, Entre Ríos, Mendoza, San Juan, San Luis',
     prices: { expreso: 21941, clasico: 15957 },
-    postalCodes: ['1000', '2000', '5000', '7600'],
+    postalCodeRanges: [[2000, 3399], [5000, 5999]],
+  },
+  {
+    id: 'interior_ba_pampa',
+    label: 'Envío Interior de Buenos Aires y La Pampa',
+    description: 'Interior de la provincia de Buenos Aires y La Pampa',
+    prices: { expreso: 23000, clasico: 16700 },
+    postalCodeRanges: [[6000, 8199]],
+  },
+  {
+    id: 'norte',
+    label: 'Envío Norte (NOA y NEA)',
+    description: 'Salta, Jujuy, Tucumán, Catamarca, Santiago del Estero, Chaco, Formosa, Corrientes, Misiones',
+    prices: { expreso: 27400, clasico: 19900 },
+    postalCodeRanges: [[3400, 4999]],
+  },
+  {
+    id: 'patagonia',
+    label: 'Envío Patagonia',
+    description: 'La Pampa sur, Neuquén, Río Negro, Chubut, Santa Cruz, Tierra del Fuego',
+    prices: { expreso: 35100, clasico: 25500 },
+    postalCodeRanges: [[8200, 9999]],
   },
 ]
 
@@ -47,8 +84,12 @@ export function normalizePostalCode(value) {
 export function getShippingForCP(postalCode, service = 'clasico') {
   const normalized = normalizePostalCode(postalCode)
   if (normalized.length < 4) return null
+  const num = Number(normalized)
+  if (Number.isNaN(num)) return SHIPPING_FALLBACK
 
-  const zone = SHIPPING_ZONES.find(({ postalCodes }) => postalCodes.includes(normalized))
+  const zone = SHIPPING_ZONES.find(({ postalCodeRanges }) =>
+    postalCodeRanges.some(([from, to]) => num >= from && num <= to)
+  )
   if (!zone || zone.prices[service] == null) return SHIPPING_FALLBACK
 
   return { ...zone, service, price: zone.prices[service] }

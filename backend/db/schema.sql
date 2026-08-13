@@ -480,3 +480,36 @@ CREATE TABLE IF NOT EXISTS category_tree_customizations (
   updated_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
   UNIQUE (level, category, subcategory, name)
 );
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Cupones de descuento (código ingresado en el checkout). El código se guarda
+-- tal cual lo cargó el admin, pero la unicidad y las búsquedas son
+-- case-insensitive (UPPER(code)) para no depender de cómo lo tipee el cliente.
+-- ─────────────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS coupons (
+  id           UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
+  code         VARCHAR(40)   NOT NULL,
+  type         VARCHAR(10)   NOT NULL CHECK (type IN ('percentage', 'fixed')),
+  value        NUMERIC(12,2) NOT NULL CHECK (value > 0),
+  active       BOOLEAN       NOT NULL DEFAULT TRUE,
+  min_purchase NUMERIC(12,2) CHECK (min_purchase IS NULL OR min_purchase >= 0),
+  usage_limit  INTEGER       CHECK (usage_limit IS NULL OR usage_limit > 0),
+  times_used   INTEGER       NOT NULL DEFAULT 0,
+  expires_at   TIMESTAMPTZ,
+  created_at   TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+  updated_at   TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+  CONSTRAINT coupons_percentage_max CHECK (type <> 'percentage' OR value <= 100)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_coupons_code_upper ON coupons(UPPER(code));
+
+DROP TRIGGER IF EXISTS coupons_updated_at ON coupons;
+CREATE TRIGGER coupons_updated_at
+  BEFORE UPDATE ON coupons
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+-- Cupón aplicado a un pedido, si hubo. discount_amount ya está restado de
+-- total_amount — se persiste aparte para poder mostrarlo desglosado en el
+-- detalle del pedido y en el panel de admin.
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS coupon_code VARCHAR(40);
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS discount_amount NUMERIC(12,2) NOT NULL DEFAULT 0;

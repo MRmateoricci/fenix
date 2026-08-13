@@ -115,6 +115,13 @@ const TagIcon = () => (
   </svg>
 )
 
+const TicketIcon = () => (
+  <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" strokeWidth="1.4" style={{ flexShrink: 0 }}>
+    <path d="M1.5 5.3c.9 0 1.6.7 1.6 1.7s-.7 1.7-1.6 1.7v2.6c0 .6.5 1.1 1.1 1.1h9.8c.6 0 1.1-.5 1.1-1.1V8.7c-.9 0-1.6-.7-1.6-1.7s.7-1.7 1.6-1.7V3.7c0-.6-.5-1.1-1.1-1.1H2.6c-.6 0-1.1.5-1.1 1.1z" strokeLinejoin="round"/>
+    <line x1="6" y1="2.6" x2="6" y2="11.4" strokeDasharray="1.3 1.3" strokeLinecap="round"/>
+  </svg>
+)
+
 // ── Toggle ────────────────────────────────────────────────────────────────────
 function Toggle({ value, onChange, size = 'md' }) {
   const w = size === 'sm' ? 32 : 40
@@ -3041,6 +3048,210 @@ function OperationalOrdersSection({ title, subtitle, orders, emptyText, type, on
         </div>
       )}
     </section>
+  )
+}
+
+// ── CouponsTab ────────────────────────────────────────────────────────────────
+const EMPTY_COUPON_FORM = { code: '', type: 'percentage', value: '', minPurchase: '', usageLimit: '', expiresAt: '' }
+
+function CouponsTab() {
+  const { coupons, couponsLoading, couponsError, fetchCoupons, createCoupon, updateCoupon, deleteCoupon } = useAdmin()
+  const [form, setForm]       = useState(EMPTY_COUPON_FORM)
+  const [creating, setCreating] = useState(false)
+  const [formError, setFormError] = useState('')
+  const [msg, setMsg]         = useState('')
+  const [busyIds, setBusyIds] = useState(() => new Set())
+
+  useEffect(() => { fetchCoupons() }, [fetchCoupons])
+
+  const notify = (text) => {
+    setMsg(text)
+    setTimeout(() => setMsg(''), 3000)
+  }
+
+  const setBusy = (id, busy) => setBusyIds(current => {
+    const next = new Set(current)
+    if (busy) next.add(id); else next.delete(id)
+    return next
+  })
+
+  async function handleCreate(e) {
+    e.preventDefault()
+    setFormError('')
+    const code = form.code.trim().toUpperCase()
+    const value = Number(form.value)
+    if (!code) return setFormError('Ingresá un código')
+    if (!Number.isFinite(value) || value <= 0) return setFormError('El valor debe ser mayor a 0')
+    if (form.type === 'percentage' && value > 100) return setFormError('El porcentaje no puede superar 100')
+
+    setCreating(true)
+    try {
+      await createCoupon({
+        code,
+        type: form.type,
+        value,
+        minPurchase: form.minPurchase || null,
+        usageLimit: form.usageLimit || null,
+        expiresAt: form.expiresAt ? new Date(form.expiresAt).toISOString() : null,
+      })
+      setForm(EMPTY_COUPON_FORM)
+      notify(`✓ Cupón "${code}" creado.`)
+    } catch (err) {
+      setFormError(err.message)
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  async function toggleActive(coupon) {
+    setBusy(coupon.id, true)
+    try {
+      await updateCoupon(coupon.id, { active: !coupon.active })
+    } catch (err) {
+      notify(err.message)
+    } finally {
+      setBusy(coupon.id, false)
+    }
+  }
+
+  async function handleDelete(coupon) {
+    if (!window.confirm(`¿Eliminar el cupón "${coupon.code}"? Esta acción no se puede deshacer.`)) return
+    setBusy(coupon.id, true)
+    try {
+      await deleteCoupon(coupon.id)
+      notify(`Cupón "${coupon.code}" eliminado.`)
+    } catch (err) {
+      notify(err.message)
+      setBusy(coupon.id, false)
+    }
+  }
+
+  return (
+    <div>
+      <h3 style={sectionTitle}>Crear cupón</h3>
+      <form onSubmit={handleCreate} style={{
+        background: C.white, borderRadius: 10, border: `1px solid ${C.border}`,
+        padding: '20px 24px', marginBottom: 28,
+      }}>
+        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 5, width: 160 }}>
+            <label style={lbl}>Código</label>
+            <input
+              type="text"
+              value={form.code}
+              onChange={e => setForm(f => ({ ...f, code: e.target.value }))}
+              placeholder="BIENVENIDA10"
+              style={{ ...inp, textTransform: 'uppercase' }}
+            />
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 5, width: 140 }}>
+            <label style={lbl}>Tipo</label>
+            <select value={form.type} onChange={e => setForm(f => ({ ...f, type: e.target.value }))} style={inp}>
+              <option value="percentage">Porcentaje</option>
+              <option value="fixed">Monto fijo</option>
+            </select>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 5, width: 120 }}>
+            <label style={lbl}>{form.type === 'percentage' ? 'Valor (%)' : 'Valor ($)'}</label>
+            <input
+              type="number" min="0" step={form.type === 'percentage' ? '1' : '0.01'}
+              value={form.value}
+              onChange={e => setForm(f => ({ ...f, value: e.target.value }))}
+              placeholder={form.type === 'percentage' ? '10' : '5000'}
+              style={inp}
+            />
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 5, width: 140 }}>
+            <label style={lbl}>Compra mínima (opcional)</label>
+            <input
+              type="number" min="0" step="0.01"
+              value={form.minPurchase}
+              onChange={e => setForm(f => ({ ...f, minPurchase: e.target.value }))}
+              placeholder="$0"
+              style={inp}
+            />
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 5, width: 120 }}>
+            <label style={lbl}>Límite de usos (opcional)</label>
+            <input
+              type="number" min="1" step="1"
+              value={form.usageLimit}
+              onChange={e => setForm(f => ({ ...f, usageLimit: e.target.value }))}
+              placeholder="Ilimitado"
+              style={inp}
+            />
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 5, width: 160 }}>
+            <label style={lbl}>Vence (opcional)</label>
+            <input
+              type="date"
+              value={form.expiresAt}
+              onChange={e => setForm(f => ({ ...f, expiresAt: e.target.value }))}
+              style={inp}
+            />
+          </div>
+          <button type="submit" disabled={creating} style={{ ...solidBtn, background: C.red, color: C.white, opacity: creating ? 0.6 : 1 }}>
+            {creating ? 'Creando...' : 'Crear cupón'}
+          </button>
+        </div>
+        {formError && <p style={{ color: C.red, fontSize: 12, margin: '12px 0 0' }}>{formError}</p>}
+        {msg && <p style={{ color: C.green, fontSize: 12, margin: '12px 0 0' }}>{msg}</p>}
+      </form>
+
+      <h3 style={sectionTitle}>
+        Cupones{coupons.length > 0 ? <span style={{ fontFamily: ADMIN_FONT }}> ({coupons.length})</span> : ''}
+      </h3>
+      {couponsError && <p style={{ color: C.red, fontSize: 12.5 }}>{couponsError}</p>}
+      {couponsLoading ? (
+        <p style={{ color: C.muted, fontSize: 13 }}>Cargando cupones...</p>
+      ) : coupons.length === 0 ? (
+        <div style={{
+          background: C.white, borderRadius: 10, border: `1px solid ${C.border}`,
+          padding: '32px 20px', textAlign: 'center', color: C.muted, fontSize: 14,
+        }}>
+          No hay cupones creados todavía.
+        </div>
+      ) : (
+        <div style={{ background: C.white, borderRadius: 10, border: `1px solid ${C.border}`, overflow: 'hidden' }}>
+          {coupons.map((c, i) => {
+            const expired = c.expires_at && new Date(c.expires_at) < new Date()
+            const limitReached = c.usage_limit != null && c.times_used >= c.usage_limit
+            return (
+              <div key={c.id} style={{
+                display: 'flex', alignItems: 'center', gap: 14, padding: '14px 20px',
+                borderBottom: i < coupons.length - 1 ? `1px solid ${C.hairline}` : 'none',
+                opacity: busyIds.has(c.id) ? 0.5 : 1,
+              }}>
+                <div style={{ flex: 1, minWidth: 140 }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 700, color: C.ink, letterSpacing: '0.03em' }}>{c.code}</div>
+                  <div style={{ fontSize: 12, color: C.text3 }}>
+                    {c.type === 'percentage' ? `${Number(c.value)}% de descuento` : `${fmt(Number(c.value))} de descuento`}
+                    {c.min_purchase != null ? ` · mín. ${fmt(Number(c.min_purchase))}` : ''}
+                  </div>
+                </div>
+                <div style={{ fontSize: 12, color: C.text3, minWidth: 90, textAlign: 'right' }}>
+                  {c.times_used}{c.usage_limit != null ? ` / ${c.usage_limit}` : ''} usos
+                </div>
+                <div style={{ fontSize: 12, color: expired ? C.red : C.text3, minWidth: 110, textAlign: 'right' }}>
+                  {c.expires_at ? `Vence ${new Date(c.expires_at).toLocaleDateString('es-AR')}` : 'Sin vencimiento'}
+                </div>
+                {(expired || limitReached) && (
+                  <span style={pill(C.redLight, C.red)}>{expired ? 'Vencido' : 'Sin usos'}</span>
+                )}
+                <Toggle value={c.active} onChange={() => toggleActive(c)} size="sm" />
+                <button
+                  onClick={() => handleDelete(c)}
+                  title="Eliminar cupón"
+                  style={{ ...iconBtn, background: C.redLight, color: C.red, flexShrink: 0 }}
+                >
+                  ✕
+                </button>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -7393,6 +7604,7 @@ const NAV_ITEMS = [
   { id: 'categories',   label: 'Categorías',     Icon: FolderIcon },
   { id: 'store',        label: 'Tienda',         Icon: StoreIcon },
   { id: 'offers',       label: 'Ofertas',        Icon: TagIcon },
+  { id: 'coupons',      label: 'Cupones',        Icon: TicketIcon },
   { id: 'orders',       label: 'Pedidos',        Icon: ClipboardIcon },
 ]
 
@@ -7534,6 +7746,9 @@ export default function AdminDashboard() {
             products={products}
             onUpdate={updateProduct}
           />
+        )}
+        {tab === 'coupons' && (
+          <CouponsTab />
         )}
         {tab === 'orders' && (
           <OrdersTab />

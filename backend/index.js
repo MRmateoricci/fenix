@@ -18,6 +18,7 @@ import catalogRouter  from './routes/catalog.js'
 import googleReviewsRouter from './routes/googleReviews.js'
 import shippingRouter from './routes/shipping.js'
 import newsletterRouter from './routes/newsletter.js'
+import couponsRouter from './routes/coupons.js'
 import { uploadsDir } from './config/uploads.js'
 import { createCorsOptionsDelegate } from './config/cors.js'
 import { startExpireReservationsJob } from './jobs/expireReservations.js'
@@ -68,6 +69,7 @@ app.use('/api/catalog',  catalogRouter)
 app.use('/api/google-reviews', googleReviewsRouter)
 app.use('/api/shipping', shippingRouter)
 app.use('/api/newsletter', newsletterRouter)
+app.use('/api/coupons', couponsRouter)
 
 // Mercado Pago no acepta back_urls con localhost. En desarrollo la preferencia
 // vuelve primero por APP_BASE_URL (por ejemplo, ngrok) y este puente redirige

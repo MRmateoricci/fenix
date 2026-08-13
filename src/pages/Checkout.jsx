@@ -72,7 +72,7 @@ function validateBilling(d) {
 // ═══════════════════════════════════════════════════════════════════════════════
 export default function Checkout() {
   const navigate = useNavigate()
-  const { items, totalPrice, clearCart, dni, setDni } = useCart()
+  const { items, totalPrice, clearCart, dni, setDni, shippingConfig } = useCart()
   const { user, authLoading, updateProfile, logout } = useAuth()
   const [step, setStep]             = useState(1)
   const [errors, setErrors]         = useState({})
@@ -83,6 +83,10 @@ export default function Checkout() {
   const [authResolved, setAuthResolved] = useState(false)
   const [emailChecking, setEmailChecking] = useState(false)
   const [accountLoginRequired, setAccountLoginRequired] = useState(false)
+  const [discountCode, setDiscountCode] = useState('')
+  const [appliedCoupon, setAppliedCoupon] = useState(null)
+  const [couponChecking, setCouponChecking] = useState(false)
+  const [couponError, setCouponError] = useState(null)
 
   const [formData, setFormData] = useState({
     nombre:       user?.firstName  || '',
@@ -166,8 +170,37 @@ export default function Checkout() {
         price: deliveryEstimate.zone.cost,
       }
     : localShippingZone
-  const shippingCost = shippingZone?.price ?? null
-  const orderTotal   = shippingCost != null ? totalPrice + shippingCost : totalPrice
+  const shippingCost   = shippingZone?.price ?? null
+  const discountAmount = appliedCoupon?.discountAmount || 0
+  const orderTotal     = (shippingCost != null ? totalPrice + shippingCost : totalPrice) - discountAmount
+
+  async function handleApplyCoupon() {
+    const code = discountCode.trim()
+    if (!code) return
+    setCouponChecking(true)
+    setCouponError(null)
+    try {
+      const res = await fetch(`${API_BASE}/api/coupons/validate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code, subtotal: totalPrice }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || 'No pudimos validar el código')
+      setAppliedCoupon(data)
+      setDiscountCode('')
+    } catch (err) {
+      setAppliedCoupon(null)
+      setCouponError(err.message || 'No pudimos validar el código')
+    } finally {
+      setCouponChecking(false)
+    }
+  }
+
+  function handleRemoveCoupon() {
+    setAppliedCoupon(null)
+    setCouponError(null)
+  }
 
   // Estimación de entrega (Correo Argentino + margen de stock) — solo tiene
   // sentido pedirla cuando la zona ya resolvió a un costo concreto.
@@ -192,6 +225,7 @@ export default function Checkout() {
         const params = new URLSearchParams({
           postalCode: cp,
           service: formData.shippingService,
+          subtotal: String(totalPrice),
         })
         const res = await fetch(`${API_BASE}/api/shipping/estimate?${params}`, {
           signal: controller.signal,
@@ -208,7 +242,7 @@ export default function Checkout() {
       clearTimeout(t)
       controller.abort()
     }
-  }, [formData.deliveryType, formData.codigoPostal, formData.shippingService])
+  }, [formData.deliveryType, formData.codigoPostal, formData.shippingService, totalPrice])
 
   function setField(key, value) {
     const normalizedValue = key === 'dni' ? value.replace(/\D/g, '').slice(0, 8) : value
@@ -348,7 +382,7 @@ export default function Checkout() {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ customer: formData, items }),
+        body: JSON.stringify({ customer: formData, items, discountCode: appliedCoupon?.code || undefined }),
       })
       if (!res.ok) {
         const data = await res.json().catch(() => ({}))
@@ -413,7 +447,23 @@ export default function Checkout() {
 
         <div className="fnx-checkout-layout">
           <aside className="fnx-checkout-summary-column">
-            <OrderSummary items={items} totalPrice={totalPrice} deliveryType={formData.deliveryType} shippingZone={shippingZone} shippingCost={shippingCost} orderTotal={orderTotal} />
+            <OrderSummary
+              items={items}
+              totalPrice={totalPrice}
+              deliveryType={formData.deliveryType}
+              shippingZone={shippingZone}
+              shippingCost={shippingCost}
+              orderTotal={orderTotal}
+              shippingConfig={shippingConfig}
+              discountCode={discountCode}
+              onDiscountCodeChange={setDiscountCode}
+              appliedCoupon={appliedCoupon}
+              discountAmount={discountAmount}
+              couponChecking={couponChecking}
+              couponError={couponError}
+              onApplyCoupon={handleApplyCoupon}
+              onRemoveCoupon={handleRemoveCoupon}
+            />
           </aside>
 
           <main className="fnx-checkout-step-column">
@@ -1108,7 +1158,13 @@ function BillingAddress({ formData, errors, setField }) {
 }
 
 // ─── Order Summary ─────────────────────────────────────────────────────────────
-function OrderSummary({ items, totalPrice, deliveryType, shippingZone, shippingCost, orderTotal }) {
+function OrderSummary({
+  items, totalPrice, deliveryType, shippingZone, shippingCost, orderTotal, shippingConfig,
+  discountCode, onDiscountCodeChange, appliedCoupon, discountAmount, couponChecking, couponError,
+  onApplyCoupon, onRemoveCoupon,
+}) {
+  const showFreeShippingNote =
+    deliveryType === 'delivery' && shippingCost != null && shippingCost > 0 && shippingConfig?.freeShippingThreshold
   return (
     <div
       style={{
@@ -1201,16 +1257,47 @@ function OrderSummary({ items, totalPrice, deliveryType, shippingZone, shippingC
         ))}
       </ul>
 
-      <div className="fnx-checkout-discount">
-        <input type="text" placeholder="Código de descuento" aria-label="Código de descuento" />
-        <button type="button" disabled>Aplicar</button>
-      </div>
+      {appliedCoupon ? (
+        <div className="fnx-checkout-discount fnx-checkout-discount-applied">
+          <span>
+            Código <strong>{appliedCoupon.code}</strong> aplicado
+            {appliedCoupon.type === 'percentage' ? ` (-${appliedCoupon.value}%)` : ''}
+          </span>
+          <button type="button" onClick={onRemoveCoupon}>Quitar</button>
+        </div>
+      ) : (
+        <div className="fnx-checkout-discount">
+          <input
+            type="text"
+            placeholder="Código de descuento"
+            aria-label="Código de descuento"
+            value={discountCode}
+            onChange={(e) => onDiscountCodeChange(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); onApplyCoupon() } }}
+            disabled={couponChecking}
+          />
+          <button type="button" onClick={onApplyCoupon} disabled={couponChecking || !discountCode.trim()}>
+            {couponChecking ? '...' : 'Aplicar'}
+          </button>
+        </div>
+      )}
+      {couponError && (
+        <p style={{ margin: '-0.375rem 0 0.5rem', padding: '0 1.5rem', fontSize: '0.75rem', color: '#b91c1c' }}>
+          {couponError}
+        </p>
+      )}
 
       <div style={{ padding: '0 1.5rem', borderBottom: '1px solid var(--color-border)' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.75rem 0', fontSize: '0.875rem', color: 'var(--color-text-muted)' }}>
           <span>Subtotal</span>
           <span>{fmt(totalPrice)}</span>
         </div>
+        {discountAmount > 0 && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.75rem 0', fontSize: '0.875rem', color: '#166534', fontWeight: 600 }}>
+            <span>Descuento{appliedCoupon ? ` · ${appliedCoupon.code}` : ''}</span>
+            <span>-{fmt(discountAmount)}</span>
+          </div>
+        )}
         {deliveryType === 'delivery' && (
           <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.75rem 0', fontSize: '0.875rem', color: 'var(--color-text-muted)' }}>
             <span>Envío{shippingZone ? ` · ${shippingZone.label}` : ''}</span>
@@ -1222,6 +1309,11 @@ function OrderSummary({ items, totalPrice, deliveryType, shippingZone, shippingC
                   : fmt(shippingCost)}
             </span>
           </div>
+        )}
+        {showFreeShippingNote && (
+          <p style={{ margin: '-0.5rem 0 0.75rem', fontSize: '0.72rem', color: 'var(--color-text-muted)' }}>
+            El envío gratis aplica a todo el país a partir de {fmt(shippingConfig.freeShippingThreshold)}.
+          </p>
         )}
         {deliveryType === 'pickup' && (
           <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.75rem 0', fontSize: '0.875rem', color: 'var(--color-text-muted)' }}>

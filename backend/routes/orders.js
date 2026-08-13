@@ -5,7 +5,7 @@ import { requireAdmin } from '../middleware/requireAdmin.js'
 import { attachUserIfPresent, requireAuth } from '../middleware/requireAuth.js'
 import { reserveStock, releaseOrderStock, InsufficientStockError } from '../services/stockReservation.js'
 import { estimateDeliveryDate } from '../services/correoArgentino.js'
-import { SHIPPING_SERVICES } from '../config/shipping.js'
+import { SHIPPING_SERVICES, qualifiesForFreeShipping } from '../config/shipping.js'
 import { quoteShipping } from '../services/shippingQuotes.js'
 import { sendOrderConfirmationNotifications } from '../services/orderNotifications.js'
 import { PaymentReconciliationError, reconcileMercadoPagoPayment } from '../services/mercadopagoPayments.js'
@@ -13,6 +13,7 @@ import { sendReviewInvitationForOrder } from '../services/reviewInvitations.js'
 import { isValidEmail, normalizeEmail } from '../utils/email.js'
 import { resolveVariantRule, ruleMatches } from '../services/productVariants.js'
 import { resolvePublicOptionPrice, resolvePublicPrice } from '../services/publicPricing.js'
+import { evaluateCoupon, findCouponByCode } from '../services/coupons.js'
 import 'dotenv/config'
 
 const router = Router()
@@ -283,6 +284,22 @@ router.post('/', attachUserIfPresent, async (req, res) => {
     }
     const productsTotal = itemsSnapshot.reduce((sum, i) => sum + i.subtotal, 0)
 
+    // Cupón de descuento: se revalida contra la DB acá (nunca se confía en el
+    // monto que haya calculado el navegador en /api/coupons/validate).
+    let discountAmount = 0
+    let couponCode = null
+    let couponId = null
+    if (req.body?.discountCode) {
+      const coupon = await findCouponByCode(req.body.discountCode)
+      const evaluation = evaluateCoupon(coupon, productsTotal)
+      if (evaluation.error) {
+        return res.status(400).json({ error: evaluation.error })
+      }
+      discountAmount = evaluation.amount
+      couponCode = coupon.code
+      couponId = coupon.id
+    }
+
     // Envío: costo por zona + estimación de entrega (Correo Argentino + margen
     // propio de stock). Llamado fuera de la transacción de DB — es red, no
     // debe sostener locks de Postgres.
@@ -296,12 +313,13 @@ router.post('/', attachUserIfPresent, async (req, res) => {
       if (!quote) {
         return res.status(400).json({ error: 'No pudimos calcular el envío para ese código postal — consultanos por WhatsApp' })
       }
-      shippingCost = quote.cost
+      const freeShipping = qualifiesForFreeShipping({ subtotal: productsTotal })
+      shippingCost = freeShipping ? 0 : quote.cost
       const estimate = await estimateDeliveryDate(customer.codigoPostal)
       estimatedDeliveryDate = estimate.estimatedDate
     }
 
-    const total = productsTotal + shippingCost
+    const total = productsTotal - discountAmount + shippingCost
 
     let reservationExpiresAt = null
     if (paymentMethod === 'mercadopago') {
@@ -323,9 +341,10 @@ router.post('/', attachUserIfPresent, async (req, res) => {
             delivery_type, address, city, postal_code, total_amount, shipping_cost, shipping_service,
             payment_method, pickup_date, estimated_delivery_date, reservation_expires_at,
             items, user_id, customer_dni, address_extra, province, billing_same_as_shipping,
-            billing_address, billing_address_extra, billing_city, billing_postal_code, billing_province)
+            billing_address, billing_address_extra, billing_city, billing_postal_code, billing_province,
+            coupon_code, discount_amount)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,
-                 $19, $20, $21, $22, $23, $24, $25, $26, $27)
+                 $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29)
          RETURNING *`,
         [
           orderNumber, initialStatus,
@@ -354,9 +373,14 @@ router.post('/', attachUserIfPresent, async (req, res) => {
           billingSameAsShipping ? customer.ciudad?.trim() || null : customer.billingCity?.trim() || null,
           billingSameAsShipping ? customer.codigoPostal?.trim() || null : customer.billingPostalCode?.trim() || null,
           billingSameAsShipping ? customer.provincia?.trim() || null : customer.billingProvince?.trim() || null,
+          couponCode,
+          discountAmount,
         ]
       )
       order = rows[0]
+      if (couponId) {
+        await client.query('UPDATE coupons SET times_used = times_used + 1 WHERE id = $1', [couponId])
+      }
       await client.query('COMMIT')
     } catch (err) {
       await client.query('ROLLBACK')
@@ -416,6 +440,7 @@ const PUBLIC_ORDER_FIELDS = `
   id, order_number, status, customer_name, delivery_type,
   address, city, postal_code, total_amount, shipping_cost, shipping_service,
   payment_method, pickup_date, estimated_delivery_date,
+  coupon_code, discount_amount,
   items, created_at, paid_at
 `
 
@@ -509,6 +534,7 @@ router.get('/mine/:id', requireAuth, async (req, res) => {
               billing_same_as_shipping, billing_address, billing_address_extra,
               billing_city, billing_province, billing_postal_code,
               total_amount, shipping_cost, shipping_service, payment_method,
+              coupon_code, discount_amount,
               pickup_date, estimated_delivery_date, items, created_at, paid_at
        FROM orders WHERE id = $1 AND user_id = $2`,
       [req.params.id, req.userId]
@@ -558,6 +584,7 @@ router.get('/', requireAdmin, async (req, res) => {
         `SELECT id, order_number, status, customer_name, customer_email, customer_phone,
                 delivery_type, address, city, postal_code, total_amount, shipping_cost, shipping_service,
                 payment_method, pickup_date, estimated_delivery_date, items,
+                coupon_code, discount_amount,
                 created_at, updated_at, paid_at, mp_payment_id
          FROM orders ${where}
          ORDER BY created_at DESC

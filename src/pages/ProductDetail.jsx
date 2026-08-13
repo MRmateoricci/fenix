@@ -99,15 +99,13 @@ export default function ProductDetail() {
   const displayDescription = variantValue('description', product?.description)
   const displayCategory = variantValue('category', product?.category)
   const variantSpecs = [
-    ['Código', variantValue('codigo', null)], ['Medida', variantValue('medida', selectedSize?.label)],
+    ['Medida', variantValue('medida', selectedSize?.label)],
     ['Categoría', variantValue('category', product?.category)], ['Subcategoría', variantValue('subcategory', product?.subcategory)],
-    ['Marca / grupo', variantValue('grupo', null)], ['Proveedor', variantValue('supplier', null)],
+    ['Marca / grupo', variantValue('grupo', null)],
     ['Potencia', variantValue('watts', product?.watts) != null ? `${variantValue('watts', product?.watts)} W` : null],
     ['Temperatura', variantValue('colorTemp', product?.colorTemp) != null ? `${variantValue('colorTemp', product?.colorTemp)} K` : null],
     ['Protección', variantValue('ipRating', product?.ipRating)], ['Material', variantValue('material', product?.material)],
     ['Tipo', variantValue('productType', product?.productType)], ['Tipo de cable', variantValue('cableType', product?.cableType)],
-    ['Dimensiones', [variantValue('lengthCm', product?.lengthCm), variantValue('widthCm', product?.widthCm), variantValue('heightCm', product?.heightCm)].every(value => value != null) ? `${variantValue('lengthCm', product?.lengthCm)} × ${variantValue('widthCm', product?.widthCm)} × ${variantValue('heightCm', product?.heightCm)} cm` : null],
-    ['Peso', variantValue('weightKg', product?.weightKg) != null ? `${variantValue('weightKg', product?.weightKg)} kg` : null],
   ].filter(([, value]) => value !== '' && value != null)
   const selectedImage = selectedImageRule?.image || selectedSize?.image || selectedTone?.image || selectedColor?.image || product?.image
   const selectedPrice = selectedPriceRule?.price != null
