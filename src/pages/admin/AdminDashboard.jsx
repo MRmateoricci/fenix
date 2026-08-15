@@ -465,6 +465,36 @@ function VariantColorField({ name, hex, code, onChange }) {
   )
 }
 
+function VariantToneField({ value, code, onChange }) {
+  const selectedPreset = TONE_PRESETS.find(preset =>
+    preset.name.localeCompare(String(value || ''), 'es-AR', { sensitivity: 'base' }) === 0
+  )
+  return (
+    <span style={{ display: 'grid', gridTemplateColumns: 'minmax(70px,1fr) 76px', gap: 4 }}>
+      <input
+        value={value}
+        onChange={event => onChange(event.target.value)}
+        placeholder="Cualquiera"
+        aria-label={`Tono de ${code}`}
+        style={{ ...inp, minWidth: 0, height: 32, padding: '5px 7px', fontSize: 10.5 }}
+      />
+      <select
+        value={selectedPreset?.name || ''}
+        onChange={event => {
+          const preset = TONE_PRESETS.find(item => item.name === event.target.value)
+          if (preset) onChange(preset.name)
+        }}
+        aria-label={`Tono predeterminado de ${code}`}
+        title="Elegir un tono predeterminado"
+        style={{ ...inp, minWidth: 0, height: 32, padding: '4px 3px', fontSize: 9.5 }}
+      >
+        <option value="">Elegir</option>
+        {TONE_PRESETS.map(preset => <option key={preset.name} value={preset.name}>{preset.name}</option>)}
+      </select>
+    </span>
+  )
+}
+
 function variantProductDataFromSource(source = {}, code = '') {
   return {
     codigo: code || source.codigo || '',
@@ -473,7 +503,7 @@ function variantProductDataFromSource(source = {}, code = '') {
     inventoryDescription: source.descripcion ?? source.inventoryDescription ?? '',
     grupo: source.grupo || '', subgrupo: source.subgrupo || '', medida: source.medida || '',
     supplier: source.supplier || '', category: source.category || '', subcategory: source.subcategory || '',
-    watts: source.watts ?? '', colorTemp: source.color_temp ?? source.colorTemp ?? '',
+    watts: source.watts ?? '', amperes: source.amperes ?? '', colorTemp: source.color_temp ?? source.colorTemp ?? '',
     ipRating: source.ip_rating ?? source.ipRating ?? '', material: source.material || '',
     cableType: source.cable_type ?? source.cableType ?? '', productType: source.product_type ?? source.productType ?? '',
     lengthCm: source.length_cm ?? source.lengthCm ?? '', widthCm: source.width_cm ?? source.widthCm ?? '',
@@ -482,27 +512,38 @@ function variantProductDataFromSource(source = {}, code = '') {
   }
 }
 
-function VariantDetailsModal({ code, value, onChange, onClose }) {
-  const data = { ...variantProductDataFromSource({}, code), ...(value || {}), codigo: code || value?.codigo || '' }
+function inheritingVariantProductData(source = {}, code = '') {
+  return {
+    ...variantProductDataFromSource(source, code),
+    name: '', description: '', category: '', subcategory: '', productType: '',
+  }
+}
+
+function VariantDetailsModal({ code, codeLocked = false, value, onChange, onClose }) {
+  const data = { ...variantProductDataFromSource({}, code), ...(value || {}), codigo: codeLocked ? code : (value?.codigo || code || '') }
   const set = (field, nextValue) => onChange({ ...data, [field]: nextValue })
   const fields = [
     ['Nombre individual', 'name'], ['Categoría', 'category'], ['Subcategoría', 'subcategory'], ['Tipo de producto', 'productType'],
     ['Grupo / marca', 'grupo'], ['Subgrupo', 'subgrupo'], ['Medida original', 'medida'], ['Proveedor', 'supplier'],
-    ['Potencia (W)', 'watts', 'number'], ['Temperatura de color (K)', 'colorTemp', 'number'], ['Protección IP', 'ipRating'], ['Material', 'material'],
+    ['Potencia (W)', 'watts', 'number'], ['Corriente (A)', 'amperes', 'number'], ['Temperatura de color (K)', 'colorTemp', 'number'], ['Protección IP', 'ipRating'], ['Material', 'material'],
     ['Tipo de cable', 'cableType'], ['Largo envío (cm)', 'lengthCm', 'number'], ['Ancho envío (cm)', 'widthCm', 'number'],
-    ['Alto envío (cm)', 'heightCm', 'number'], ['Peso (kg)', 'weightKg', 'number'], ['Imagen secundaria', 'hoverImage'],
+    ['Alto envío (cm)', 'heightCm', 'number'], ['Peso (kg)', 'weightKg', 'number'],
   ]
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 2100, background: 'rgba(17,24,39,.58)', display: 'grid', placeItems: 'center', padding: 18 }}>
       <div style={{ width: 'min(820px,96vw)', maxHeight: '90vh', overflow: 'auto', background: C.white, borderRadius: 12, boxShadow: '0 20px 60px rgba(0,0,0,.28)' }}>
         <div style={{ position: 'sticky', top: 0, zIndex: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 20px', borderBottom: `1px solid ${C.border}`, background: C.white }}>
-          <div><strong style={{ color: C.ink }}>Datos individuales</strong><div style={{ color: C.muted, fontSize: 11, marginTop: 3 }}>{code}</div></div>
+          <div><strong style={{ color: C.ink }}>Datos individuales de la variante</strong><div style={{ color: C.muted, fontSize: 11, marginTop: 3 }}>{data.codigo || 'Sin código'}</div></div>
           <button type="button" onClick={onClose} style={outlineBtn}>Cerrar</button>
         </div>
         <div style={{ padding: 20, display: 'grid', gridTemplateColumns: 'repeat(2,minmax(0,1fr))', gap: 12 }}>
+          <p style={{ gridColumn: 'span 2', margin: 0, color: C.muted, fontSize: 11, lineHeight: 1.45 }}>Los campos públicos que queden vacíos heredan la información general compartida del producto.</p>
+          <label style={lbl}>Código de la variante<input value={data.codigo} disabled={codeLocked} onChange={event => set('codigo', event.target.value.toUpperCase())} style={{ ...inp, marginTop: 5, ...(codeLocked ? { opacity: .65, cursor: 'not-allowed' } : {}) }} /></label>
+          <div style={{ alignSelf: 'end', color: C.muted, fontSize: 10.5, paddingBottom: 10 }}>{codeLocked ? 'El código proviene de la asociación con el proveedor.' : 'Identificador único de esta presentación.'}</div>
           <label style={{ ...lbl, gridColumn: 'span 2' }}>Descripción individual<textarea value={data.description} onChange={event => set('description', event.target.value)} rows={4} style={{ ...inp, marginTop: 5, resize: 'vertical' }} /></label>
           <label style={{ ...lbl, gridColumn: 'span 2' }}>Descripción de inventario<textarea value={data.inventoryDescription} onChange={event => set('inventoryDescription', event.target.value)} rows={2} style={{ ...inp, marginTop: 5, resize: 'vertical' }} /></label>
           {fields.map(([label, field, type]) => <label key={field} style={lbl}>{label}<input type={type || 'text'} min={type === 'number' ? 0 : undefined} step="any" value={data[field] ?? ''} onChange={event => set(field, event.target.value)} style={{ ...inp, marginTop: 5 }} /></label>)}
+          <div style={{ gridColumn: 'span 2' }}><ImageFileField label="Imagen hover de la variante (opcional)" value={data.hoverImage} onChange={value => set('hoverImage', value)} /></div>
         </div>
       </div>
     </div>
@@ -568,17 +609,34 @@ function legacyVariantRulesFromProduct(product = {}) {
       size: size?.label || '', sizeValue: measure.value, sizeUnit: measure.unit,
       image: size?.image || tone?.image || color?.image || '',
       precio_costo: cost, precio_venta: sale, precio_iva: tax, stock,
-      productData: variantProductDataFromSource(product),
+      productData: inheritingVariantProductData(product),
     })
   }
   if (!hasExactStock) {
     rules.unshift({
       id: `legacy-stock-${Date.now()}`, supplierCodes: [], color: '', colorHex: '#CCCCCC', tone: '',
       size: '', sizeValue: '', sizeUnit: '', image: '', precio_costo: '', precio_venta: '', precio_iva: '',
-      stock: product.stock ?? 0, productData: variantProductDataFromSource(product), isStockFallback: true,
+      stock: product.stock ?? 0, productData: inheritingVariantProductData(product), isStockFallback: true,
     })
   }
   return rules
+}
+
+function baseVariantRuleFromProduct(product = {}) {
+  const measure = parseMergeMeasure(product.medida || '')
+  return {
+    id: `base-${Date.now()}`,
+    isBase: true,
+    supplierCodes: [],
+    color: '', colorHex: '#CCCCCC', tone: '',
+    size: product.medida || '', sizeValue: measure.value, sizeUnit: measure.unit,
+    image: product.image || product.image_url || '',
+    precio_costo: product.priceCost ?? product.precio_costo ?? '',
+    precio_venta: product.price ?? product.precio_venta ?? '',
+    precio_iva: product.priceWithTax ?? product.precio_iva ?? '',
+    stock: product.stock ?? 0,
+    productData: inheritingVariantProductData(product, product.codigo || ''),
+  }
 }
 
 const EMPTY = {
@@ -587,6 +645,7 @@ const EMPTY = {
   name: '', category: '', subcategory: '', productType: '',
   price: '', originalPrice: '',
   description: '', image: '', hoverImage: '',
+  watts: '', amperes: '',
   lengthCm: '', widthCm: '', heightCm: '', weightKg: '',
   inStock: true, stock: '', colors: [], sizes: [], tones: [], variantStock: {}, variantRules: [],
   published: true, isNew: false, bestSeller: false,
@@ -618,6 +677,7 @@ function draftFromInventoryRow(inv) {
     colorTemp:   inv.color_temp,
     ipRating:    inv.ip_rating,
     watts:       inv.watts,
+    amperes:     inv.amperes,
     material:    inv.material,
     productType: inv.product_type || inv.cable_type || '',
     lengthCm:    inv.length_cm ?? '',
@@ -664,7 +724,8 @@ function toUnifiedProductPayload(data) {
     variant_stock: data.variantStock || {},
     color_temp: data.colorTemp || null,
     ip_rating: data.ipRating || null,
-    watts: data.watts || null,
+    watts: data.watts === '' || data.watts == null ? null : Number(data.watts),
+    amperes: data.amperes === '' || data.amperes == null ? null : Number(data.amperes),
     material: data.material || null,
     published: Boolean(data.published),
     is_new: Boolean(data.isNew),
@@ -678,8 +739,13 @@ function ProductModal({ product, onSave, onClose, onVariantsChanged, publishOnSa
   const { currencySettings, categoryTree, updateProductVariantRules, detachProductVariant } = useAdmin()
   const isNew = !product
   const [form, setForm] = useState(() => {
-    if (isNew) return EMPTY
+    if (isNew) return { ...EMPTY, variantRules: [baseVariantRuleFromProduct()] }
     const storedRules = splitVariantRulesBySupplierCode(product.variantRules, product.colors, product)
+    const legacyRules = legacyVariantRulesFromProduct(product)
+    const variantRules = storedRules.length ? storedRules : legacyRules.length ? legacyRules : [baseVariantRuleFromProduct(product)]
+    if (variantRules.length && product.image && !variantRules.some(rule => rule.image)) {
+      variantRules[0] = { ...variantRules[0], image: product.image }
+    }
     return {
     ...EMPTY, ...product,
     price:         String(product.price ?? ''),
@@ -695,11 +761,9 @@ function ProductModal({ product, onSave, onClose, onVariantsChanged, publishOnSa
     sizes:         product.sizes || [],
     tones:         product.tones || [],
     variantStock:  product.variantStock || {},
-    variantRules: storedRules.length ? storedRules : legacyVariantRulesFromProduct(product),
+    variantRules,
   }})
   const hasGroupedRules = form.variantRules.length > 0
-  const hadVariantConfiguration = (product?.variantRules || []).length > 0 ||
-    (product?.colors || []).length > 0 || (product?.sizes || []).length > 0 || (product?.tones || []).length > 0
   const hadCombinedSupplierCodes = (product?.variantRules || []).some(rule => (rule.supplierCodes || []).length > 1)
   const [useVariantStock, setUseVariantStock] = useState(
     () => Object.keys(product?.variantStock || {}).length > 0
@@ -720,8 +784,33 @@ function ProductModal({ product, onSave, onClose, onVariantsChanged, publishOnSa
   const groupedConflictCodes = groupedConflict
     ? groupedConflict.map(index => form.variantRules[index]?.supplierCodes?.[0]).filter(Boolean)
     : []
-  const groupedGridColumns = 'minmax(205px,1.25fr) 142px 190px 100px 90px 90px 82px 60px 58px'
-  const valid = (!isNew || form.codigo.trim()) && !groupedConflict && (!willBePublished || (form.name.trim() && form.price && Number(form.price) > 0))
+  const groupedGridColumns = 'minmax(205px,1.25fr) 142px 190px 170px 90px 90px 82px 60px 58px'
+  const ruleNumbers = field => form.variantRules
+    .map(rule => rule[field])
+    .filter(value => value !== '' && value != null)
+    .map(Number)
+    .filter(value => Number.isFinite(value) && value >= 0)
+  const minRuleValue = field => {
+    const values = ruleNumbers(field)
+    return values.length ? Math.min(...values) : ''
+  }
+  const variantSummary = {
+    cost: minRuleValue('precio_costo'),
+    sale: minRuleValue('precio_venta'),
+    tax: (() => {
+      const values = form.variantRules
+        .map(rule => priceWithIva(rule.precio_iva, rule.precio_venta))
+        .filter(value => value !== '' && value != null)
+        .map(Number)
+        .filter(value => Number.isFinite(value) && value >= 0)
+      return values.length ? Math.min(...values) : ''
+    })(),
+    stock: form.variantRules.reduce((total, rule) => total + Math.max(0, Number(rule.stock) || 0), 0),
+  }
+  const variantCode = rule => String(rule.supplierCodes?.[0] || rule.productData?.codigo || '').trim()
+  const allVariantsHaveCode = form.variantRules.every(rule => variantCode(rule))
+  const valid = form.variantRules.length > 0 && allVariantsHaveCode && !groupedConflict &&
+    (!willBePublished || (form.name.trim() && variantSummary.sale > 0))
   const subOptions = getSubcategoryOptions(form.category, categoryTree).map(node => node.label)
   const typeOptions = getProductTypeOptions(form.category, form.subcategory, categoryTree).map(node => node.label)
   const categoryOptions = categoryTree.map(node => ({ value: getCategoryValue(node), label: node.label }))
@@ -813,16 +902,15 @@ function ProductModal({ product, onSave, onClose, onVariantsChanged, publishOnSa
     ...current,
     variantRules: [...current.variantRules, {
       id: `manual-${Date.now()}`, supplierCodes: [], color: '', colorHex: '#CCCCCC', size: '', sizeValue: '', sizeUnit: '', tone: '',
-      productData: variantProductDataFromSource(product), image: '',
-      precio_costo: current.variantRules.length ? '' : current.priceCost,
-      precio_venta: current.variantRules.length ? '' : current.price,
-      precio_iva: current.variantRules.length ? '' : current.priceWithTax,
-      stock: current.variantRules.length ? 0 : current.stock,
+      productData: { ...inheritingVariantProductData(product || current), codigo: '' }, image: '',
+      precio_costo: '', precio_venta: '', precio_iva: '', stock: 0,
     }],
   }))
   const removeGroupedRule = index => setForm(current => ({
     ...current,
-    variantRules: current.variantRules.filter((_, ruleIndex) => ruleIndex !== index),
+    variantRules: current.variantRules.length <= 1
+      ? current.variantRules
+      : current.variantRules.filter((_, ruleIndex) => ruleIndex !== index),
   }))
   const variantStockTotal = Object.values(form.variantStock)
     .flatMap(row => Object.values(row || {}))
@@ -860,56 +948,38 @@ function ProductModal({ product, onSave, onClose, onVariantsChanged, publishOnSa
     if (!valid || saving) return
     setSaving(true)
     setSaveError('')
-    const out = { ...form, price: form.price === '' ? null : Number(form.price) }
-    out.codigo = form.codigo.trim()
-    out.supplier = form.supplier.trim().toUpperCase() || 'OTRO'
-    out.inventoryDescription = form.inventoryDescription.trim()
-    out.lengthCm = form.lengthCm === '' ? null : Number(form.lengthCm)
-    out.widthCm = form.widthCm === '' ? null : Number(form.widthCm)
-    out.heightCm = form.heightCm === '' ? null : Number(form.heightCm)
-    out.weightKg = form.weightKg === '' ? null : Number(form.weightKg)
-    out.priceCost = form.priceCost === '' ? null : Number(form.priceCost)
-    out.priceWithTax = form.priceWithTax === '' ? null : Number(form.priceWithTax)
+    const primaryRule = form.variantRules[0]
+    const primaryData = primaryRule?.productData || {}
+    const out = { ...form }
+    out.codigo = form.codigo.trim() || variantCode(primaryRule)
+    out.supplier = String(primaryData.supplier || form.supplier || 'OTRO').trim().toUpperCase()
+    out.inventoryDescription = String(primaryData.inventoryDescription || form.inventoryDescription || '').trim()
+    out.lengthCm = primaryData.lengthCm === '' || primaryData.lengthCm == null ? null : Number(primaryData.lengthCm)
+    out.widthCm = primaryData.widthCm === '' || primaryData.widthCm == null ? null : Number(primaryData.widthCm)
+    out.heightCm = primaryData.heightCm === '' || primaryData.heightCm == null ? null : Number(primaryData.heightCm)
+    out.weightKg = primaryData.weightKg === '' || primaryData.weightKg == null ? null : Number(primaryData.weightKg)
+    out.watts = primaryData.watts === '' || primaryData.watts == null ? null : Number(primaryData.watts)
+    out.amperes = primaryData.amperes === '' || primaryData.amperes == null ? null : Number(primaryData.amperes)
+    out.priceCost = variantSummary.cost === '' ? null : variantSummary.cost
+    out.price = variantSummary.sale === '' ? null : variantSummary.sale
+    out.priceWithTax = variantSummary.tax === '' ? null : variantSummary.tax
+    out.stock = variantSummary.stock
+    out.inStock = out.stock > 0
+    out.image = primaryRule?.image || form.image || null
+    out.hoverImage = primaryData.hoverImage || form.hoverImage || null
     out.originalPrice = form.originalPrice ? Number(form.originalPrice) : null
     if (publishOnSave) out.published = true
-    if (!hasGroupedRules && form.stock !== '') {
-      out.stock   = Number(form.stock)
-      out.inStock = out.stock > 0
-    } else {
-      delete out.stock
-    }
     out.colors = form.colors.filter(c => c.name?.trim()).map(c => ({ ...c, price: c.price === '' || c.price == null ? null : Number(c.price) }))
     out.sizes  = form.sizes.filter(s => s.label.trim()).map(s => ({ ...s, price: s.price === '' || s.price == null ? null : Number(s.price) }))
     out.tones  = form.tones.filter(t => t.name?.trim()).map(t => ({ ...t, price: t.price === '' || t.price == null ? null : Number(t.price) }))
 
-    if (hasGroupedRules) {
-      delete out.stock
-      out.variantStock = {}
-    } else if (useVariantStock) {
-      const colorNames = out.colors.length ? out.colors.map(c => c.name) : ['']
-      const toneNames = out.tones.length ? out.tones.map(t => t.name) : ['']
-      const rowKeys = colorNames.flatMap(color => toneNames.map(tone => combineVariantRowKey(color, tone)))
-      const colKeys = out.sizes.length ? out.sizes.map(s => s.label) : ['_']
-      const cleanedVariantStock = {}
-      let total = 0
-      for (const rowKey of rowKeys) {
-        const row = form.variantStock[rowKey] || {}
-        cleanedVariantStock[rowKey] = {}
-        for (const colKey of colKeys) {
-          const n = Math.max(0, Math.round(Number(row[colKey]) || 0))
-          cleanedVariantStock[rowKey][colKey] = n
-          total += n
-        }
-      }
-      out.variantStock = cleanedVariantStock
-      out.stock = total
-      out.inStock = total > 0
-    } else {
-      out.variantStock = {}
-    }
+    out.variantStock = {}
     try {
-      await onSave(out)
-      if (!isNew && (hasGroupedRules || hadVariantConfiguration)) await updateProductVariantRules(product.id, out.variantRules)
+      const savedProduct = await onSave(out)
+      const productId = product?.id || savedProduct?.id
+      if (!productId) throw new Error('El producto se creó pero no se recibió su identificador')
+      await updateProductVariantRules(productId, out.variantRules)
+      await onVariantsChanged?.()
       onClose()
     } catch (error) {
       setSaveError(error.message || 'No se pudieron guardar los cambios')
@@ -948,43 +1018,27 @@ function ProductModal({ product, onSave, onClose, onVariantsChanged, publishOnSa
         <div className="adm-product-modal__body" style={{ overflowY: 'auto', padding: '24px 28px', flex: 1, minHeight: 0 }}>
         <div className="adm-product-modal__columns">
           <section className="adm-product-modal__section">
-          <h3 style={{ ...sectionTitle, margin: '0 0 14px' }}>Datos internos</h3>
+          <h3 style={{ ...sectionTitle, margin: '0 0 8px' }}>Resumen calculado</h3>
+          <p style={{ fontSize: 11, color: C.muted, margin: '0 0 14px', lineHeight: 1.45 }}>
+            Los códigos, precios, stock, imágenes y características se cargan en las variantes. Este resumen se actualiza automáticamente.
+          </p>
           <div className="adm-product-modal__fields">
-          <FormField label="Código *" value={form.codigo} onChange={v => set('codigo', v)} placeholder="ej: ALC-PO043" />
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-            <label style={lbl}>Proveedor</label>
-            <input list="supplier-options" value={form.supplier} onChange={e => set('supplier', e.target.value)} placeholder="ej: ALCIDES" style={inp} />
-            <datalist id="supplier-options">{SUPPLIER_FILTERS.filter(s => s !== 'Todos').map(s => <option key={s} value={s} />)}</datalist>
-          </div>
-          <FormField label="Descripción interna" value={form.inventoryDescription} onChange={v => set('inventoryDescription', v)} span={2} />
-          <FormField
-            label={hasGroupedRules ? 'Stock (suma de variantes)' : useVariantStock ? 'Stock (suma de las variantes)' : 'Stock'}
-            value={hasGroupedRules ? form.stock : useVariantStock ? String(variantStockTotal) : form.stock}
-            onChange={v => set('stock', v)}
-            type="number"
-            disabled={hasGroupedRules || useVariantStock}
-          />
-          <div style={{ gridColumn: 'span 2', marginTop: 4 }}>
-            <label style={lbl}>Dimensiones para envío</label>
-            <p style={{ fontSize: 10.5, color: C.muted, margin: '3px 0 8px' }}>Medidas del paquete en centímetros y peso aproximado en kilogramos.</p>
-            <div className="adm-product-modal__shipping-fields">
-              <FormField label="Largo (cm)" value={form.lengthCm} onChange={v => set('lengthCm', v)} type="number" step="0.01" />
-              <FormField label="Ancho (cm)" value={form.widthCm} onChange={v => set('widthCm', v)} type="number" step="0.01" />
-              <FormField label="Alto (cm)" value={form.heightCm} onChange={v => set('heightCm', v)} type="number" step="0.01" />
-              <FormField label="Peso aprox. (kg)" value={form.weightKg} onChange={v => set('weightKg', v)} type="number" step="0.001" />
+            <FormField label="Cantidad de variantes" value={String(form.variantRules.length)} onChange={() => {}} disabled />
+            <FormField label="Stock total" value={String(variantSummary.stock)} onChange={() => {}} disabled />
+            <FormField label="Costo mínimo (calculado)" value={variantSummary.cost} onChange={() => {}} type="number" disabled />
+            <FormField label="Precio desde (calculado)" value={variantSummary.sale} onChange={() => {}} type="number" disabled />
+            <FormField label="IVA mínimo (calculado)" value={variantSummary.tax} onChange={() => {}} type="number" disabled />
+            <div style={{ gridColumn: 'span 2', color: C.muted, fontSize: 11.5 }}>
+              Equivalentes con US$ 1 = {fmt(usdArsRate)}: costo {variantSummary.cost !== '' ? fmtUsd(Number(variantSummary.cost) / usdArsRate) : '—'} · venta {variantSummary.sale !== '' ? fmtUsd(Number(variantSummary.sale) / usdArsRate) : '—'} · con IVA {variantSummary.tax !== '' ? fmtUsd(Number(variantSummary.tax) / usdArsRate) : '—'}
             </div>
-          </div>
-          <FormField label={hasGroupedRules ? 'Costo mínimo (calculado)' : 'Precio costo (ARS)'} value={form.priceCost} onChange={v => set('priceCost', v)} type="number" disabled={hasGroupedRules} />
-          <FormField label={hasGroupedRules ? 'Precio desde (calculado)' : 'Precio de venta (ARS)'} value={form.price} onChange={v => set('price', v)} type="number" disabled={hasGroupedRules} />
-          <FormField label={hasGroupedRules ? 'IVA mínimo (calculado)' : 'Precio con IVA (ARS)'} value={form.priceWithTax} onChange={v => set('priceWithTax', v)} type="number" disabled={hasGroupedRules} />
-          {!hasGroupedRules && <div style={{ gridColumn: 'span 2', color: C.muted, fontSize: 11.5, marginTop: -4 }}>
-            Equivalentes con US$ 1 = {fmt(usdArsRate)}: costo {form.priceCost !== '' ? fmtUsd(Number(form.priceCost) / usdArsRate) : '—'} · venta {form.price !== '' ? fmtUsd(Number(form.price) / usdArsRate) : '—'} · con IVA {form.priceWithTax !== '' ? fmtUsd(Number(form.priceWithTax) / usdArsRate) : '—'}
-          </div>}
           </div>
           </section>
 
           <section className="adm-product-modal__section adm-product-modal__section--store">
-            <h3 style={{ ...sectionTitle, margin: '0 0 14px' }}>Información para la tienda online</h3>
+            <h3 style={{ ...sectionTitle, margin: '0 0 8px' }}>Información general compartida</h3>
+            <p style={{ fontSize: 11, color: C.muted, margin: '0 0 14px', lineHeight: 1.45 }}>
+              Estos datos identifican al grupo en la tienda. Cada variante puede sobrescribir su ficha desde “Editar detalles”.
+            </p>
             <div className="adm-product-modal__fields">
               <FormField label="Nombre del producto *" value={form.name} onChange={v => set('name', v)} span={2} />
 
@@ -1036,9 +1090,6 @@ function ProductModal({ product, onSave, onClose, onVariantsChanged, publishOnSa
             />
           </div>
 
-          <ImageFileField label="Imagen principal" value={form.image} onChange={v => set('image', v)} productId={product?.id} />
-          <ImageFileField label="Imagen hover (opcional)" value={form.hoverImage} onChange={v => set('hoverImage', v)} productId={product?.id} />
-
               <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
                 <label style={lbl}>Visibilidad en la tienda</label>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, height: 38 }}>
@@ -1073,7 +1124,7 @@ function ProductModal({ product, onSave, onClose, onVariantsChanged, publishOnSa
           </section>
         </div>
 
-        {isNew && <>
+        {isNew && !hasGroupedRules && <>
         {/* Variantes de color */}
         <div style={{ marginTop: 20 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
@@ -1301,19 +1352,19 @@ function ProductModal({ product, onSave, onClose, onVariantsChanged, publishOnSa
         </div>
         </>}
 
-        {!isNew && (
+        {(
           <div style={{ marginTop: 18, padding: 14, border: `1px solid ${C.border}`, borderRadius: 10, background: '#F8FAFC' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 10 }}>
               <div>
-                <label style={{ ...lbl, color: C.ink }}>Variantes combinadas</label>
+                <label style={{ ...lbl, color: C.ink }}>Variantes</label>
                 <p style={{ fontSize: 11, color: C.muted, margin: '4px 0 0', lineHeight: 1.4 }}>
-                  Cada fila representa una variante con Color + Tono + Medida, ficha individual, precio, foto y stock. Si tiene código de proveedor también se muestra; “Cualquiera” funciona como opción general.
+                  Todo producto tiene al menos una variante. Cada fila concentra código, Color + Tono + Medida, ficha individual, precio, foto y stock; “Cualquiera” funciona como opción general.
                 </p>
               </div>
               <button type="button" onClick={addGroupedRule} style={{ ...outlineBtn, padding: '5px 10px', fontSize: 10.5, whiteSpace: 'nowrap' }}>+ Agregar variante</button>
             </div>
             <div style={{ overflowX: 'auto' }}>
-              <div style={{ minWidth: 1080 }}>
+              <div style={{ minWidth: 1160 }}>
                 <div style={{ display: 'grid', gridTemplateColumns: groupedGridColumns, gap: 7, padding: '5px 7px', fontSize: 9.5, color: C.text3, fontWeight: 700, textTransform: 'uppercase' }}>
                   <span>Variante / código</span><span>Medida</span><span>Color</span><span>Tono</span>
                   <span>Precio s/IVA</span><span>Precio c/IVA</span><span>Costo</span><span>Stock</span><span />
@@ -1322,6 +1373,7 @@ function ProductModal({ product, onSave, onClose, onVariantsChanged, publishOnSa
                   const specificity = mergeRuleSpecificity(rule)
                   const inConflict = groupedConflict?.includes(index)
                   const hasSupplierCode = Boolean(rule.supplierCodes?.length)
+                  const displayedCode = variantCode(rule)
                   return (
                     <div key={rule.id || index} style={{ display: 'grid', gridTemplateColumns: groupedGridColumns, gap: 7, alignItems: 'center', padding: 7, border: `1px solid ${inConflict ? C.red : C.border}`, borderRadius: 7, background: C.white, marginBottom: 5 }}>
                       <span style={{ minWidth: 0, display: 'flex', alignItems: 'center', gap: 9 }}>
@@ -1332,9 +1384,15 @@ function ProductModal({ product, onSave, onClose, onVariantsChanged, publishOnSa
                         />
                         <span style={{ minWidth: 0, display: 'grid', gap: 5, fontSize: 10.5, color: C.ink }}>
                           {hasSupplierCode
-                            ? rule.supplierCodes.map(code => <strong key={code} title={code} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{code}</strong>)
-                            : <strong>Variante manual</strong>}
-                          <small style={{ color: specificity === 3 ? C.green : C.muted, fontSize: 9, fontWeight: 600 }}>{specificity === 3 ? 'Exacta' : `Fallback · ${specificity}/3`}</small>
+                            ? <strong title={displayedCode} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{displayedCode}</strong>
+                            : <input
+                                value={rule.productData?.codigo || ''}
+                                onChange={event => setGroupedRule(index, 'productData', { ...(rule.productData || {}), codigo: event.target.value.toUpperCase() })}
+                                placeholder="Código *"
+                                aria-label={`Código de variante ${index + 1}`}
+                                style={{ ...inp, minWidth: 0, height: 26, padding: '3px 6px', fontSize: 10 }}
+                              />}
+                          <small style={{ color: index === 0 || specificity === 3 ? C.green : C.muted, fontSize: 9, fontWeight: 600 }}>{index === 0 ? 'Variante base' : specificity === 3 ? 'Exacta' : `Fallback · ${specificity}/3`}</small>
                           <button type="button" onClick={() => setVariantDetailsIndex(index)} style={{ border: 'none', background: 'none', padding: 0, color: '#2563EB', cursor: 'pointer', textAlign: 'left', fontSize: 9.5 }}>Editar detalles</button>
                         </span>
                       </span>
@@ -1354,21 +1412,26 @@ function ProductModal({ product, onSave, onClose, onVariantsChanged, publishOnSa
                           variantRules: current.variantRules.map((item, ruleIndex) => ruleIndex === index ? { ...item, color: color.name, colorHex: color.hex } : item),
                         }))}
                       />
-                      <input value={rule.tone} onChange={event => setGroupedRule(index, 'tone', event.target.value)} placeholder="Cualquiera" aria-label="Tono" style={{ ...inp, height: 32, padding: '5px 7px', fontSize: 10.5 }} />
+                      <VariantToneField
+                        value={rule.tone}
+                        code={rule.supplierCodes?.[0] || `variante ${index + 1}`}
+                        onChange={value => setGroupedRule(index, 'tone', value)}
+                      />
                       <input type="number" min="0" value={rule.precio_venta} onChange={event => setGroupedRule(index, 'precio_venta', event.target.value)} aria-label="Precio de venta" style={{ ...inp, height: 32, padding: '5px 7px', fontSize: 10.5 }} />
                       <input type="number" min="0" value={priceWithIva(rule.precio_iva, rule.precio_venta)} onChange={event => setGroupedRule(index, 'precio_iva', event.target.value)} aria-label="Precio con IVA" style={{ ...inp, height: 32, padding: '5px 7px', fontSize: 10.5 }} />
                       <input type="number" min="0" value={rule.precio_costo} onChange={event => setGroupedRule(index, 'precio_costo', event.target.value)} aria-label="Precio de costo" style={{ ...inp, height: 32, padding: '5px 7px', fontSize: 10.5 }} />
                       <input type="number" min="0" step="1" value={rule.stock} onChange={event => setGroupedRule(index, 'stock', event.target.value)} aria-label="Stock" style={{ ...inp, height: 32, padding: '5px 7px', fontSize: 10.5 }} />
-                      {hasSupplierCode
+                      {hasSupplierCode && form.variantRules.length > 1
                         ? <button type="button" onClick={() => setDetachCandidate(rule)} disabled={saving || detaching} title="Sacar del grupo y crear un producto individual" style={{ ...outlineBtn, height: 27, padding: '3px 6px', color: C.red, borderColor: '#FCA5A5', fontSize: 9.5 }}>Separar</button>
-                        : <button type="button" onClick={() => removeGroupedRule(index)} title="Eliminar regla manual" aria-label="Eliminar regla manual" style={{ ...iconBtn, width: 26, height: 26, color: C.red }}>×</button>}
+                        : <button type="button" onClick={() => removeGroupedRule(index)} disabled={form.variantRules.length === 1} title={form.variantRules.length === 1 ? 'El producto debe conservar al menos una variante' : 'Eliminar variante'} aria-label="Eliminar variante" style={{ ...iconBtn, width: 26, height: 26, color: C.red, opacity: form.variantRules.length === 1 ? .35 : 1, cursor: form.variantRules.length === 1 ? 'not-allowed' : 'pointer' }}>×</button>}
                     </div>
                   )
                 })}
-                {!form.variantRules.length && <div style={{ padding: '18px 8px', color: C.muted, fontSize: 11.5 }}>Este producto todavía no tiene variantes. Usá “Agregar variante” para cargar la primera.</div>}
+                {!form.variantRules.length && <div style={{ padding: '18px 8px', color: C.red, fontSize: 11.5 }}>El producto necesita al menos una variante.</div>}
               </div>
             </div>
             {hadCombinedSupplierCodes && <div style={{ marginTop: 8, color: C.muted, fontSize: 10.5 }}>Se separaron automáticamente los códigos que estaban juntos. Diferenciá sus atributos y revisá el stock antes de guardar.</div>}
+            {!allVariantsHaveCode && <div style={{ marginTop: 8, color: C.red, fontSize: 10.5 }}>Todas las variantes necesitan un código. Completá el campo “Código” de cada fila.</div>}
             {groupedConflict && <div style={{ marginTop: 8, color: C.red, fontSize: 10.5 }}>
               {groupedConflictCodes.length === 2
                 ? <>Los códigos <strong>{groupedConflictCodes[0]}</strong> y <strong>{groupedConflictCodes[1]}</strong> quedarían como la misma variante y el sistema no sabría qué precio usar. Diferencialos completando Medida, Color o Tono.</>
@@ -1429,11 +1492,11 @@ function ProductModal({ product, onSave, onClose, onVariantsChanged, publishOnSa
           </div>
         )}
 
-        {form.image && (
+        {form.variantRules[0]?.image && (
           <div style={{ marginTop: 16 }}>
             <label style={lbl}>Vista previa</label>
             <img
-              src={form.image}
+              src={form.variantRules[0].image}
               alt="preview"
               onError={e => { e.target.style.display = 'none' }}
               style={{ width: 80, height: 80, objectFit: 'cover', borderRadius: 8, marginTop: 6, border: `1px solid ${C.border}` }}
@@ -1467,7 +1530,8 @@ function ProductModal({ product, onSave, onClose, onVariantsChanged, publishOnSa
         )}
         {variantDetailsIndex != null && form.variantRules[variantDetailsIndex] && (
           <VariantDetailsModal
-            code={form.variantRules[variantDetailsIndex].supplierCodes?.[0] || 'Variante manual'}
+            code={form.variantRules[variantDetailsIndex].supplierCodes?.[0] || form.variantRules[variantDetailsIndex].productData?.codigo || ''}
+            codeLocked={Boolean(form.variantRules[variantDetailsIndex].supplierCodes?.length)}
             value={form.variantRules[variantDetailsIndex].productData}
             onChange={productData => setGroupedRule(variantDetailsIndex, 'productData', productData)}
             onClose={() => setVariantDetailsIndex(null)}
@@ -6870,8 +6934,9 @@ function UnifiedProductsTab() {
 
   async function handleSave(data) {
     const payload = toUnifiedProductPayload(data)
-    if (addOpen) await createInventoryItem(payload)
-    else await updateInventoryItem(editItem.id, payload)
+    const savedProduct = addOpen
+      ? await createInventoryItem(payload)
+      : await updateInventoryItem(editItem.id, payload)
     if (editItem?.id) {
       setStockDrafts(current => {
         const next = { ...current }
@@ -6881,6 +6946,7 @@ function UnifiedProductsTab() {
     }
     await fetchCatalog()
     fetchInventory(inventoryFilters)
+    return savedProduct
   }
 
   async function handleDelete(id) {
@@ -7470,7 +7536,7 @@ function UnifiedProductsTab() {
                     </div>
                     <div style={{ fontSize: 10.5, color: C.muted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {p.codigo}{p.category ? ` · ${p.category}` : ''}
-                      {Number(p.variant_rule_count) > 0 ? ` · ${p.variant_rule_count} códigos unidos` : ''}
+                      {Number(p.variant_rule_count) === 1 ? ' · Variante base' : Number(p.variant_rule_count) > 1 ? ` · ${p.variant_rule_count} variantes` : ''}
                     </div>
                   </div>
                   <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11.5, color: C.text3, overflow: 'hidden', whiteSpace: 'nowrap' }}>

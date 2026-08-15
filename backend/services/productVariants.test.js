@@ -12,7 +12,7 @@ import {
 test('conserva la ficha individual completa al crear una variante', () => {
   const data = normalizeVariantProductData({}, {
     codigo: 'CAB-4', name: 'Cable 4 mm', descripcion: 'Descripción original', medida: '4 mm²',
-    category: 'Electricidad', watts: 20, length_cm: 30, weight_kg: 1.5,
+    category: 'Electricidad', watts: 20, amperes: 1.25, length_cm: 30, weight_kg: 1.5,
   })
   assert.equal(data.codigo, 'CAB-4')
   assert.equal(data.name, 'Cable 4 mm')
@@ -20,6 +20,7 @@ test('conserva la ficha individual completa al crear una variante', () => {
   assert.equal(data.medida, '4 mm²')
   assert.equal(data.category, 'Electricidad')
   assert.equal(data.watts, 20)
+  assert.equal(data.amperes, 1.25)
   assert.equal(data.lengthCm, 30)
   assert.equal(data.weightKg, 1.5)
 })

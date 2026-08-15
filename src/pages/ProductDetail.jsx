@@ -103,6 +103,7 @@ export default function ProductDetail() {
     ['Categoría', variantValue('category', product?.category)], ['Subcategoría', variantValue('subcategory', product?.subcategory)],
     ['Marca / grupo', variantValue('grupo', null)],
     ['Potencia', variantValue('watts', product?.watts) != null ? `${variantValue('watts', product?.watts)} W` : null],
+    ['Corriente', variantValue('amperes', product?.amperes) != null ? `${variantValue('amperes', product?.amperes)} A` : null],
     ['Temperatura', variantValue('colorTemp', product?.colorTemp) != null ? `${variantValue('colorTemp', product?.colorTemp)} K` : null],
     ['Protección', variantValue('ipRating', product?.ipRating)], ['Material', variantValue('material', product?.material)],
     ['Tipo', variantValue('productType', product?.productType)], ['Tipo de cable', variantValue('cableType', product?.cableType)],

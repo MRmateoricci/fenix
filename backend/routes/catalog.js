@@ -16,7 +16,7 @@ const SELECT_FIELDS = `
   original_price, original_price_usd, price_currency,
   COALESCE((SELECT usd_ars_rate FROM store_settings WHERE id = 1), 1510) AS usd_ars_rate,
   description_larga,
-  image_url, hover_image_url, stock, watts, ip_rating, color_temp, material, cable_type, product_type,
+  image_url, hover_image_url, stock, watts, amperes, ip_rating, color_temp, material, cable_type, product_type,
   color_options, size_options, tone_options, variant_stock, length_cm, width_cm, height_cm, weight_kg,
   is_new, best_seller,
   COALESCE((
@@ -78,6 +78,7 @@ export function mapRow(r) {
     colorTemp: r.color_temp != null ? Number(r.color_temp) : null,
     ipRating: r.ip_rating,
     watts: r.watts != null ? Number(r.watts) : null,
+    amperes: r.amperes != null ? Number(r.amperes) : null,
     material: r.material,
     cableType: r.cable_type,
     productType: r.product_type || r.cable_type,

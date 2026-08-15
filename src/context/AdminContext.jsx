@@ -32,6 +32,7 @@ function toBackendPayload(p) {
   if ('colorTemp' in p)     out.color_temp         = p.colorTemp
   if ('ipRating' in p)      out.ip_rating          = p.ipRating
   if ('watts' in p)         out.watts              = p.watts
+  if ('amperes' in p)       out.amperes            = p.amperes
   if ('material' in p)      out.material           = p.material
   if ('productType' in p)   out.product_type       = p.productType || null
   if ('cableType' in p)     out.cable_type         = p.cableType

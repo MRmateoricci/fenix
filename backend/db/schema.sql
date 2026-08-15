@@ -179,6 +179,7 @@ CREATE TABLE IF NOT EXISTS products (
   subgrupo          VARCHAR(150),        -- distribuidor/categoría (Huergui col D)
   medida            VARCHAR(60),
   watts             NUMERIC(10,2),
+  amperes           NUMERIC(10,3),
   precio_costo      NUMERIC(14,2),
   precio_venta      NUMERIC(14,2),
   precio_iva        NUMERIC(14,2),
@@ -234,6 +235,7 @@ ALTER TABLE products ADD COLUMN IF NOT EXISTS tone_options      JSONB NOT NULL D
 -- todas las celdas (ver POST/PATCH /api/products y reserveStock).
 ALTER TABLE products ADD COLUMN IF NOT EXISTS variant_stock     JSONB NOT NULL DEFAULT '{}';
 ALTER TABLE products ADD COLUMN IF NOT EXISTS color_temp        NUMERIC(6,0);
+ALTER TABLE products ADD COLUMN IF NOT EXISTS amperes           NUMERIC(10,3);
 ALTER TABLE products ADD COLUMN IF NOT EXISTS ip_rating         VARCHAR(10);
 ALTER TABLE products ADD COLUMN IF NOT EXISTS material          VARCHAR(100);
 ALTER TABLE products ADD COLUMN IF NOT EXISTS cable_type        VARCHAR(60);
@@ -320,6 +322,58 @@ DROP TRIGGER IF EXISTS product_variant_rules_updated_at ON product_variant_rules
 CREATE TRIGGER product_variant_rules_updated_at
   BEFORE UPDATE ON product_variant_rules
   FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+-- Los importadores y ajustes rápidos históricos actualizan la fila `products`.
+-- Cuando el producto tiene una sola variante (la Base), reflejamos esos cambios
+-- en ella para que precio, stock y ficha técnica no queden desincronizados.
+CREATE OR REPLACE FUNCTION sync_single_base_variant()
+RETURNS TRIGGER AS $$
+BEGIN
+  IF (SELECT COUNT(*) = 1 FROM product_variant_rules WHERE product_id = NEW.id) THEN
+    UPDATE product_variant_rules
+       SET precio_costo = NEW.precio_costo,
+           precio_venta = NEW.precio_venta,
+           precio_iva = NEW.precio_iva,
+           precio_costo_usd = NEW.precio_costo_usd,
+           precio_venta_usd = NEW.precio_venta_usd,
+           precio_iva_usd = NEW.precio_iva_usd,
+           price_currency = NEW.price_currency,
+           price_exchange_rate = NEW.price_exchange_rate,
+           stock = NEW.stock,
+           image_url = NEW.image_url,
+           product_data = product_data || jsonb_build_object(
+             'codigo', NEW.codigo,
+             'supplier', NEW.supplier,
+             'inventoryDescription', COALESCE(NEW.descripcion, ''),
+             'medida', COALESCE(NEW.medida, ''),
+             'watts', NEW.watts,
+             'amperes', NEW.amperes,
+             'colorTemp', NEW.color_temp,
+             'ipRating', COALESCE(NEW.ip_rating, ''),
+             'material', COALESCE(NEW.material, ''),
+             'cableType', COALESCE(NEW.cable_type, ''),
+             'lengthCm', NEW.length_cm,
+             'widthCm', NEW.width_cm,
+             'heightCm', NEW.height_cm,
+             'weightKg', NEW.weight_kg,
+             'hoverImage', COALESCE(NEW.hover_image_url, '')
+           ),
+           updated_at = NOW()
+     WHERE product_id = NEW.id;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS products_sync_single_base_variant ON products;
+CREATE TRIGGER products_sync_single_base_variant
+  AFTER UPDATE OF codigo, supplier, descripcion, medida, watts, amperes, color_temp,
+    ip_rating, material, cable_type, length_cm, width_cm, height_cm, weight_kg,
+    hover_image_url, image_url, precio_costo, precio_venta, precio_iva,
+    precio_costo_usd, precio_venta_usd, precio_iva_usd, price_currency,
+    price_exchange_rate, stock
+  ON products
+  FOR EACH ROW EXECUTE FUNCTION sync_single_base_variant();
 
 ALTER TABLE supplier_product_mappings
   ADD COLUMN IF NOT EXISTS tone_name VARCHAR(100);

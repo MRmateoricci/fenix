@@ -44,7 +44,7 @@ const VARIANT_TEXT_LIMITS = {
   category: 100, subcategory: 150, ipRating: 20, material: 100,
   cableType: 100, productType: 150, hoverImage: 2000,
 }
-const VARIANT_NUMBER_FIELDS = ['watts', 'colorTemp', 'lengthCm', 'widthCm', 'heightCm', 'weightKg']
+const VARIANT_NUMBER_FIELDS = ['watts', 'amperes', 'colorTemp', 'lengthCm', 'widthCm', 'heightCm', 'weightKg']
 
 export function variantProductSnapshot(product = {}) {
   return {
@@ -54,7 +54,7 @@ export function variantProductSnapshot(product = {}) {
     inventoryDescription: product.descripcion ?? product.inventoryDescription ?? '',
     grupo: product.grupo || '', subgrupo: product.subgrupo || '', medida: product.medida || '',
     supplier: product.supplier || '', category: product.category || '', subcategory: product.subcategory || '',
-    watts: numberOrNull(product.watts), colorTemp: numberOrNull(product.color_temp ?? product.colorTemp),
+    watts: numberOrNull(product.watts), amperes: numberOrNull(product.amperes), colorTemp: numberOrNull(product.color_temp ?? product.colorTemp),
     ipRating: product.ip_rating ?? product.ipRating ?? '', material: product.material || '',
     cableType: product.cable_type ?? product.cableType ?? '', productType: product.product_type ?? product.productType ?? '',
     lengthCm: numberOrNull(product.length_cm ?? product.lengthCm), widthCm: numberOrNull(product.width_cm ?? product.widthCm),
@@ -257,8 +257,10 @@ export async function loadMergePreview(client, rawIds) {
   if (suppliers.size !== 1) throw new Error('Sólo se pueden unir productos del mismo proveedor')
   return products.map(product => ({
     ...product,
-    isGrouped: Number(product.variant_rule_count) > 0 ||
-      (product.color_options || []).length > 0 || (product.size_options || []).length > 0 || (product.tone_options || []).length > 0,
+    isGrouped: Number(product.variant_rule_count) > 1 ||
+      (Number(product.variant_rule_count) === 0 && (
+        (product.color_options || []).length > 0 || (product.size_options || []).length > 0 || (product.tone_options || []).length > 0
+      )),
   }))
 }
 
@@ -285,7 +287,7 @@ export async function mergeProducts(client, payload) {
   if (conflict.rows.length) throw new Error(`El código general ${generalCode} ya existe`)
 
   if (base.isGrouped && !Number(base.variant_rule_count)) await normalizeLegacyStock(client, base)
-  const { rows: retainedRules } = await client.query(
+  let { rows: retainedRules } = await client.query(
     `SELECT rule.*, COALESCE((
        SELECT jsonb_agg(mapping.source_code ORDER BY mapping.source_code)
        FROM supplier_product_mappings mapping WHERE mapping.variant_rule_id=rule.id
@@ -293,6 +295,13 @@ export async function mergeProducts(client, payload) {
      FROM product_variant_rules rule WHERE rule.product_id=$1 ORDER BY rule.created_at`,
     [baseId]
   )
+  // Una única regla es la variante base de un producto simple. Al usarlo como
+  // base de una unión se vuelve a crear con los atributos elegidos en la vista
+  // previa, evitando conservar una fila comodín duplicada.
+  if (!base.isGrouped && retainedRules.length) {
+    await client.query('DELETE FROM product_variant_rules WHERE product_id=$1', [baseId])
+    retainedRules = []
+  }
   const submittedAssignments = Array.isArray(payload.assignments) ? payload.assignments : []
   const assignments = new Map(submittedAssignments
     .filter(item => !item.variantRuleId)
@@ -487,12 +496,12 @@ export async function detachVariantRule(client, productId, ruleId) {
     await client.query(
       `UPDATE products SET name=$1,descripcion=$2,description_larga=$3,grupo=$4,subgrupo=$5,medida=$6,
          supplier=COALESCE(NULLIF($7,''),supplier),category=NULLIF($8,''),subcategory=NULLIF($9,''),
-         watts=$10,color_temp=$11,ip_rating=NULLIF($12,''),material=NULLIF($13,''),
-         cable_type=NULLIF($14,''),product_type=NULLIF($15,''),length_cm=$16,width_cm=$17,height_cm=$18,
-         weight_kg=$19,hover_image_url=NULLIF($20,''),updated_at=NOW() WHERE id=$21`,
+         watts=$10,amperes=$11,color_temp=$12,ip_rating=NULLIF($13,''),material=NULLIF($14,''),
+         cable_type=NULLIF($15,''),product_type=NULLIF($16,''),length_cm=$17,width_cm=$18,height_cm=$19,
+         weight_kg=$20,hover_image_url=NULLIF($21,''),updated_at=NOW() WHERE id=$22`,
       [data.name || null, data.inventoryDescription || null, data.description || null, data.grupo || null,
         data.subgrupo || null, data.medida || rule.size_label || null, data.supplier, data.category,
-        data.subcategory, data.watts, data.colorTemp, data.ipRating, data.material, data.cableType,
+        data.subcategory, data.watts, data.amperes, data.colorTemp, data.ipRating, data.material, data.cableType,
         data.productType, data.lengthCm, data.widthCm, data.heightCm, data.weightKg, data.hoverImage, id]
     )
   }
@@ -526,13 +535,13 @@ export async function detachVariantRule(client, productId, ruleId) {
 
   const { rows: inserted } = await client.query(
     `INSERT INTO products (
-       codigo,descripcion,grupo,subgrupo,medida,watts,precio_costo,precio_venta,precio_iva,
+       codigo,descripcion,grupo,subgrupo,medida,watts,amperes,precio_costo,precio_venta,precio_iva,
        precio_costo_usd,precio_venta_usd,precio_iva_usd,price_currency,price_exchange_rate,
        stock,source,supplier,price_updated_at,stock_updated_at,name,category,subcategory,
        description_larga,image_url,hover_image_url,color_options,size_options,tone_options,
        variant_stock,color_temp,ip_rating,material,cable_type,product_type,published,
        length_cm,width_cm,height_cm,weight_kg,is_new,best_seller)
-     SELECT $2,descripcion,grupo,subgrupo,$3,watts,$4,$5,$6,$7,$8,$9,
+     SELECT $2,descripcion,grupo,subgrupo,$3,watts,amperes,$4,$5,$6,$7,$8,$9,
        COALESCE($10,price_currency),COALESCE($11,price_exchange_rate),COALESCE($12,0),source,supplier,
        price_updated_at,stock_updated_at,name,category,subcategory,description_larga,
        COALESCE($13,image_url),hover_image_url,'[]'::jsonb,'[]'::jsonb,'[]'::jsonb,'{}'::jsonb,

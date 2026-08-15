@@ -550,7 +550,7 @@ router.get('/:id', async (req, res) => {
 
 router.patch('/:id/variant-rules', async (req, res) => {
   const rules = Array.isArray(req.body.rules) ? req.body.rules : []
-  if (!UUID_PATTERN.test(req.params.id) || rules.length > 500) {
+  if (!UUID_PATTERN.test(req.params.id) || rules.length < 1 || rules.length > 500) {
     return res.status(400).json({ error: 'Las reglas enviadas no son válidas' })
   }
   const supplierCodeKey = value => String(value || '').trim().toUpperCase().replace(/\s+/g, '')
@@ -574,6 +574,10 @@ router.patch('/:id/variant-rules', async (req, res) => {
   if (normalized.some(rule => [rule.precio_costo, rule.precio_venta, rule.precio_iva].some(value => value != null && value < 0) ||
       (rule.stock != null && (!Number.isInteger(rule.stock) || rule.stock < 0)))) {
     return res.status(400).json({ error: 'Hay precios o cantidades inválidas' })
+  }
+  const variantCodes = normalized.map(rule => String(rule.supplier_codes[0] || rule.product_data?.codigo || '').trim().toUpperCase())
+  if (variantCodes.some(code => !code)) {
+    return res.status(400).json({ error: 'Cada variante necesita un código' })
   }
   if (findRuleAmbiguity(normalized)) {
     return res.status(409).json({ error: 'Hay filas que representan la misma variante. Asignales distinto color, tono o medida' })
@@ -737,6 +741,7 @@ const FIELD_TRANSFORMS = {
   tone_options:      (v) => JSON.stringify(v ?? []),
   variant_stock:     (v) => JSON.stringify(v ?? {}),
   color_temp:        (v) => toNumber(v),
+  amperes:           (v) => toNumber(v),
   ip_rating:         (v) => v,
   material:          (v) => v,
   cable_type:        (v) => v,
