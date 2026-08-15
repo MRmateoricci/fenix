@@ -18,7 +18,7 @@ const SELECT_FIELDS = `
   description_larga,
   image_url, hover_image_url, stock, watts, ip_rating, color_temp, material, cable_type, product_type,
   color_options, size_options, tone_options, variant_stock, length_cm, width_cm, height_cm, weight_kg,
-  is_new, best_seller,
+  is_new, best_seller, a_pedido,
   COALESCE((
     SELECT jsonb_agg(jsonb_build_object(
       'id', vr.id, 'color', vr.color_name, 'colorHex', vr.color_hex, 'size', vr.size_label, 'tone', vr.tone_name,
@@ -129,6 +129,7 @@ export function mapRow(r) {
     priceFrom: variantRules.filter(rule => rule.price != null).length > 1,
     isNew: Boolean(r.is_new),
     bestSeller: Boolean(r.best_seller),
+    aPedido: Boolean(r.a_pedido),
     published: true,
   }
 }

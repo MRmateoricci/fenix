@@ -26,6 +26,11 @@ import {
   parseCatalogImagesPdf,
 } from '../services/catalogImageImport.js'
 import {
+  applyFolderImages,
+  buildFolderImagePreview,
+  discardFolderImagePreview,
+} from '../services/folderImageImport.js'
+import {
   upsertCatalogRows,
   matchPriceRows,
   applyPriceUpdates,
@@ -35,6 +40,7 @@ import {
   applyPurchaseIncrement,
   matchInvoiceLines,
   applyInvoiceLines,
+  priceCodeKey,
 } from '../services/productsRepo.js'
 import {
   detachVariantRule,
@@ -108,6 +114,32 @@ async function applySavedSupplierCurrencies(client, parsedFiles) {
   )
   const currencyBySupplier = new Map(savedCurrencies.rows.map(row => [row.supplier, row.currency]))
   for (const file of parsedFiles) file.currency = currencyBySupplier.get(file.supplier) || file.currency
+}
+
+// Un código puntual puede venir en una moneda distinta a la del resto del
+// excel del proveedor. Si ese código tiene una excepción guardada, manda por
+// sobre la moneda general del archivo para esa fila únicamente.
+async function applySavedPriceCodeOverrides(client, parsedFiles) {
+  const suppliers = [...new Set(parsedFiles.map(file => file.supplier))]
+  if (!suppliers.length) return
+  const { rows } = await client.query(
+    'SELECT supplier, source_code_key, currency FROM supplier_price_code_overrides WHERE supplier = ANY($1::text[])',
+    [suppliers]
+  )
+  if (!rows.length) return
+  const overridesBySupplier = new Map()
+  for (const row of rows) {
+    if (!overridesBySupplier.has(row.supplier)) overridesBySupplier.set(row.supplier, new Map())
+    overridesBySupplier.get(row.supplier).set(row.source_code_key, row.currency)
+  }
+  for (const file of parsedFiles) {
+    const overrides = overridesBySupplier.get(file.supplier)
+    if (!overrides) continue
+    for (const row of file.rows) {
+      const currency = overrides.get(priceCodeKey(row.codigo))
+      if (currency) row.currency = currency
+    }
+  }
 }
 
 function convertedVariantOptions(products, currency, usdArsRate) {
@@ -461,13 +493,31 @@ router.patch('/supplier-settings/:supplier', async (req, res) => {
     await client.query('BEGIN')
     const settings = await client.query('SELECT usd_ars_rate FROM store_settings WHERE id = 1')
     const usdArsRate = Number(settings.rows[0]?.usd_ars_rate || 1510)
+
+    // Un código con una excepción de moneda guardada (ver .../codes) no se
+    // toca al cambiar la moneda general del proveedor: ese código puntual
+    // mantiene la moneda que se fijó a mano, sin importar cuántas veces se
+    // togglee el resto de la lista.
+    const overrides = await client.query(
+      'SELECT source_code_key FROM supplier_price_code_overrides WHERE supplier = $1',
+      [supplier]
+    )
+    const overrideKeys = new Set(overrides.rows.map(row => row.source_code_key))
+    let excludedIds = []
+    if (overrideKeys.size) {
+      const supplierProducts = await client.query('SELECT id, codigo FROM products WHERE supplier = $1', [supplier])
+      excludedIds = supplierProducts.rows
+        .filter(row => overrideKeys.has(priceCodeKey(row.codigo)))
+        .map(row => row.id)
+    }
+
     const colorProducts = await client.query(
       `SELECT id, color_options, size_options, tone_options, price_currency, price_exchange_rate
        FROM products
-       WHERE supplier = $1
+       WHERE supplier = $1 AND id <> ALL($2::uuid[])
          AND (jsonb_array_length(color_options) > 0 OR jsonb_array_length(size_options) > 0 OR jsonb_array_length(tone_options) > 0)
        FOR UPDATE`,
-      [supplier]
+      [supplier, excludedIds]
     )
 
     const convertedColors = convertedVariantOptions(colorProducts.rows, currency, usdArsRate)
@@ -483,8 +533,8 @@ router.patch('/supplier-settings/:supplier', async (req, res) => {
              precio_iva = ROUND((CASE WHEN price_currency = 'USD' THEN COALESCE(precio_iva_usd, precio_iva / COALESCE(NULLIF(price_exchange_rate, 0), $2)) ELSE precio_iva END) * $2, 2),
              original_price = ROUND((CASE WHEN price_currency = 'USD' THEN COALESCE(original_price_usd, original_price / COALESCE(NULLIF(price_exchange_rate, 0), $2)) ELSE original_price END) * $2, 2),
              price_currency = 'USD', price_exchange_rate = $2, updated_at = NOW()
-         WHERE supplier = $1`,
-        [supplier, usdArsRate]
+         WHERE supplier = $1 AND id <> ALL($3::uuid[])`,
+        [supplier, usdArsRate, excludedIds]
       )
       : await client.query(
         `UPDATE products
@@ -493,8 +543,8 @@ router.patch('/supplier-settings/:supplier', async (req, res) => {
              precio_iva = CASE WHEN price_currency = 'USD' THEN COALESCE(precio_iva_usd, precio_iva / COALESCE(NULLIF(price_exchange_rate, 0), $2)) ELSE precio_iva END,
              original_price = CASE WHEN price_currency = 'USD' THEN COALESCE(original_price_usd, original_price / COALESCE(NULLIF(price_exchange_rate, 0), $2)) ELSE original_price END,
              price_currency = 'ARS', price_exchange_rate = $2, updated_at = NOW()
-         WHERE supplier = $1`,
-        [supplier, usdArsRate]
+         WHERE supplier = $1 AND id <> ALL($3::uuid[])`,
+        [supplier, usdArsRate, excludedIds]
       )
 
     for (const product of convertedColors) {
@@ -510,13 +560,71 @@ router.patch('/supplier-settings/:supplier', async (req, res) => {
       [supplier, currency]
     )
     await client.query('COMMIT')
-    res.json({ supplier, currency, productCount: update.rowCount, usdArsRate })
+    res.json({ supplier, currency, productCount: update.rowCount, skippedCount: excludedIds.length, usdArsRate })
   } catch (err) {
     await client.query('ROLLBACK')
     console.error('[PATCH /api/products/supplier-settings/:supplier]', err)
     res.status(500).json({ error: 'No se pudo actualizar la moneda del proveedor' })
   } finally {
     client.release()
+  }
+})
+
+// Excepciones de moneda por código: casos puntuales donde un artículo de la
+// lista de un proveedor no respeta la moneda general configurada arriba.
+router.get('/supplier-settings/:supplier/codes', async (req, res) => {
+  const supplier = normalizePriceSupplier(req.params.supplier)
+  if (!supplier) return res.status(400).json({ error: 'Proveedor inválido' })
+  try {
+    const { rows } = await pool.query(
+      `SELECT source_code, currency, updated_at FROM supplier_price_code_overrides
+       WHERE supplier = $1 ORDER BY source_code`,
+      [supplier]
+    )
+    res.json({
+      supplier,
+      overrides: rows.map(row => ({ codigo: row.source_code, currency: row.currency, updatedAt: row.updated_at })),
+    })
+  } catch (err) {
+    console.error('[GET /api/products/supplier-settings/:supplier/codes]', err)
+    res.status(500).json({ error: 'No se pudieron cargar las excepciones de moneda' })
+  }
+})
+
+router.put('/supplier-settings/:supplier/codes/:codigo', async (req, res) => {
+  const supplier = normalizePriceSupplier(req.params.supplier)
+  const codigo = normalizeCodigo(req.params.codigo)
+  const currency = req.body.currency === 'USD' ? 'USD' : req.body.currency === 'ARS' ? 'ARS' : null
+  if (!supplier || !codigo || !currency) return res.status(400).json({ error: 'Proveedor, código o moneda inválidos' })
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO supplier_price_code_overrides (supplier, source_code_key, source_code, currency, updated_at)
+       VALUES ($1, $2, $3, $4, NOW())
+       ON CONFLICT (supplier, source_code_key) DO UPDATE SET
+         source_code = EXCLUDED.source_code, currency = EXCLUDED.currency, updated_at = NOW()
+       RETURNING source_code, currency, updated_at`,
+      [supplier, priceCodeKey(codigo), codigo, currency]
+    )
+    res.json({ supplier, codigo: rows[0].source_code, currency: rows[0].currency, updatedAt: rows[0].updated_at })
+  } catch (err) {
+    console.error('[PUT /api/products/supplier-settings/:supplier/codes/:codigo]', err)
+    res.status(500).json({ error: 'No se pudo guardar la excepción de moneda' })
+  }
+})
+
+router.delete('/supplier-settings/:supplier/codes/:codigo', async (req, res) => {
+  const supplier = normalizePriceSupplier(req.params.supplier)
+  const codigo = normalizeCodigo(req.params.codigo)
+  if (!supplier || !codigo) return res.status(400).json({ error: 'Proveedor o código inválidos' })
+  try {
+    await pool.query(
+      'DELETE FROM supplier_price_code_overrides WHERE supplier = $1 AND source_code_key = $2',
+      [supplier, priceCodeKey(codigo)]
+    )
+    res.status(204).end()
+  } catch (err) {
+    console.error('[DELETE /api/products/supplier-settings/:supplier/codes/:codigo]', err)
+    res.status(500).json({ error: 'No se pudo eliminar la excepción de moneda' })
   }
 })
 
@@ -748,6 +856,7 @@ const FIELD_TRANSFORMS = {
   published:         (v) => Boolean(v),
   is_new:            (v) => Boolean(v),
   best_seller:       (v) => Boolean(v),
+  a_pedido:          (v) => Boolean(v),
 }
 const EDITABLE_FIELDS = Object.keys(FIELD_TRANSFORMS)
 
@@ -961,6 +1070,12 @@ const uploadCleosImage = multer({
   fileFilter: (req, file, cb) => cb(null, /^image\/(jpeg|png|webp|gif)$/.test(file.mimetype)),
 })
 
+const uploadFolderImages = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 8 * 1024 * 1024, files: 500 },
+  fileFilter: (req, file, cb) => cb(null, /^image\/(jpeg|png|webp|gif)$/.test(file.mimetype)),
+})
+
 // POST /api/products/:id/adjust-stock — ajuste manual +/- individual
 // ─────────────────────────────────────────────────────────────────────────────
 router.post('/:id/adjust-stock', async (req, res) => {
@@ -980,6 +1095,96 @@ router.post('/:id/adjust-stock', async (req, res) => {
   } catch (err) {
     console.error('[POST /api/products/:id/adjust-stock]', err)
     res.status(500).json({ error: 'Error interno' })
+  }
+})
+
+// Corrige un producto puntual que quedó con la moneda equivocada (ej. un excel
+// de proveedor ya cargado donde un código venía en USD aunque el resto de la
+// lista estaba en ARS). Reinterpreta el número guardado en la moneda correcta
+// y, si el producto tiene código y proveedor, deja la excepción guardada para
+// que las próximas cargas de ese proveedor ya lean ese código bien.
+router.patch('/:id/currency', async (req, res) => {
+  const currency = req.body.currency === 'USD' ? 'USD' : req.body.currency === 'ARS' ? 'ARS' : null
+  if (!currency) return res.status(400).json({ error: 'Moneda inválida' })
+
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+    const settings = await client.query('SELECT usd_ars_rate FROM store_settings WHERE id = 1')
+    const usdArsRate = Number(settings.rows[0]?.usd_ars_rate || 1510)
+
+    const current = await client.query(
+      `SELECT id, codigo, supplier, price_currency, price_exchange_rate,
+              color_options, size_options, tone_options
+       FROM products WHERE id = $1 FOR UPDATE`,
+      [req.params.id]
+    )
+    const product = current.rows[0]
+    if (!product) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Producto no encontrado' }) }
+
+    const convertedColors = convertedVariantOptions([product], currency, usdArsRate)[0]
+
+    const update = currency === 'USD'
+      ? await client.query(
+        `UPDATE products
+         SET precio_costo_usd = CASE WHEN price_currency = 'USD' THEN COALESCE(precio_costo_usd, precio_costo / COALESCE(NULLIF(price_exchange_rate, 0), $2)) ELSE precio_costo END,
+             precio_venta_usd = CASE WHEN price_currency = 'USD' THEN COALESCE(precio_venta_usd, precio_venta / COALESCE(NULLIF(price_exchange_rate, 0), $2)) ELSE precio_venta END,
+             precio_iva_usd = CASE WHEN price_currency = 'USD' THEN COALESCE(precio_iva_usd, precio_iva / COALESCE(NULLIF(price_exchange_rate, 0), $2)) ELSE precio_iva END,
+             original_price_usd = CASE WHEN price_currency = 'USD' THEN COALESCE(original_price_usd, original_price / COALESCE(NULLIF(price_exchange_rate, 0), $2)) ELSE original_price END,
+             precio_costo = ROUND((CASE WHEN price_currency = 'USD' THEN COALESCE(precio_costo_usd, precio_costo / COALESCE(NULLIF(price_exchange_rate, 0), $2)) ELSE precio_costo END) * $2, 2),
+             precio_venta = ROUND((CASE WHEN price_currency = 'USD' THEN COALESCE(precio_venta_usd, precio_venta / COALESCE(NULLIF(price_exchange_rate, 0), $2)) ELSE precio_venta END) * $2, 2),
+             precio_iva = ROUND((CASE WHEN price_currency = 'USD' THEN COALESCE(precio_iva_usd, precio_iva / COALESCE(NULLIF(price_exchange_rate, 0), $2)) ELSE precio_iva END) * $2, 2),
+             original_price = ROUND((CASE WHEN price_currency = 'USD' THEN COALESCE(original_price_usd, original_price / COALESCE(NULLIF(price_exchange_rate, 0), $2)) ELSE original_price END) * $2, 2),
+             price_currency = 'USD', price_exchange_rate = $2, updated_at = NOW()
+         WHERE id = $1
+         RETURNING precio_costo, precio_venta, precio_iva, price_currency`,
+        [product.id, usdArsRate]
+      )
+      : await client.query(
+        `UPDATE products
+         SET precio_costo = CASE WHEN price_currency = 'USD' THEN COALESCE(precio_costo_usd, precio_costo / COALESCE(NULLIF(price_exchange_rate, 0), $2)) ELSE precio_costo END,
+             precio_venta = CASE WHEN price_currency = 'USD' THEN COALESCE(precio_venta_usd, precio_venta / COALESCE(NULLIF(price_exchange_rate, 0), $2)) ELSE precio_venta END,
+             precio_iva = CASE WHEN price_currency = 'USD' THEN COALESCE(precio_iva_usd, precio_iva / COALESCE(NULLIF(price_exchange_rate, 0), $2)) ELSE precio_iva END,
+             original_price = CASE WHEN price_currency = 'USD' THEN COALESCE(original_price_usd, original_price / COALESCE(NULLIF(price_exchange_rate, 0), $2)) ELSE original_price END,
+             price_currency = 'ARS', price_exchange_rate = $2, updated_at = NOW()
+         WHERE id = $1
+         RETURNING precio_costo, precio_venta, precio_iva, price_currency`,
+        [product.id, usdArsRate]
+      )
+
+    if ((product.color_options?.length || product.size_options?.length || product.tone_options?.length)) {
+      await client.query(
+        'UPDATE products SET color_options = $1::jsonb, size_options = $2::jsonb, tone_options = $3::jsonb WHERE id = $4',
+        [JSON.stringify(convertedColors.colors), JSON.stringify(convertedColors.sizes), JSON.stringify(convertedColors.tones), product.id]
+      )
+    }
+
+    const supplier = normalizePriceSupplier(product.supplier)
+    if (supplier && product.codigo) {
+      await client.query(
+        `INSERT INTO supplier_price_code_overrides (supplier, source_code_key, source_code, currency, updated_at)
+         VALUES ($1, $2, $3, $4, NOW())
+         ON CONFLICT (supplier, source_code_key) DO UPDATE SET
+           source_code = EXCLUDED.source_code, currency = EXCLUDED.currency, updated_at = NOW()`,
+        [supplier, priceCodeKey(product.codigo), product.codigo, currency]
+      )
+    }
+
+    await client.query('COMMIT')
+    res.json({
+      id: product.id,
+      priceCurrency: update.rows[0].price_currency,
+      precioCosto: update.rows[0].precio_costo,
+      precioVenta: update.rows[0].precio_venta,
+      precioIva: update.rows[0].precio_iva,
+      usdArsRate,
+    })
+  } catch (err) {
+    await client.query('ROLLBACK')
+    console.error('[PATCH /api/products/:id/currency]', err)
+    res.status(500).json({ error: 'No se pudo cambiar la moneda del producto' })
+  } finally {
+    client.release()
   }
 })
 
@@ -1144,6 +1349,7 @@ router.post('/import/prices/bulk/preview', upload.array('files', 100), async (re
     const settings = await client.query('SELECT usd_ars_rate FROM store_settings WHERE id = 1')
     const usdArsRate = Number(settings.rows[0]?.usd_ars_rate || 1510)
     await applySavedSupplierCurrencies(client, parsedFiles)
+    await applySavedPriceCodeOverrides(client, parsedFiles)
     const result = await previewSupplierPriceDrafts(client, parsedFiles, usdArsRate)
     res.json({
       fileType: 'bulk-prices',
@@ -1183,6 +1389,7 @@ router.post('/import/prices/bulk', upload.array('files', 100), async (req, res) 
     const settings = await client.query('SELECT usd_ars_rate FROM store_settings WHERE id = 1')
     const usdArsRate = Number(settings.rows[0]?.usd_ars_rate || 1510)
     await applySavedSupplierCurrencies(client, parsedFiles)
+    await applySavedPriceCodeOverrides(client, parsedFiles)
     await client.query(
       `INSERT INTO supplier_price_settings (supplier, currency)
        SELECT entry.supplier, entry.currency
@@ -1584,6 +1791,57 @@ router.post('/import/catalog-images/apply', async (req, res) => {
     }
     console.error('[POST /api/products/import/catalog-images/apply]', err)
     res.status(400).json({ error: err.message || 'No se pudieron aplicar las imágenes del catálogo' })
+  } finally {
+    client.release()
+  }
+})
+
+// Carga masiva de imágenes sueltas (por ejemplo, el contenido de una carpeta).
+// Cada archivo se intenta emparejar con un producto por su código en el nombre
+// de archivo; el admin confirma o corrige la asociación antes de guardar nada.
+router.post('/import/folder-images/parse', uploadFolderImages.array('files', 500), async (req, res) => {
+  const supplier = normalizePriceSupplier(req.body.supplier)
+  if (!req.files?.length) return res.status(400).json({ error: 'Elegí una carpeta o imágenes para subir' })
+  if (!supplier) return res.status(400).json({ error: 'Elegí el proveedor de estas imágenes' })
+
+  try {
+    const { rows: products } = await pool.query(
+      `SELECT id, codigo, name, image_url FROM products WHERE supplier = $1 AND codigo IS NOT NULL ORDER BY codigo`,
+      [supplier]
+    )
+    if (!products.length) {
+      return res.status(404).json({ error: `No hay productos cargados para el proveedor ${supplier}` })
+    }
+    const parsed = await buildFolderImagePreview(req.files, products)
+    res.json({ ...parsed, supplier, supplierProductCount: products.length })
+  } catch (err) {
+    console.error('[POST /api/products/import/folder-images/parse]', err)
+    res.status(422).json({ error: err.message || 'No se pudieron leer las imágenes' })
+  }
+})
+
+router.post('/import/folder-images/apply', async (req, res) => {
+  const supplier = normalizePriceSupplier(req.body.supplier)
+  const { importId, actions } = req.body
+  if (!supplier) return res.status(400).json({ error: 'El proveedor de la revisión no es válido' })
+
+  const client = await pool.connect()
+  let applied = null
+  try {
+    await client.query('BEGIN')
+    applied = await applyFolderImages(client, importId, supplier, actions)
+    await client.query('COMMIT')
+    await discardFolderImagePreview(applied.previewDir).catch(cleanupError => {
+      console.warn('[Folder images preview cleanup]', cleanupError.message)
+    })
+    res.json({ fileType: 'folder-images', updated: applied.updated, imagesSaved: applied.imagesSaved })
+  } catch (err) {
+    await client.query('ROLLBACK')
+    if (applied?.writtenFiles?.length) {
+      await Promise.all(applied.writtenFiles.map(file => unlink(file).catch(() => {})))
+    }
+    console.error('[POST /api/products/import/folder-images/apply]', err)
+    res.status(400).json({ error: err.message || 'No se pudieron aplicar las imágenes' })
   } finally {
     client.release()
   }

@@ -76,6 +76,30 @@ test('una asociación cuyos precios coinciden queda sin cambios y no cuenta como
   assert.equal(result.files[0].items[0].status, 'unchanged')
 })
 
+test('un código con excepción de moneda se lee en su propia moneda aunque el resto del archivo esté en otra', async () => {
+  const client = {
+    async query(sql) {
+      if (/FROM supplier_product_mappings mapping/.test(sql)) return { rows: [{
+        source_code_key: 'EXCEPCION', product_id: 'product-1', color_name: null, size_label: null,
+        tone_name: null, variant_rule_id: null, product_code: 'EXCEPCION', product_name: 'Producto',
+        precio_costo: 80, precio_venta: 100, precio_iva: 121,
+        precio_costo_usd: null, precio_venta_usd: null, precio_iva_usd: null,
+        color_options: [], size_options: [],
+      }] }
+      throw new Error(`Consulta inesperada: ${sql}`)
+    },
+  }
+  const result = await previewSupplierPriceDrafts(client, [{
+    fileName: 'lista.xlsx', supplier: 'PROVEEDOR', currency: 'ARS', totalRows: 1, skipped: 0,
+    rows: [{ codigo: 'EXCEPCION', descripcion: 'Producto', precio_costo: 0.05, precio_venta: 0.1, precio_iva: 0.121, currency: 'USD' }],
+  }], 1510)
+
+  const item = result.files[0].items[0]
+  assert.equal(item.currency, 'USD')
+  // El precio actual (100 ARS) se compara contra la fila en USD (100 / 1510), redondeado a 2 decimales.
+  assert.equal(item.changes.find(change => change.field === 'precioVenta').previous, Math.round((100 / 1510) * 100) / 100)
+})
+
 test('crea borradores, convierte USD y no pisa códigos existentes o repetidos', async () => {
   const insertParams = []
   const client = {
@@ -119,6 +143,32 @@ test('crea borradores, convierte USD y no pisa códigos existentes o repetidos',
   ])
   assert.deepEqual(insertParams[1].slice(0, 11), [
     'ARS-1', 'En pesos', 1510, 2000, 2420, 1, 1.32, 1.6, 'ARS', 1510, 'CABRERA',
+  ])
+})
+
+test('un código con excepción de moneda se convierte con su propia moneda al crear el borrador', async () => {
+  const insertParams = []
+  const client = {
+    async query(sql, params) {
+      if (/SELECT source_code_key, product_id/.test(sql)) return { rows: [] }
+      insertParams.push(params)
+      return { rows: params.filter((_, index) => index % 11 === 0).map(codigo => ({ codigo })) }
+    },
+  }
+
+  await createSupplierPriceDrafts(client, [{
+    fileName: 'CABRERA.xlsx', supplier: 'CABRERA', currency: 'ARS', totalRows: 2, skipped: 0,
+    rows: [
+      { codigo: 'ARS-1', descripcion: 'En pesos', precio_costo: 1510, precio_venta: 2000, precio_iva: 2420 },
+      { codigo: 'USD-EXCEPCION', descripcion: 'Excepción en dólares', precio_costo: 2, precio_venta: 3, precio_iva: 3.63, currency: 'USD' },
+    ],
+  }], 1510)
+
+  assert.deepEqual(insertParams[0].slice(0, 11), [
+    'ARS-1', 'En pesos', 1510, 2000, 2420, 1, 1.32, 1.6, 'ARS', 1510, 'CABRERA',
+  ])
+  assert.deepEqual(insertParams[0].slice(11, 22), [
+    'USD-EXCEPCION', 'Excepción en dólares', 3020, 4530, 5481.3, 2, 3, 3.63, 'USD', 1510, 'CABRERA',
   ])
 })
 
