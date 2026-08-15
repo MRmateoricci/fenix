@@ -13,6 +13,14 @@ export class InsufficientStockError extends Error {
 // caller). Si algún item no tiene stock suficiente, tira InsufficientStockError
 // para que el caller haga ROLLBACK — ninguno de los descuentos previos de esta
 // misma orden queda aplicado a medias.
+//
+// Excepción "a pedido": el WHERE de cada UPDATE lee products.a_pedido en la
+// misma sentencia (nunca un dato mandado por el cliente, ni una lectura previa
+// separada que pueda quedar vieja) y, si es true, deja pasar el descuento aunque
+// dejaría el stock en negativo. Cuando eso pasa, se marca `item.aPedido = true`
+// mutando el item recibido (el mismo array que el caller serializa en la orden)
+// para que se sepa qué items necesitaron la excepción — un producto a_pedido con
+// stock suficiente no se marca, porque para ese item no cambió nada.
 export async function reserveStock(client, items) {
   for (const item of items) {
     let rows
@@ -20,8 +28,9 @@ export async function reserveStock(client, items) {
       const result = await client.query(
         `UPDATE product_variant_rules vr
          SET stock=stock-$1,updated_at=NOW()
-         WHERE vr.id=$2 AND vr.product_id=$3 AND vr.stock >= $1
-         RETURNING vr.product_id`,
+         WHERE vr.id=$2 AND vr.product_id=$3
+           AND (vr.stock >= $1 OR (SELECT a_pedido FROM products WHERE id = $3))
+         RETURNING vr.product_id, vr.stock`,
         [item.quantity, item.variantRuleId, item.id]
       )
       rows = result.rows
@@ -30,6 +39,7 @@ export async function reserveStock(client, items) {
           `UPDATE products SET stock=stock-$1,stock_updated_at=NOW() WHERE id=$2`,
           [item.quantity, item.id]
         )
+        item.aPedido = Number(rows[0].stock) < 0
       }
     } else {
       const result = item.colorKey != null && item.sizeKey != null
@@ -39,17 +49,21 @@ export async function reserveStock(client, items) {
                stock = stock - $1,
                stock_updated_at = NOW()
            WHERE id = $2
-             AND (variant_stock #>> $3::text[])::int >= $1
-           RETURNING stock`,
+             AND ((variant_stock #>> $3::text[])::int >= $1 OR a_pedido = TRUE)
+           RETURNING (variant_stock #>> $3::text[])::int AS cell_stock`,
           [item.quantity, item.id, [item.colorKey, item.sizeKey]]
         )
       : await client.query(
           `UPDATE products SET stock = stock - $1, stock_updated_at = NOW()
-           WHERE id = $2 AND stock >= $1
+           WHERE id = $2 AND (stock >= $1 OR a_pedido = TRUE)
            RETURNING stock`,
           [item.quantity, item.id]
         )
       rows = result.rows
+      if (rows.length) {
+        const postStock = item.colorKey != null && item.sizeKey != null ? rows[0].cell_stock : rows[0].stock
+        item.aPedido = Number(postStock) < 0
+      }
     }
     if (!rows.length) throw new InsufficientStockError(item.name)
   }

@@ -9,6 +9,7 @@ import Footer from './components/Footer'
 import WhatsAppFAB from './components/WhatsAppFAB'
 import Home from './pages/Home'
 import Products from './pages/Products'
+import ProductosAPedido from './pages/ProductosAPedido'
 import ProductDetail from './pages/ProductDetail'
 import Cart from './pages/Cart'
 import Checkout from './pages/Checkout'
@@ -112,6 +113,7 @@ export default function App() {
                 <Route element={<Layout />}>
                   <Route path="/" element={<Home />} />
                   <Route path="/products" element={<Products />} />
+                  <Route path="/productos-a-pedido" element={<ProductosAPedido />} />
                   <Route path="/products/:id" element={<ProductDetail />} />
                   <Route path="/cart" element={<Cart />} />
                   <Route path="/checkout" element={<Checkout />} />

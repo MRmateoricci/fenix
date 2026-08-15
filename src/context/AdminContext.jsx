@@ -43,6 +43,8 @@ function toBackendPayload(p) {
   if ('published' in p)     out.published          = p.published
   if ('isNew' in p)         out.is_new             = p.isNew
   if ('bestSeller' in p)    out.best_seller        = p.bestSeller
+  if ('aPedido' in p)       out.a_pedido           = p.aPedido
+  if ('diasEntregaPedido' in p) out.dias_entrega_pedido = p.diasEntregaPedido === '' ? null : p.diasEntregaPedido
   // El backend solo tiene `stock` (entero) — inStock es stock > 0 derivado al
   // leer. Si viene stock explícito se usa tal cual; si solo viene el toggle
   // inStock, se traduce a un stock mínimo (1) o a 0.
@@ -78,7 +80,7 @@ export function AdminProvider({ children }) {
   const [importResult, setImportResult]          = useState(null)
   const [importLoading, setImportLoading]        = useState(false)
   const [importError, setImportError]            = useState(null)
-  const [currencySettings, setCurrencySettings]  = useState({ usdArsRate: 1510, updatedAt: null })
+  const [currencySettings, setCurrencySettings]  = useState({ usdArsRate: 1510, diasEntregaPedidoDefault: 7, updatedAt: null })
   const [supplierSettings, setSupplierSettings]  = useState([])
   const [subcategories, setSubcategories]        = useState([])
   const [productTypes, setProductTypes]          = useState([])
@@ -205,6 +207,17 @@ export function AdminProvider({ children }) {
     })
     const data = await res.json()
     if (!res.ok) throw new Error(data.error || 'No se pudo actualizar el producto')
+    return data
+  }, [])
+
+  const updateProductCurrency = useCallback(async (id, currency) => {
+    const res = await fetch(`${API_BASE}/api/products/${id}/currency`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', 'x-admin-token': ADMIN_PASSWORD },
+      body: JSON.stringify({ currency }),
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error || 'No se pudo cambiar la moneda del producto')
     return data
   }, [])
 
@@ -384,7 +397,19 @@ export function AdminProvider({ children }) {
     })
     const data = await res.json()
     if (!res.ok) throw new Error(data.error || 'No se pudo guardar la cotizacion')
-    setCurrencySettings(data)
+    setCurrencySettings(prev => ({ ...prev, ...data }))
+    return data
+  }, [])
+
+  const updateDeliverySettings = useCallback(async (diasEntregaPedidoDefault) => {
+    const res = await fetch(`${API_BASE}/api/products/delivery-settings`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', 'x-admin-token': ADMIN_PASSWORD },
+      body: JSON.stringify({ diasEntregaPedidoDefault }),
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error || 'No se pudo guardar el plazo')
+    setCurrencySettings(prev => ({ ...prev, ...data }))
     return data
   }, [])
 
@@ -422,6 +447,28 @@ export function AdminProvider({ children }) {
       : [...current, { supplier, currency: data.currency, configured: true, productCount: data.productCount }]
     )
     return data
+  }, [])
+
+  const setPriceCodeCurrency = useCallback(async (supplier, codigo, currency) => {
+    const res = await fetch(`${API_BASE}/api/products/supplier-settings/${encodeURIComponent(supplier)}/codes/${encodeURIComponent(codigo)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'x-admin-token': ADMIN_PASSWORD },
+      body: JSON.stringify({ currency }),
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error || 'No se pudo guardar la moneda de este código')
+    return data
+  }, [])
+
+  const clearPriceCodeCurrency = useCallback(async (supplier, codigo) => {
+    const res = await fetch(`${API_BASE}/api/products/supplier-settings/${encodeURIComponent(supplier)}/codes/${encodeURIComponent(codigo)}`, {
+      method: 'DELETE',
+      headers: { 'x-admin-token': ADMIN_PASSWORD },
+    })
+    if (!res.ok && res.status !== 204) {
+      const data = await res.json().catch(() => ({}))
+      throw new Error(data.error || 'No se pudo quitar la excepción de moneda')
+    }
   }, [])
 
   // ── fetchSubcategories/fetchProductTypes + create/delete ─────────────────
@@ -840,6 +887,43 @@ export function AdminProvider({ children }) {
     }
   }, [])
 
+  // ── parseFolderImages/applyFolderImages — subir una carpeta de imágenes sueltas
+  // y vincularlas a productos por el código detectado en el nombre de archivo ──
+  const parseFolderImages = useCallback(async (files, supplier) => {
+    const formData = new FormData()
+    formData.append('supplier', supplier)
+    for (const file of files) formData.append('files', file)
+    const res = await fetch(`${API_BASE}/api/products/import/folder-images/parse`, {
+      method: 'POST',
+      headers: { 'x-admin-token': ADMIN_PASSWORD },
+      body: formData,
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error || 'No se pudieron leer las imágenes')
+    return data
+  }, [])
+
+  const applyFolderImages = useCallback(async (importId, supplier, actions) => {
+    setImportLoading(true)
+    setImportError(null)
+    try {
+      const res = await fetch(`${API_BASE}/api/products/import/folder-images/apply`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-admin-token': ADMIN_PASSWORD },
+        body: JSON.stringify({ importId, supplier, actions }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'No se pudieron guardar las imágenes')
+      setImportResult(data)
+      return data
+    } catch (err) {
+      setImportError(err.message)
+      throw err
+    } finally {
+      setImportLoading(false)
+    }
+  }, [])
+
   // ── fetchCoupons/createCoupon/updateCoupon/deleteCoupon ──────────────────
   const fetchCoupons = useCallback(async () => {
     setCouponsLoading(true)
@@ -905,14 +989,15 @@ export function AdminProvider({ children }) {
       fetchOrders, updateOrderStatus,
       inventory, inventoryTotal, inventorySuppliers, inventoryLoading, inventoryError,
       importResult, importLoading, importError,
-      currencySettings, fetchCurrencySettings, updateCurrencySettings,
+      currencySettings, fetchCurrencySettings, updateCurrencySettings, updateDeliverySettings,
       supplierSettings, fetchSupplierSettings, updateSupplierCurrency,
+      setPriceCodeCurrency, clearPriceCodeCurrency,
       subcategories, fetchSubcategories, createSubcategory, updateSubcategory, deleteSubcategory,
       productTypes, fetchProductTypes, createProductType, updateProductType, deleteProductType,
       categoryCustomizations, saveCategoryCustomization,
       categoryTree,
       coupons, couponsLoading, couponsError, fetchCoupons, createCoupon, updateCoupon, deleteCoupon,
-      fetchInventory, fetchInventoryItem, createInventoryItem, updateInventoryItem, deleteInventoryItem,
+      fetchInventory, fetchInventoryItem, createInventoryItem, updateInventoryItem, updateProductCurrency, deleteInventoryItem,
       fetchInventorySelectionIds, applyInventoryBatch,
       previewProductMerge, mergeInventoryProducts, updateProductVariantRules, detachProductVariant,
       adjustInventoryStocks, uploadInventoryFile, uploadProductImage,
@@ -920,6 +1005,7 @@ export function AdminProvider({ children }) {
       searchProducts, parseInvoicePdf, applyInvoiceLines,
       parseCleosCatalogPdf, uploadCleosPreviewImage, applyCleosCatalogProducts,
       parseCatalogImagesPdf, uploadCatalogPreviewImage, applyCatalogImages,
+      parseFolderImages, applyFolderImages,
     }}>
       {children}
     </AdminContext.Provider>

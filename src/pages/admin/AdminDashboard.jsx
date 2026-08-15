@@ -648,7 +648,7 @@ const EMPTY = {
   watts: '', amperes: '',
   lengthCm: '', widthCm: '', heightCm: '', weightKg: '',
   inStock: true, stock: '', colors: [], sizes: [], tones: [], variantStock: {}, variantRules: [],
-  published: true, isNew: false, bestSeller: false,
+  published: true, isNew: false, bestSeller: false, aPedido: false, diasEntregaPedido: '',
 }
 
 // Normaliza una fila de la API para editar todos sus datos en un único modal.
@@ -692,6 +692,8 @@ function draftFromInventoryRow(inv) {
     published:   Boolean(inv.published),
     isNew:       Boolean(inv.is_new),
     bestSeller:  Boolean(inv.best_seller),
+    aPedido:     Boolean(inv.a_pedido),
+    diasEntregaPedido: inv.dias_entrega_pedido ?? '',
   }
 }
 
@@ -730,6 +732,8 @@ function toUnifiedProductPayload(data) {
     published: Boolean(data.published),
     is_new: Boolean(data.isNew),
     best_seller: Boolean(data.bestSeller),
+    a_pedido: Boolean(data.aPedido),
+    dias_entrega_pedido: data.diasEntregaPedido === '' || data.diasEntregaPedido == null ? null : Number(data.diasEntregaPedido),
   }
   if (data.stock !== undefined) payload.stock = data.stock === '' ? 0 : Number(data.stock)
   return payload
@@ -1119,6 +1123,31 @@ function ProductModal({ product, onSave, onClose, onVariantsChanged, publishOnSa
                     {form.bestSeller ? 'Se muestra en la tarjeta' : 'No se muestra'}
                   </span>
                 </div>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                <label style={lbl}>Producto "A pedido"</label>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, height: 38 }}>
+                  <Toggle value={form.aPedido} onChange={v => set('aPedido', v)} />
+                  <span style={{ fontSize: 13, color: form.aPedido ? C.green : C.text3, fontWeight: 600 }}>
+                    {form.aPedido ? 'Se puede comprar sin stock, con plazo de entrega' : 'Sin stock no se puede comprar'}
+                  </span>
+                </div>
+                {form.aPedido && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 4 }}>
+                    <label style={lbl}>Plazo de entrega (días hábiles)</label>
+                    <input
+                      type="number" min="1" step="1"
+                      value={form.diasEntregaPedido}
+                      onChange={e => set('diasEntregaPedido', e.target.value)}
+                      placeholder={`Default de la tienda: ${currencySettings.diasEntregaPedidoDefault || 7}`}
+                      style={{ ...inp, maxWidth: 240 }}
+                    />
+                    <span style={{ fontSize: 11, color: C.muted }}>
+                      Si lo dejás vacío, se usa el default de la tienda ({currencySettings.diasEntregaPedidoDefault || 7} días).
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
           </section>
@@ -3763,11 +3792,13 @@ function ImportUploadCard({
   const inputRef = useRef(null)
   const directoryInputRef = useRef(null)
   const handleSelection = (fileList) => {
-    const acceptsPdf = String(accept).toLowerCase().includes('.pdf')
-    const files = [...(fileList || [])].filter(file => acceptsPdf
-      ? /\.pdf$/i.test(file.name)
-      : /\.(xlsx|xls)$/i.test(file.name)
-    )
+    const acceptLower = String(accept).toLowerCase()
+    const matcher = acceptLower.includes('.pdf')
+      ? /\.pdf$/i
+      : acceptLower.includes('image/')
+        ? /\.(jpe?g|png|webp|gif)$/i
+        : /\.(xlsx|xls)$/i
+    const files = [...(fileList || [])].filter(file => matcher.test(file.name))
     if (!files.length) return
     if (onFiles) onFiles(files)
     else if (onFile) onFile(files[0])
@@ -4993,6 +5024,41 @@ function CurrencySettingsCard({ settings, onSave }) {
   )
 }
 
+function DeliveryDefaultCard({ settings, onSave }) {
+  const [value, setValue] = useState(String(settings.diasEntregaPedidoDefault || 7))
+  const [saving, setSaving] = useState(false)
+  const [message, setMessage] = useState('')
+
+  useEffect(() => setValue(String(settings.diasEntregaPedidoDefault || 7)), [settings.diasEntregaPedidoDefault])
+
+  const save = async () => {
+    const days = Math.trunc(Number(value))
+    if (!Number.isFinite(days) || days <= 0) { setMessage('Ingresá una cantidad de días válida.'); return }
+    setSaving(true)
+    setMessage('')
+    try {
+      await onSave(days)
+      setMessage('Plazo guardado.')
+    } catch (err) {
+      setMessage(err.message || 'No se pudo guardar.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div style={{ background: C.white, borderRadius: 10, border: `1px solid ${C.border}`, padding: '11px 13px', display: 'flex', flexDirection: 'column', gap: 5 }}>
+      <div style={{ fontSize: 12.5, fontWeight: 600, color: C.ink }}>Plazo de entrega "a pedido"</div>
+      <p style={{ fontSize: 10.5, color: C.muted, margin: 0 }}>Default para productos a pedido sin plazo propio cargado.</p>
+      <div style={{ display: 'flex', gap: 7 }}>
+        <input type="number" min="1" step="1" value={value} onChange={event => { setValue(event.target.value); setMessage('') }} aria-label="Días hábiles de entrega por default" style={{ ...inp, minWidth: 0 }} />
+        <button type="button" onClick={save} disabled={saving} style={{ ...outlineBtn, padding: '5px 9px', whiteSpace: 'nowrap' }}>{saving ? 'Guardando...' : 'Guardar'}</button>
+      </div>
+      <div style={{ minHeight: 14, fontSize: 10.5, color: message.includes('guardado') ? C.green : C.red }}>{message || `${Math.trunc(Number(value)) || 7} días hábiles`}</div>
+    </div>
+  )
+}
+
 function SupplierToolbar({ supplierNames, settings, inventory, selectedSupplier, usdArsRate, onSelect, onSave }) {
   const [value, setValue] = useState(selectedSupplier === 'Todos' ? '' : selectedSupplier)
   const [open, setOpen] = useState(false)
@@ -5027,7 +5093,8 @@ function SupplierToolbar({ supplierNames, settings, inventory, selectedSupplier,
     setMessage('')
     try {
       const result = await onSave(selectedName, currency)
-      setMessage(`${result.productCount} productos pasaron a ${currency}.`)
+      const skipped = Number(result.skippedCount || 0)
+      setMessage(`${result.productCount} productos pasaron a ${currency}.${skipped ? ` ${skipped} mantuvieron su moneda por tener una excepción propia.` : ''}`)
     } catch (err) {
       setMessage(err.message || 'No se pudo guardar.')
     } finally {
@@ -6521,10 +6588,12 @@ const BULK_PRICE_STATUS = {
   invalid: { label: 'Inválido', color: C.red, background: C.redLight },
 }
 
-function BulkPriceReviewModal({ preview, saving = false, readOnly = false, error = '', onConfirm, onClose }) {
+function BulkPriceReviewModal({ preview, saving = false, readOnly = false, error = '', onConfirm, onCurrencyOverride, onClose }) {
   const initialFilter = preview.updated ? 'update' : preview.created ? 'create' : preview.unchanged ? 'unchanged' : 'all'
   const [filter, setFilter] = useState(initialFilter)
   const [search, setSearch] = useState('')
+  const [savingCurrencyKey, setSavingCurrencyKey] = useState(null)
+  const [overrideError, setOverrideError] = useState('')
   const rows = useMemo(() => (preview.files || []).flatMap(file =>
     (file.items || []).map((item, index) => ({
       ...item,
@@ -6548,6 +6617,19 @@ function BulkPriceReviewModal({ preview, saving = false, readOnly = false, error
   const priceText = (value, currency) => {
     if (value == null) return '—'
     return currency === 'USD' ? fmtUsd(value) : fmt(value)
+  }
+  const canOverrideCurrency = !readOnly && typeof onCurrencyOverride === 'function'
+  async function handleCurrencyOverride(row, currency) {
+    if (savingCurrencyKey) return
+    setOverrideError('')
+    setSavingCurrencyKey(row.rowKey)
+    try {
+      await onCurrencyOverride(row.codigo, currency)
+    } catch (err) {
+      setOverrideError(err.message || 'No se pudo guardar la moneda de este código')
+    } finally {
+      setSavingCurrencyKey(null)
+    }
   }
 
   return (
@@ -6619,6 +6701,31 @@ function BulkPriceReviewModal({ preview, saving = false, readOnly = false, error
                     <td style={{ padding: 10, maxWidth: 230 }}>
                       <strong style={{ color: C.ink, fontFamily: 'monospace' }}>{row.codigo || `Fila ${row.rowNumber}`}</strong>
                       {row.descripcion && <span title={row.descripcion} style={{ display: 'block', marginTop: 3, color: C.muted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.descripcion}</span>}
+                      {canOverrideCurrency && row.codigo && !['invalid', 'duplicate'].includes(row.status) && (
+                        row.currency !== row.fileCurrency ? (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 5 }}>
+                            <span style={pill('#FEF3C7', '#92400E')}>Excepción: {row.currency}</span>
+                            <button
+                              type="button"
+                              disabled={savingCurrencyKey === row.rowKey}
+                              onClick={() => handleCurrencyOverride(row, null)}
+                              style={{ border: 'none', background: 'none', padding: 0, color: C.muted, fontSize: 10, textDecoration: 'underline', cursor: 'pointer' }}
+                            >
+                              {savingCurrencyKey === row.rowKey ? '...' : 'Quitar'}
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            disabled={savingCurrencyKey === row.rowKey}
+                            onClick={() => handleCurrencyOverride(row, row.fileCurrency === 'USD' ? 'ARS' : 'USD')}
+                            title="Este código se leerá siempre en esta moneda para este proveedor, aunque el resto del excel esté en otra."
+                            style={{ display: 'block', marginTop: 5, fontSize: 9.5, padding: '2px 6px', borderRadius: 5, border: `1px solid ${C.border}`, background: C.white, color: C.text3, cursor: 'pointer' }}
+                          >
+                            {savingCurrencyKey === row.rowKey ? 'Guardando...' : `Marcar código en ${row.fileCurrency === 'USD' ? 'ARS' : 'USD'}`}
+                          </button>
+                        )
+                      )}
                     </td>
                     <td style={{ padding: 10, maxWidth: 230 }}>
                       {row.targetCode ? <><strong style={{ display: 'block', color: C.ink }}>{row.targetCode}</strong><span style={{ display: 'block', marginTop: 3, color: C.muted }}>{row.targetName}{row.variant ? ` · ${row.variant}` : ''}</span></> : <span style={{ color: C.muted }}>{row.status === 'create' ? 'Producto nuevo sin publicar' : '—'}</span>}
@@ -6643,7 +6750,7 @@ function BulkPriceReviewModal({ preview, saving = false, readOnly = false, error
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '13px 20px', borderTop: `1px solid ${C.border}`, background: C.white }}>
-          <span style={{ color: error ? C.red : C.muted, fontSize: 11.5 }}>{error || `${visibleRows.length} de ${rows.length} filas visibles`}</span>
+          <span style={{ color: (error || overrideError) ? C.red : C.muted, fontSize: 11.5 }}>{error || overrideError || `${visibleRows.length} de ${rows.length} filas visibles`}</span>
           <div style={{ display: 'flex', gap: 8 }}>
             {!readOnly && <button type="button" onClick={onClose} disabled={saving} style={outlineBtn}>Cancelar</button>}
             {!readOnly && <button type="button" onClick={onConfirm} disabled={saving || !(preview.created || preview.updated)} style={{ ...solidBtn, background: C.green, color: C.white, opacity: saving || !(preview.created || preview.updated) ? .55 : 1 }}>
@@ -6657,19 +6764,215 @@ function BulkPriceReviewModal({ preview, saving = false, readOnly = false, error
   )
 }
 
+function FolderImageProductPicker({ row, supplier, onChange }) {
+  const { searchProducts } = useAdmin()
+  const [query, setQuery] = useState('')
+  const [results, setResults] = useState([])
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    if (!query.trim() || query.trim().length < 2) { setResults([]); return undefined }
+    setLoading(true)
+    const timeout = setTimeout(async () => {
+      setResults(await searchProducts(query, { supplier }))
+      setLoading(false)
+    }, 300)
+    return () => clearTimeout(timeout)
+  }, [query, supplier, searchProducts])
+
+  const choose = (product) => {
+    onChange({
+      ...row,
+      match: { id: product.id, codigo: product.codigo, name: product.name, image_url: product.image_url || null },
+      accepted: true,
+    })
+    setQuery('')
+    setResults([])
+  }
+
+  return (
+    <div>
+      <input
+        value={query}
+        onChange={event => setQuery(event.target.value)}
+        placeholder="Buscar producto por código o nombre..."
+        style={{ ...inp, padding: '6px 8px', fontSize: 11.5 }}
+      />
+      {loading && <span style={{ fontSize: 10.5, color: C.muted }}>Buscando...</span>}
+      {!loading && !!results.length && (
+        <div style={{ display: 'grid', gap: 3, marginTop: 6, maxHeight: 140, overflowY: 'auto' }}>
+          {results.map(product => (
+            <button
+              type="button"
+              key={product.id}
+              onClick={() => choose(product)}
+              style={{ border: 0, background: C.paper, borderRadius: 5, padding: '6px 8px', textAlign: 'left', cursor: 'pointer', color: C.text2, fontSize: 11 }}
+            >
+              <strong>{product.codigo}</strong> — {product.name || product.descripcion || 'Sin descripción'}
+            </button>
+          ))}
+        </div>
+      )}
+      {!loading && query.trim().length >= 2 && !results.length && (
+        <span style={{ fontSize: 10.5, color: C.muted }}>No se encontraron productos.</span>
+      )}
+    </div>
+  )
+}
+
+function FolderImageReviewRow({ row, supplier, onChange }) {
+  const set = changes => onChange({ ...row, ...changes })
+  const image = row.imageOptions[0]
+
+  return (
+    <div style={{ border: `1px solid ${row.accepted ? C.border : C.hairline}`, borderRadius: 10, padding: 13, opacity: row.accepted ? 1 : 0.72 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, marginBottom: 10 }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12, fontWeight: 600, color: C.ink }}>
+          <input
+            type="checkbox"
+            checked={row.accepted}
+            disabled={!row.match}
+            onChange={event => set({ accepted: event.target.checked })}
+          />
+          {row.accepted ? 'Aplicar esta imagen' : 'No aplicar'}
+        </label>
+        <span style={pill('#F3F4F6', C.text3)}>{row.originalName}</span>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(100px, 130px) minmax(0, 1fr)', gap: 15 }}>
+        <div style={{ aspectRatio: '1 / 1', border: `1px solid ${C.border}`, borderRadius: 8, background: '#F4F4F4', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <img src={image.url} alt={row.originalName} style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+        </div>
+
+        <div style={{ minWidth: 0 }}>
+          {row.match ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+              {row.match.image_url && (
+                <img src={row.match.image_url} alt={`Imagen actual de ${row.match.codigo}`} style={{ width: 40, height: 40, objectFit: 'contain', borderRadius: 5, background: '#fff', border: `1px solid ${C.border}`, flexShrink: 0 }} />
+              )}
+              <div style={{ fontSize: 11.5, color: C.text2, minWidth: 0 }}>
+                Va a <strong>{row.match.codigo}</strong> — {row.match.name || 'sin nombre'}
+                {row.match.image_url && <div style={{ fontSize: 10.5, color: C.muted, marginTop: 2 }}>Reemplaza la imagen actual del producto</div>}
+              </div>
+              <button type="button" onClick={() => set({ match: null, accepted: false })} style={{ ...outlineBtn, padding: '4px 8px', fontSize: 10, marginLeft: 'auto', flexShrink: 0 }}>Cambiar</button>
+            </div>
+          ) : (
+            <>
+              {row.detectedCode && (
+                <p style={{ fontSize: 10.5, color: C.amberDark, margin: '0 0 6px' }}>
+                  No se encontró ningún producto con el código "{row.detectedCode}". Buscalo a mano:
+                </p>
+              )}
+              <FolderImageProductPicker row={row} supplier={supplier} onChange={onChange} />
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function FolderImagesReviewModal({ parsed, onConfirm, onClose }) {
+  const [rows, setRows] = useState(() => parsed.products.map((row, index) => ({
+    ...row,
+    key: `${index}-${row.originalName}`,
+    accepted: Boolean(row.match),
+  })))
+  const [query, setQuery] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState('')
+
+  const updateRow = (key, next) => setRows(current => current.map(row => row.key === key ? next : row))
+  const acceptedRows = rows.filter(row => row.accepted && row.match && row.selectedImageKey)
+  const unmatchedCount = rows.filter(row => !row.match).length
+  const visibleRows = rows.filter(row => {
+    const needle = query.trim().toLowerCase()
+    if (!needle) return true
+    return `${row.originalName} ${row.detectedCode || ''} ${row.match?.codigo || ''} ${row.match?.name || ''}`.toLowerCase().includes(needle)
+  })
+
+  const handleConfirm = async () => {
+    setError('')
+    if (!acceptedRows.length) {
+      setError('Seleccioná al menos una imagen para aplicar.')
+      return
+    }
+    const productIds = acceptedRows.map(row => row.match.id)
+    if (productIds.some((id, index) => productIds.indexOf(id) !== index)) {
+      setError('Hay más de una imagen apuntando al mismo producto. Dejá una sola por producto.')
+      return
+    }
+    setSubmitting(true)
+    try {
+      await onConfirm(parsed.importId, parsed.supplier, acceptedRows.map(row => ({ productId: row.match.id, selectedImageKey: row.selectedImageKey })))
+      onClose()
+    } catch (confirmError) {
+      setError(confirmError.message || 'No se pudieron guardar las imágenes')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 16 }}>
+      <div style={{ background: C.paper, borderRadius: 12, width: '100%', maxWidth: 900, height: '92vh', display: 'flex', flexDirection: 'column', boxShadow: '0 24px 80px rgba(0,0,0,0.3)', overflow: 'hidden' }}>
+        <div style={{ padding: '22px 26px 17px', borderBottom: `1px solid ${C.border}` }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', gap: 15 }}>
+            <div>
+              <h2 style={{ fontFamily: ADMIN_FONT, fontSize: 21, color: C.ink, margin: 0, fontWeight: 500 }}>Revisar imágenes de {parsed.supplier}</h2>
+              <p style={{ fontSize: 11.5, color: C.muted, margin: '6px 0 0' }}>
+                Se subieron {rows.length} imágenes. Sólo se muestran y se pueden asignar productos de {parsed.supplier}. Nada se modifica hasta confirmar.
+              </p>
+            </div>
+            <button type="button" onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.text3, fontSize: 18 }}>×</button>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 14, flexWrap: 'wrap' }}>
+            <input value={query} onChange={event => setQuery(event.target.value)} placeholder="Buscar archivo o producto..." style={{ ...inp, padding: '7px 9px', fontSize: 11.5, flex: '1 1 280px', maxWidth: 430 }} />
+            <span style={pill(C.greenLight, C.green)}>{acceptedRows.length} listas para aplicar</span>
+            {!!unmatchedCount && <span style={pill(C.amberLight, C.amberDark)}>{unmatchedCount} sin producto</span>}
+          </div>
+        </div>
+
+        <div style={{ flex: 1, overflowY: 'auto', padding: '16px 26px', display: 'grid', gap: 10 }}>
+          {visibleRows.map(row => (
+            <FolderImageReviewRow key={row.key} row={row} supplier={parsed.supplier} onChange={next => updateRow(row.key, next)} />
+          ))}
+          {!visibleRows.length && <p style={{ fontSize: 11.5, color: C.muted }}>No hay filas que coincidan con la búsqueda.</p>}
+        </div>
+
+        {error && <p style={{ fontSize: 12, color: C.red, margin: '14px 26px 0' }}>{error}</p>}
+
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', padding: '16px 26px', borderTop: `1px solid ${C.border}` }}>
+          <button type="button" onClick={onClose} disabled={submitting} style={outlineBtn}>Cancelar</button>
+          <button
+            type="button"
+            onClick={handleConfirm}
+            disabled={submitting || !acceptedRows.length}
+            style={{ ...solidBtn, background: C.green, color: C.white, opacity: submitting || !acceptedRows.length ? 0.55 : 1 }}
+          >
+            {submitting ? 'Guardando...' : `Confirmar ${acceptedRows.length} imagen${acceptedRows.length === 1 ? '' : 'es'}`}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function UnifiedProductsTab() {
   const {
     inventory, inventoryTotal, inventorySuppliers, inventoryLoading, inventoryError,
     importResult, importLoading, importError,
-    currencySettings, updateCurrencySettings,
+    currencySettings, updateCurrencySettings, updateDeliverySettings,
     supplierSettings, updateSupplierCurrency,
-    fetchInventory, fetchInventoryItem, createInventoryItem, updateInventoryItem, deleteInventoryItem, fetchCatalog,
+    setPriceCodeCurrency, clearPriceCodeCurrency,
+    fetchInventory, fetchInventoryItem, createInventoryItem, updateInventoryItem, updateProductCurrency, deleteInventoryItem, fetchCatalog,
     fetchInventorySelectionIds, applyInventoryBatch,
     previewProductMerge, mergeInventoryProducts,
     adjustInventoryStocks, uploadInventoryFile,
     previewPriceFiles, uploadPriceFiles,
     parseInvoicePdf, applyInvoiceLines,
     parseCatalogImagesPdf, uploadCatalogPreviewImage, applyCatalogImages,
+    parseFolderImages, applyFolderImages,
   } = useAdmin()
 
   const [search, setSearch]           = useState('')
@@ -6701,10 +7004,15 @@ function UnifiedProductsTab() {
   const [catalogParsing, setCatalogParsing]   = useState(false)
   const [catalogError, setCatalogError]       = useState(null)
   const [catalogParsed, setCatalogParsed]     = useState(null)
+  const [folderImagesSupplier, setFolderImagesSupplier] = useState('')
+  const [folderImagesParsing, setFolderImagesParsing]   = useState(false)
+  const [folderImagesError, setFolderImagesError]       = useState(null)
+  const [folderImagesParsed, setFolderImagesParsed]     = useState(null)
   const [stockDrafts, setStockDrafts]       = useState({})
   const [stockSaving, setStockSaving]       = useState(false)
   const [stockSaveError, setStockSaveError] = useState('')
   const [hoveredProductId, setHoveredProductId] = useState(null)
+  const [currencyTogglingId, setCurrencyTogglingId] = useState(null)
   const [selectedIds, setSelectedIds]       = useState(() => new Set())
   const [bulkAction, setBulkAction]         = useState('precio_venta')
   const [bulkPrice, setBulkPrice]           = useState('')
@@ -6821,6 +7129,14 @@ function UnifiedProductsTab() {
     }
   }
 
+  async function handlePriceCodeCurrency(codigo, currency) {
+    if (!pricePreview) return
+    if (currency) await setPriceCodeCurrency(pricePreview.supplier, codigo, currency)
+    else await clearPriceCodeCurrency(pricePreview.supplier, codigo)
+    const data = await previewPriceFiles(pricePreview.files, pricePreview.supplier)
+    setPricePreview(current => (current ? { ...current, data } : current))
+  }
+
   async function handleSupplierCurrencySave(supplier, currency) {
     const result = await updateSupplierCurrency(supplier, currency)
     await fetchCatalog()
@@ -6829,10 +7145,31 @@ function UnifiedProductsTab() {
     return result
   }
 
+  async function handleProductCurrencyToggle(product) {
+    if (currencyTogglingId) return
+    setBulkError('')
+    setCurrencyTogglingId(product.id)
+    const nextCurrency = product.price_currency === 'USD' ? 'ARS' : 'USD'
+    try {
+      await updateProductCurrency(product.id, nextCurrency)
+      await fetchInventory(inventoryFilters)
+    } catch (err) {
+      setBulkError(err.message || 'No se pudo cambiar la moneda del producto')
+    } finally {
+      setCurrencyTogglingId(null)
+    }
+  }
+
   async function handleCurrencyRateSave(rate) {
     const result = await updateCurrencySettings(rate)
     await fetchCatalog()
     await fetchInventory(inventoryFilters)
+    return result
+  }
+
+  async function handleDeliveryDefaultSave(days) {
+    const result = await updateDeliverySettings(days)
+    await fetchCatalog()
     return result
   }
 
@@ -6862,6 +7199,30 @@ function UnifiedProductsTab() {
 
   async function handleCatalogImagesConfirm(importId, supplier, actions, merges, deletes) {
     await applyCatalogImages(importId, supplier, actions, merges, deletes)
+    await fetchCatalog()
+    setPage(1)
+    fetchInventory({ ...inventoryFilters, page: 1 })
+  }
+
+  async function handleFolderImagesUpload(files) {
+    if (!folderImagesSupplier) {
+      setFolderImagesError('Elegí el proveedor antes de subir las imágenes.')
+      return
+    }
+    setFolderImagesError(null)
+    setFolderImagesParsing(true)
+    try {
+      const data = await parseFolderImages(files, folderImagesSupplier)
+      setFolderImagesParsed(data)
+    } catch (err) {
+      setFolderImagesError(err.message)
+    } finally {
+      setFolderImagesParsing(false)
+    }
+  }
+
+  async function handleFolderImagesConfirm(importId, supplier, actions) {
+    await applyFolderImages(importId, supplier, actions)
     await fetchCatalog()
     setPage(1)
     fetchInventory({ ...inventoryFilters, page: 1 })
@@ -7168,7 +7529,30 @@ function UnifiedProductsTab() {
             ))}
           </select>
         </ImportUploadCard>
+        <ImportUploadCard
+          label="Imágenes por carpeta"
+          hint="Elegí el proveedor y una carpeta con fotos (o varios archivos sueltos) de ese proveedor. Nombrá cada imagen con el código del producto — vas a revisar el emparejamiento antes de guardar."
+          accept="image/jpeg,image/png,image/webp,image/gif"
+          multiple
+          allowDirectory
+          disabled={importLoading || folderImagesParsing || !folderImagesSupplier}
+          busyLabel={folderImagesParsing ? 'Leyendo imágenes...' : !folderImagesSupplier ? 'Elegí un proveedor' : 'Importando...'}
+          onFiles={handleFolderImagesUpload}
+        >
+          <select
+            value={folderImagesSupplier}
+            onChange={event => { setFolderImagesSupplier(event.target.value); setFolderImagesError(null) }}
+            aria-label="Proveedor de las imágenes"
+            style={{ ...inp, padding: '6px 8px', fontSize: 11, marginTop: 2 }}
+          >
+            <option value="">Seleccionar proveedor...</option>
+            {[...inventorySuppliers].sort(PRICE_CODE_COLLATOR.compare).map(supplier => (
+              <option key={supplier} value={supplier}>{supplier}</option>
+            ))}
+          </select>
+        </ImportUploadCard>
         <CurrencySettingsCard settings={currencySettings} onSave={handleCurrencyRateSave} />
+        <DeliveryDefaultCard settings={currencySettings} onSave={handleDeliveryDefaultSave} />
       </div>
 
       {invoiceError && (
@@ -7200,6 +7584,20 @@ function UnifiedProductsTab() {
         />
       )}
 
+      {folderImagesError && (
+        <DismissibleErrorNotice key={folderImagesError}>
+          {folderImagesError}
+        </DismissibleErrorNotice>
+      )}
+
+      {folderImagesParsed && (
+        <FolderImagesReviewModal
+          parsed={folderImagesParsed}
+          onConfirm={handleFolderImagesConfirm}
+          onClose={() => setFolderImagesParsed(null)}
+        />
+      )}
+
       {importError && (
         <DismissibleErrorNotice key={importError}>
           {importError}
@@ -7212,6 +7610,7 @@ function UnifiedProductsTab() {
           saving={importLoading}
           error={pricePreviewError}
           onConfirm={handlePriceFilesConfirm}
+          onCurrencyOverride={handlePriceCodeCurrency}
           onClose={() => { if (!importLoading) { setPricePreview(null); setPricePreviewError('') } }}
         />
       )}
@@ -7541,7 +7940,15 @@ function UnifiedProductsTab() {
                   </div>
                   <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11.5, color: C.text3, overflow: 'hidden', whiteSpace: 'nowrap' }}>
                     <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.supplier || 'OTRO'}</span>
-                    <small style={pill(p.price_currency === 'USD' ? '#EEF2FF' : '#F3F4F6', p.price_currency === 'USD' ? '#4338CA' : C.text3)}>{p.price_currency || 'ARS'}</small>
+                    <button
+                      type="button"
+                      onClick={event => { event.stopPropagation(); handleProductCurrencyToggle(p) }}
+                      disabled={currencyTogglingId === p.id}
+                      title="Este código quedó cargado en la moneda equivocada. Tocá para reinterpretarlo y recordar la moneda correcta para este proveedor."
+                      style={{ ...pill(p.price_currency === 'USD' ? '#EEF2FF' : '#F3F4F6', p.price_currency === 'USD' ? '#4338CA' : C.text3), border: 'none', cursor: 'pointer', opacity: currencyTogglingId === p.id ? 0.55 : 1 }}
+                    >
+                      {currencyTogglingId === p.id ? '...' : (p.price_currency || 'ARS')}
+                    </button>
                   </span>
                   <span style={{ display: 'flex', flexDirection: 'column', fontSize: 12.5, color: C.text2, overflow: 'hidden', whiteSpace: 'nowrap' }}>
                     <span>{costArs != null ? fmt(costArs) : '—'}</span>

@@ -43,6 +43,15 @@ function placeholderReviews(id) {
   return { rating, reviews }
 }
 
+function ClockIcon({ size = 12 }) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="1.8">
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 7v5l3.5 2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
 function StarRow({ value, size = 12 }) {
   const rounded = Math.round(value)
   return (
@@ -358,6 +367,11 @@ export default function ProductCard({ product }) {
           <span style={{ fontFamily: "'Inter', system-ui, sans-serif", fontSize: 12, color: T.text3 }}>
             Hasta {INSTALLMENTS} cuotas sin interés de <strong style={{ fontWeight: 600 }}>{fmt(displayPrice / INSTALLMENTS)}</strong>
           </span>
+          {!product.inStock && product.aPedido && (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontFamily: "'Inter', system-ui, sans-serif", fontSize: 11.5, color: T.amber, fontWeight: 500 }}>
+              <ClockIcon /> A pedido · llega en ~{product.diasEntregaPedido} días hábiles
+            </span>
+          )}
           <span style={{ fontFamily: "'Inter', system-ui, sans-serif", fontSize: 11, color: T.muted2 }}>
             Precio sin impuestos nacionales: {fmt(displayPrice * (1 - NATIONAL_TAX_RATE))}
           </span>

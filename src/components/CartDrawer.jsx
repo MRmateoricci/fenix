@@ -13,6 +13,8 @@ const T = {
   muted2:   '#9A917F',
   red:      '#CC0000',
   green:    '#1E8A4C',
+  amber:    '#8A5A00',
+  amberBg:  '#FDF0DC',
 }
 
 const fmt = (n) =>
@@ -104,6 +106,8 @@ export default function CartDrawer({ open, onClose }) {
         {items.length > 0 && (
           <FreeShippingProgress totalPrice={totalPrice} shippingConfig={shippingConfig} onViewZones={() => goTo('/policies/shipping')} />
         )}
+
+        <APedidoNotice items={items} />
 
         {/* Items */}
         <div style={{ flex: 1, overflowY: 'auto' }}>
@@ -224,6 +228,23 @@ export default function CartDrawer({ open, onClose }) {
         )}
       </aside>
     </>
+  )
+}
+
+// Aviso breve cuando el carrito incluye items a pedido — el plazo mostrado es
+// el mayor entre esos items, no una suma (cada uno llega por su cuenta).
+function APedidoNotice({ items }) {
+  const dias = items.filter((i) => i.aPedido).map((i) => Number(i.diasEntregaPedido) || 0)
+  if (!dias.length) return null
+  const maxDias = Math.max(...dias)
+  return (
+    <div style={{
+      margin: '16px 28px 0', padding: '10px 12px', borderRadius: 4,
+      background: T.amberBg, color: T.amber,
+      fontFamily: 'var(--font-sans)', fontSize: 11.5, lineHeight: 1.4,
+    }}>
+      Tu pedido incluye productos a pedido. El plazo de entrega es de hasta {maxDias} días hábiles.
+    </div>
   )
 }
 
@@ -381,6 +402,14 @@ function CartItem({ item, onRemove, onUpdate }) {
         }}>
           {item.category}
         </p>
+        {item.aPedido && (
+          <p style={{
+            fontFamily: "var(--font-sans)", fontSize: 10.5, color: T.amber,
+            margin: '-8px 0 12px',
+          }}>
+            A pedido · llega en ~{item.diasEntregaPedido} días hábiles
+          </p>
+        )}
 
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           {/* Qty */}

@@ -233,6 +233,8 @@ router.post('/', attachUserIfPresent, async (req, res) => {
       `SELECT products.id, precio_venta, precio_iva, precio_venta_usd, precio_iva_usd, price_currency,
               color_options, size_options, tone_options, variant_stock,
               COALESCE((SELECT usd_ars_rate FROM store_settings WHERE id=1),1510) AS usd_ars_rate,
+              a_pedido,
+              COALESCE(dias_entrega_pedido, (SELECT dias_entrega_pedido_default FROM store_settings WHERE id=1), 7) AS dias_entrega_pedido,
               COALESCE((SELECT jsonb_agg(to_jsonb(vr)) FROM product_variant_rules vr
                         WHERE vr.product_id=products.id), '[]'::jsonb) AS variant_rules
        FROM products WHERE id = ANY($1::uuid[])`,
@@ -280,6 +282,8 @@ router.post('/', attachUserIfPresent, async (req, res) => {
         colorKey: variantPath ? variantPath.colorKey : null,
         sizeKey:  variantPath ? variantPath.sizeKey : null,
         variantRuleId: variantPath?.variantRuleId || null,
+        aPedido: false,
+        diasEntregaPedido: null,
       })
     }
     const productsTotal = itemsSnapshot.reduce((sum, i) => sum + i.subtotal, 0)
@@ -334,6 +338,13 @@ router.post('/', attachUserIfPresent, async (req, res) => {
     try {
       await client.query('BEGIN')
       await reserveStock(client, itemsSnapshot)
+      // reserveStock marca item.aPedido = true cuando ese item específico tuvo
+      // que usar la excepción de stock insuficiente — acá solo completamos el
+      // plazo a mostrar, ya resuelto (producto o default de tienda) en el SELECT
+      // de dbProducts de más arriba.
+      for (const item of itemsSnapshot) {
+        if (item.aPedido) item.diasEntregaPedido = Number(productMap.get(item.id)?.dias_entrega_pedido) || 7
+      }
 
       const { rows } = await client.query(
         `INSERT INTO orders

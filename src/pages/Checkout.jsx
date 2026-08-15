@@ -829,6 +829,8 @@ export default function Checkout() {
 
             <BillingAddress formData={formData} errors={errors} setField={setField} />
 
+            <APedidoCheckoutNotice items={items} />
+
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginBottom: '2rem' }}>
               <GhostBtn onClick={() => setStep(2)} disabled={submitting}>
                 <ArrowLeftIcon /> Volver
@@ -1575,6 +1577,41 @@ function CheckSmall() {
   return (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
       <polyline points="20 6 9 17 4 12" />
+    </svg>
+  )
+}
+
+// Aviso visible antes de pagar — el cliente tiene que saber el plazo de items
+// a pedido ANTES de ir a Mercado Pago, no después. El plazo mostrado es el
+// mayor entre los items a pedido, no una suma (cada uno llega por su cuenta).
+// Puramente informativo: no se suma al tiempo de envío ni se calcula una fecha combinada.
+function APedidoCheckoutNotice({ items }) {
+  const dias = items.filter((i) => i.aPedido).map((i) => Number(i.diasEntregaPedido) || 0)
+  if (!dias.length) return null
+  const maxDias = Math.max(...dias)
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'flex-start', gap: 10,
+      padding: '14px 16px', borderRadius: 10, marginBottom: '1.5rem',
+      backgroundColor: 'rgba(224,138,30,0.1)', border: '1px solid rgba(224,138,30,0.35)',
+    }}>
+      <ClockIcon />
+      <p style={{ margin: 0, fontSize: '0.8125rem', color: '#8A5A00', lineHeight: 1.5 }}>
+        Tu pedido incluye productos a pedido. El plazo de entrega es de hasta <strong>{maxDias} días hábiles</strong>.
+      </p>
+    </div>
+  )
+}
+
+function ClockIcon() {
+  return (
+    <svg
+      style={{ flexShrink: 0, marginTop: '0.125rem', color: '#8A5A00' }}
+      width="16" height="16" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" strokeWidth="1.8"
+    >
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 7v5l3.5 2" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   )
 }

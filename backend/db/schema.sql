@@ -256,6 +256,15 @@ ALTER TABLE products ADD COLUMN IF NOT EXISTS weight_kg          NUMERIC(10,3);
 -- vendido"). Se activan a mano desde el admin, no se calculan de ventas.
 ALTER TABLE products ADD COLUMN IF NOT EXISTS is_new             BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE products ADD COLUMN IF NOT EXISTS best_seller        BOOLEAN NOT NULL DEFAULT FALSE;
+-- Producto "a pedido": no tiene stock inmediato, se fabrica/importa al confirmar
+-- la compra. Se activa a mano desde el admin y alimenta la sección pública
+-- "Productos a pedido".
+ALTER TABLE products ADD COLUMN IF NOT EXISTS a_pedido           BOOLEAN NOT NULL DEFAULT FALSE;
+-- Nullable a propósito: NULL significa "usar el default global de la tienda"
+-- (store_settings.dias_entrega_pedido_default), así el admin solo completa este
+-- campo producto por producto en los casos excepcionales que se apartan del plazo
+-- general.
+ALTER TABLE products ADD COLUMN IF NOT EXISTS dias_entrega_pedido INTEGER;
 
 -- Asociaciones confirmadas entre el código que usa cada proveedor en su XLS y
 -- el producto real del catálogo. Se consultan antes de cualquier heurística de
@@ -392,6 +401,11 @@ INSERT INTO store_settings (id, usd_ars_rate)
 VALUES (1, 1510)
 ON CONFLICT (id) DO NOTHING;
 
+-- Plazo de entrega global para productos "a pedido" (products.dias_entrega_pedido
+-- NULL). Configurado una sola vez acá para que el admin no tenga que completar el
+-- campo por producto salvo excepciones.
+ALTER TABLE store_settings ADD COLUMN IF NOT EXISTS dias_entrega_pedido_default INTEGER NOT NULL DEFAULT 7;
+
 -- Moneda de origen elegida para cada proveedor. Los precios públicos continúan
 -- expresados en ARS; las columnas *_usd conservan los importes fuente para poder
 -- recalcularlos cuando cambia la cotización sin perder precisión.
@@ -399,6 +413,21 @@ CREATE TABLE IF NOT EXISTS supplier_price_settings (
   supplier   VARCHAR(80) PRIMARY KEY,
   currency   VARCHAR(3) NOT NULL DEFAULT 'ARS' CHECK (currency IN ('ARS', 'USD')),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Excepción de moneda para un código puntual dentro de la lista de un
+-- proveedor. No todos los excels respetan la moneda configurada en
+-- supplier_price_settings; esta tabla recuerda el caso puntual para que se
+-- siga aplicando en cada carga futura de ese proveedor, sin depender de que
+-- el admin la recuerde a mano.
+CREATE TABLE IF NOT EXISTS supplier_price_code_overrides (
+  supplier        VARCHAR(80)  NOT NULL,
+  source_code_key VARCHAR(200) NOT NULL,
+  source_code     VARCHAR(200) NOT NULL,
+  currency        VARCHAR(3)   NOT NULL CHECK (currency IN ('ARS', 'USD')),
+  created_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (supplier, source_code_key)
 );
 
 -- `supplier` inicialmente se infería del código con una columna generada. Se

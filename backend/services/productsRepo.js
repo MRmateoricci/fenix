@@ -83,6 +83,14 @@ const pricePreviewRound = value => value == null || !Number.isFinite(Number(valu
   ? null
   : Math.round(Number(value) * 100) / 100
 
+// El excel de un proveedor casi siempre respeta una única moneda, pero algunos
+// códigos puntuales vienen en la otra. `row.currency` (cargado desde
+// supplier_price_code_overrides antes de llamar a estas funciones) manda por
+// sobre la moneda general del archivo cuando existe una excepción guardada.
+function rowCurrency(row, file) {
+  return row.currency || file.currency
+}
+
 function previewSourceValue(arsValue, usdValue, currency, usdArsRate) {
   if (currency === 'USD') {
     return pricePreviewRound(usdValue ?? (arsValue == null ? null : Number(arsValue) / usdArsRate))
@@ -200,10 +208,11 @@ export async function previewSupplierPriceDrafts(client, files, usdArsRate) {
 
     const items = []
     for (const row of uniqueRows) {
+      const currency = rowCurrency(row, file)
       const mapping = mappedByCode.get(priceCodeKey(row.codigo))
       if (mapping) {
         const variant = [mapping.color_name, mapping.size_label, mapping.tone_name].filter(Boolean).join(' / ')
-        const changes = pricePreviewChanges(mappedCurrentPrices(mapping, file.currency, usdArsRate), row)
+        const changes = pricePreviewChanges(mappedCurrentPrices(mapping, currency, usdArsRate), row)
         const hasChanges = changes.some(change => change.changed)
         items.push({
           status: hasChanges ? 'update' : 'unchanged',
@@ -213,7 +222,7 @@ export async function previewSupplierPriceDrafts(client, files, usdArsRate) {
           targetCode: mapping.product_code,
           targetName: mapping.product_name,
           variant: variant || null,
-          currency: file.currency,
+          currency,
           changes,
           ...(!hasChanges ? { reason: 'Los precios ya coinciden. No se realizará ningún cambio.' } : {}),
         })
@@ -229,17 +238,17 @@ export async function previewSupplierPriceDrafts(client, files, usdArsRate) {
           status: 'update', codigo: row.codigo, descripcion: row.descripcion,
           targetProductId: existing.id,
           targetCode: existing.codigo, targetName: existing.product_name,
-          currency: file.currency,
+          currency,
           reason: previousSupplier && previousSupplier !== file.supplier
             ? `Se asociará a ${file.supplier} (actualmente figura como ${previousSupplier}).`
             : `Se creará la asociación con ${file.supplier}.`,
-          changes: pricePreviewChanges(mappedCurrentPrices(existing, file.currency, usdArsRate), row),
+          changes: pricePreviewChanges(mappedCurrentPrices(existing, currency, usdArsRate), row),
         })
         updated++
       } else {
         items.push({
           status: 'create', codigo: row.codigo, descripcion: row.descripcion,
-          currency: file.currency, changes: pricePreviewChanges(null, row),
+          currency, changes: pricePreviewChanges(null, row),
         })
         created++
       }
@@ -341,7 +350,7 @@ export async function createSupplierPriceDrafts(client, files, usdArsRate, previ
         type: 'update',
         productId,
         sourceCode: row.codigo,
-        currency: file.currency,
+        currency: rowCurrency(row, file),
         precioCosto: row.precio_costo,
         precioVenta: row.precio_venta,
         precioIva: row.precio_iva,
@@ -359,7 +368,7 @@ export async function createSupplierPriceDrafts(client, files, usdArsRate, previ
     for (const batch of chunk(unmappedRows)) {
       const params = []
       for (const row of batch) {
-        const currency = file.currency === 'USD' ? 'USD' : 'ARS'
+        const currency = rowCurrency(row, file)
         const toArs = value => value == null
           ? null
           : Math.round((currency === 'USD' ? Number(value) * usdArsRate : Number(value)) * 100) / 100
