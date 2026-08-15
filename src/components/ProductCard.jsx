@@ -321,7 +321,7 @@ export default function ProductCard({ product }) {
         </div>
 
         {/* Badges */}
-        {(product.isNew || product.bestSeller) && (
+        {(product.isNew || product.bestSeller || product.aPedido) && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             {product.isNew && (
               <span style={{
@@ -332,6 +332,17 @@ export default function ProductCard({ product }) {
                 padding: '3px 9px', borderRadius: 20,
               }}>
                 Nuevo
+              </span>
+            )}
+            {product.aPedido && (
+              <span style={{
+                display: 'inline-flex', alignItems: 'center',
+                background: T.ink, color: '#fff',
+                fontFamily: "'Inter', system-ui, sans-serif",
+                fontSize: 10.5, fontWeight: 600, letterSpacing: '.02em',
+                padding: '3px 9px', borderRadius: 20,
+              }}>
+                A pedido
               </span>
             )}
             {product.bestSeller && (

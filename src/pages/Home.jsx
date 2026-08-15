@@ -154,6 +154,7 @@ export default function Home() {
         <CategoriasSection />
         <DestacadosSection />
         <MostSearchedSection />
+        <ProductosAPedidoSection />
         <HistoriaSection />
         <ResenasSection />
         <ContactoSection />
@@ -615,6 +616,38 @@ function DestacadosSection() {
             </Link>
           </div>
           <InfiniteProductCarousel products={featured} label="Promociones" />
+        </div>
+      </Reveal>
+    </section>
+  )
+}
+
+// ─── Productos a pedido ─────────────────────────────────────────────────────
+// Productos marcados a mano desde el admin (product.aPedido) que no tienen
+// stock inmediato y se consiguen especialmente. Enlaza a /productos-a-pedido.
+function ProductosAPedidoSection() {
+  const { products } = useAdmin()
+  const aPedido = products.filter(p => p.aPedido)
+
+  if (aPedido.length === 0) return null
+
+  return (
+    <section
+      id="productos-a-pedido"
+      style={{
+        margin: '18px 0 0',
+        padding: '14px 24px',
+        scrollMarginTop: 90,
+      }}
+    >
+      <Reveal>
+        <div className="fnx-tonal-product-section">
+          <div className="fnx-tonal-product-section__header">
+            <Link to="/productos-a-pedido" style={{ textDecoration: 'none' }}>
+              <h2 className="fnx-tonal-product-section__title">Productos a pedido</h2>
+            </Link>
+          </div>
+          <InfiniteProductCarousel products={aPedido} label="Productos a pedido" />
         </div>
       </Reveal>
     </section>
