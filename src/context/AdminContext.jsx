@@ -43,6 +43,7 @@ function toBackendPayload(p) {
   if ('isNew' in p)         out.is_new             = p.isNew
   if ('bestSeller' in p)    out.best_seller        = p.bestSeller
   if ('aPedido' in p)       out.a_pedido           = p.aPedido
+  if ('diasEntregaPedido' in p) out.dias_entrega_pedido = p.diasEntregaPedido === '' ? null : p.diasEntregaPedido
   // El backend solo tiene `stock` (entero) — inStock es stock > 0 derivado al
   // leer. Si viene stock explícito se usa tal cual; si solo viene el toggle
   // inStock, se traduce a un stock mínimo (1) o a 0.
@@ -78,7 +79,7 @@ export function AdminProvider({ children }) {
   const [importResult, setImportResult]          = useState(null)
   const [importLoading, setImportLoading]        = useState(false)
   const [importError, setImportError]            = useState(null)
-  const [currencySettings, setCurrencySettings]  = useState({ usdArsRate: 1510, updatedAt: null })
+  const [currencySettings, setCurrencySettings]  = useState({ usdArsRate: 1510, diasEntregaPedidoDefault: 7, updatedAt: null })
   const [supplierSettings, setSupplierSettings]  = useState([])
   const [subcategories, setSubcategories]        = useState([])
   const [productTypes, setProductTypes]          = useState([])
@@ -395,7 +396,19 @@ export function AdminProvider({ children }) {
     })
     const data = await res.json()
     if (!res.ok) throw new Error(data.error || 'No se pudo guardar la cotizacion')
-    setCurrencySettings(data)
+    setCurrencySettings(prev => ({ ...prev, ...data }))
+    return data
+  }, [])
+
+  const updateDeliverySettings = useCallback(async (diasEntregaPedidoDefault) => {
+    const res = await fetch(`${API_BASE}/api/products/delivery-settings`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', 'x-admin-token': ADMIN_PASSWORD },
+      body: JSON.stringify({ diasEntregaPedidoDefault }),
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error || 'No se pudo guardar el plazo')
+    setCurrencySettings(prev => ({ ...prev, ...data }))
     return data
   }, [])
 
@@ -975,7 +988,7 @@ export function AdminProvider({ children }) {
       fetchOrders, updateOrderStatus,
       inventory, inventoryTotal, inventorySuppliers, inventoryLoading, inventoryError,
       importResult, importLoading, importError,
-      currencySettings, fetchCurrencySettings, updateCurrencySettings,
+      currencySettings, fetchCurrencySettings, updateCurrencySettings, updateDeliverySettings,
       supplierSettings, fetchSupplierSettings, updateSupplierCurrency,
       setPriceCodeCurrency, clearPriceCodeCurrency,
       subcategories, fetchSubcategories, createSubcategory, updateSubcategory, deleteSubcategory,

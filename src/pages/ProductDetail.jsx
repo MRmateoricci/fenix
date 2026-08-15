@@ -130,6 +130,10 @@ export default function ProductDetail() {
     ? Number(product.variantStock[variantRowKey]?.[selectedSize?.label ?? '_'] ?? 0)
     : (product?.stock ?? 0)
   const variantInStock = availableStock > 0
+  // El plazo de "a pedido" aplica a la combinación elegida, no al producto en
+  // general: si hay variantes, lo que importa es si ESA combinación (availableStock)
+  // tiene stock, no el stock agregado del producto.
+  const isAPedido = !variantInStock && Boolean(product?.aPedido)
 
   useEffect(() => {
     let nextColor = product?.colors?.[0] ?? null
@@ -198,7 +202,7 @@ export default function ProductDetail() {
   }
 
   function handleAdd() {
-    if (!variantInStock || added) return
+    if ((!variantInStock && !isAPedido) || added) return
     for (let i = 0; i < qty; i++) {
       addItem({
         id:       product.id,
@@ -209,6 +213,8 @@ export default function ProductDetail() {
         color:    selectedColor?.name,
         size:     selectedSize?.label,
         tone:     selectedTone?.name,
+        aPedido:  isAPedido,
+        diasEntregaPedido: isAPedido ? product.diasEntregaPedido : null,
       })
     }
     setAdded(true)
@@ -361,6 +367,14 @@ export default function ProductDetail() {
                     }}>
                       En stock
                     </span>
+                  ) : isAPedido ? (
+                    <span style={{
+                      padding: '4px 10px', borderRadius: 4,
+                      fontSize: 11, letterSpacing: '.12em', textTransform: 'uppercase',
+                      fontWeight: 600, backgroundColor: '#FDF0DC', color: '#8A5A00',
+                    }}>
+                      A pedido
+                    </span>
                   ) : (
                     <span style={{
                       padding: '4px 10px', borderRadius: 4,
@@ -426,6 +440,15 @@ export default function ProductDetail() {
               }}>
                 {fmt(selectedPrice)}
               </p>
+
+              {isAPedido && (
+                <p style={{
+                  fontSize: 13.5, color: '#8A5A00', backgroundColor: '#FDF0DC',
+                  padding: '12px 14px', borderRadius: 10, margin: 0,
+                }}>
+                  Este producto no está en stock inmediato. Lo conseguimos especialmente para vos y llega en aproximadamente {product.diasEntregaPedido} días hábiles.
+                </p>
+              )}
 
               {/* Selector de color */}
               {(product.colors?.length > 0 || hasDefaultColorOption) && (
@@ -644,26 +667,28 @@ export default function ProductDetail() {
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 <button
                   onClick={handleAdd}
-                  disabled={!variantInStock || added}
+                  disabled={(!variantInStock && !isAPedido) || added}
                   style={{
                     width: '100%', padding: '15px 0',
                     fontSize: 14, fontWeight: 600, letterSpacing: '.04em',
-                    borderRadius: 10, border: 'none', cursor: variantInStock && !added ? 'pointer' : 'not-allowed',
+                    borderRadius: 10, border: 'none', cursor: (variantInStock || isAPedido) && !added ? 'pointer' : 'not-allowed',
                     display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
                     transition: 'background .2s, opacity .2s',
                     ...(added
                       ? { backgroundColor: '#166534', color: '#fff' }
-                      : variantInStock
+                      : (variantInStock || isAPedido)
                         ? { backgroundColor: 'var(--color-primary)', color: '#fff' }
                         : { backgroundColor: 'var(--color-border)', color: 'var(--color-text-muted)' }),
                   }}
-                  onMouseEnter={(e) => { if (variantInStock && !added) e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)' }}
-                  onMouseLeave={(e) => { if (variantInStock && !added) e.currentTarget.style.backgroundColor = 'var(--color-primary)' }}
+                  onMouseEnter={(e) => { if ((variantInStock || isAPedido) && !added) e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)' }}
+                  onMouseLeave={(e) => { if ((variantInStock || isAPedido) && !added) e.currentTarget.style.backgroundColor = 'var(--color-primary)' }}
                 >
                   {added ? (
                     <><CheckIcon /> Agregado al carrito</>
                   ) : variantInStock ? (
                     <><CartIcon /> Agregar al carrito</>
+                  ) : isAPedido ? (
+                    <><CartIcon /> Agregar al carrito · a pedido</>
                   ) : (
                     'Sin stock'
                   )}
@@ -696,7 +721,7 @@ export default function ProductDetail() {
                 </a>
               </div>
 
-              {!variantInStock && <StockAlertForm product={product} />}
+              {!variantInStock && !isAPedido && <StockAlertForm product={product} />}
 
               {/* Info chips */}
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>

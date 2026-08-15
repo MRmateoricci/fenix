@@ -5,7 +5,7 @@ import PageSEO from '../components/SEO'
 export default function ProductosAPedido() {
   const { products } = useAdmin()
 
-  const productosAPedido = products.filter((p) => p.aPedido)
+  const productosAPedido = products.filter((p) => !p.inStock && p.aPedido)
 
   return (
     <>
@@ -29,7 +29,7 @@ export default function ProductosAPedido() {
             textAlign: 'center', color: 'var(--color-text-muted)',
             maxWidth: '38rem', margin: '0 auto 2.5rem',
           }}>
-            Estos productos no están en stock inmediato: los conseguimos especialmente para vos. Consultanos por WhatsApp para conocer tiempos de entrega.
+            Estos productos no están en stock inmediato, pero los podés comprar igual: los conseguimos especialmente para vos y te mostramos el plazo de entrega estimado en cada ficha.
           </p>
 
           {productosAPedido.length === 0 ? (

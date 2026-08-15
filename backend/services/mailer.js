@@ -50,8 +50,17 @@ function deliveryLine(order) {
 
 function itemsRows(order) {
   return (order.items || [])
-    .map((i) => `<tr><td style="padding:4px 8px">${i.name}</td><td style="padding:4px 8px">${i.quantity}</td><td style="padding:4px 8px">${fmt(i.subtotal)}</td></tr>`)
+    .map((i) => `<tr><td style="padding:4px 8px">${i.name}${i.aPedido ? `<br><span style="font-size:11px;color:#8A5A00">A pedido · llega en ~${i.diasEntregaPedido} días hábiles</span>` : ''}</td><td style="padding:4px 8px">${i.quantity}</td><td style="padding:4px 8px">${fmt(i.subtotal)}</td></tr>`)
     .join('')
+}
+
+// Aviso agregado cuando el pedido incluye items a pedido — el plazo mostrado
+// es el mayor entre esos items, no una suma (cada uno llega por su cuenta).
+function aPedidoNotice(order) {
+  const dias = (order.items || []).filter((i) => i.aPedido).map((i) => Number(i.diasEntregaPedido) || 0)
+  if (!dias.length) return ''
+  const maxDias = Math.max(...dias)
+  return `<p style="background:#FDF0DC;color:#8A5A00;padding:10px 14px;border-radius:6px;">Este pedido incluye productos a pedido. El plazo de entrega es de hasta ${maxDias} días hábiles.</p>`
 }
 
 const appBaseUrl = () =>
@@ -145,6 +154,7 @@ export function customerConfirmationEmail(order) {
       <h2>${isReserved ? 'Tu reserva fue confirmada' : 'Gracias por tu compra'}</h2>
       <p>Pedido <strong>${order.order_number}</strong></p>
       <p>${deliveryLine(order)}</p>
+      ${aPedidoNotice(order)}
       <table style="border-collapse: collapse; margin: 12px 0;">${itemsRows(order)}</table>
       <p><strong>Total: ${fmt(order.total_amount)}</strong>${order.shipping_cost ? ` (incluye envío ${fmt(order.shipping_cost)})` : ''}</p>
       <p>Ante cualquier consulta, escribinos por WhatsApp mencionando el número de pedido.</p>
@@ -164,6 +174,7 @@ export function adminNewOrderEmail(order) {
       <h2>${order.status === 'reserved' ? 'Nueva reserva de retiro' : 'Nuevo pedido'}</h2>
       <p>Pedido <strong>${order.order_number}</strong> — ${order.customer_name} (${order.customer_email}, ${order.customer_phone})</p>
       <p>${deliveryLine(order)}</p>
+      ${aPedidoNotice(order)}
       <table style="border-collapse: collapse; margin: 12px 0;">${itemsRows(order)}</table>
       <p><strong>Total: ${fmt(order.total_amount)}</strong></p>
       ${order.delivery_type === 'delivery'

@@ -45,6 +45,11 @@ export function OrderItemsBlock({
             <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
               {item.quantity} × {fmt(item.price)}{item.color ? ` · ${item.color}` : ''}{item.tone ? ` · ${item.tone}` : ''}{item.size ? ` · ${item.size}` : ''}
             </p>
+            {item.aPedido && (
+              <p className="text-xs" style={{ color: '#8A5A00', marginTop: 2 }}>
+                A pedido · llega en ~{item.diasEntregaPedido} días hábiles
+              </p>
+            )}
           </div>
           <p className="text-sm font-semibold shrink-0" style={{ color: 'var(--color-text)' }}>
             {fmt(item.subtotal)}

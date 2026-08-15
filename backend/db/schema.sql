@@ -258,6 +258,11 @@ ALTER TABLE products ADD COLUMN IF NOT EXISTS best_seller        BOOLEAN NOT NUL
 -- la compra. Se activa a mano desde el admin y alimenta la sección pública
 -- "Productos a pedido".
 ALTER TABLE products ADD COLUMN IF NOT EXISTS a_pedido           BOOLEAN NOT NULL DEFAULT FALSE;
+-- Nullable a propósito: NULL significa "usar el default global de la tienda"
+-- (store_settings.dias_entrega_pedido_default), así el admin solo completa este
+-- campo producto por producto en los casos excepcionales que se apartan del plazo
+-- general.
+ALTER TABLE products ADD COLUMN IF NOT EXISTS dias_entrega_pedido INTEGER;
 
 -- Asociaciones confirmadas entre el código que usa cada proveedor en su XLS y
 -- el producto real del catálogo. Se consultan antes de cualquier heurística de
@@ -341,6 +346,11 @@ CREATE TABLE IF NOT EXISTS store_settings (
 INSERT INTO store_settings (id, usd_ars_rate)
 VALUES (1, 1510)
 ON CONFLICT (id) DO NOTHING;
+
+-- Plazo de entrega global para productos "a pedido" (products.dias_entrega_pedido
+-- NULL). Configurado una sola vez acá para que el admin no tenga que completar el
+-- campo por producto salvo excepciones.
+ALTER TABLE store_settings ADD COLUMN IF NOT EXISTS dias_entrega_pedido_default INTEGER NOT NULL DEFAULT 7;
 
 -- Moneda de origen elegida para cada proveedor. Los precios públicos continúan
 -- expresados en ARS; las columnas *_usd conservan los importes fuente para poder

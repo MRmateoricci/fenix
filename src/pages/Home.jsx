@@ -623,11 +623,12 @@ function DestacadosSection() {
 }
 
 // ─── Productos a pedido ─────────────────────────────────────────────────────
-// Productos marcados a mano desde el admin (product.aPedido) que no tienen
-// stock inmediato y se consiguen especialmente. Enlaza a /productos-a-pedido.
+// Productos marcados a mano desde el admin (product.aPedido) que además están
+// sin stock inmediato — con stock disponible se compran como cualquier otro,
+// sin pasar por acá. Enlaza a /productos-a-pedido.
 function ProductosAPedidoSection() {
   const { products } = useAdmin()
-  const aPedido = products.filter(p => p.aPedido)
+  const aPedido = products.filter(p => !p.inStock && p.aPedido)
 
   if (aPedido.length === 0) return null
 

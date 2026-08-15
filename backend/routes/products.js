@@ -385,14 +385,38 @@ router.post('/merge', async (req, res) => {
 // ambas monedas. El catalogo y los cobros continuan expresados en ARS.
 router.get('/currency-settings', async (_req, res) => {
   try {
-    const { rows } = await pool.query('SELECT usd_ars_rate, updated_at FROM store_settings WHERE id = 1')
+    const { rows } = await pool.query('SELECT usd_ars_rate, dias_entrega_pedido_default, updated_at FROM store_settings WHERE id = 1')
     res.json({
       usdArsRate: Number(rows[0]?.usd_ars_rate || 1510),
+      diasEntregaPedidoDefault: Number(rows[0]?.dias_entrega_pedido_default || 7),
       updatedAt: rows[0]?.updated_at || null,
     })
   } catch (err) {
     console.error('[GET /api/products/currency-settings]', err)
     res.status(500).json({ error: 'No se pudo cargar la cotizacion' })
+  }
+})
+
+// Plazo por default (en días hábiles) para productos a_pedido que no tienen su
+// propio dias_entrega_pedido cargado. Endpoint separado del de cotización porque
+// no dispara ninguna conversión de precios.
+router.patch('/delivery-settings', async (req, res) => {
+  const diasEntregaPedidoDefault = Math.trunc(Number(req.body.diasEntregaPedidoDefault))
+  if (!Number.isFinite(diasEntregaPedidoDefault) || diasEntregaPedidoDefault <= 0) {
+    return res.status(400).json({ error: 'El plazo debe ser un número mayor a cero' })
+  }
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO store_settings (id, dias_entrega_pedido_default, updated_at)
+       VALUES (1, $1, NOW())
+       ON CONFLICT (id) DO UPDATE SET dias_entrega_pedido_default = EXCLUDED.dias_entrega_pedido_default, updated_at = NOW()
+       RETURNING dias_entrega_pedido_default, updated_at`,
+      [diasEntregaPedidoDefault]
+    )
+    res.json({ diasEntregaPedidoDefault: Number(rows[0].dias_entrega_pedido_default), updatedAt: rows[0].updated_at })
+  } catch (err) {
+    console.error('[PATCH /api/products/delivery-settings]', err)
+    res.status(500).json({ error: 'No se pudo guardar el plazo' })
   }
 })
 
@@ -857,6 +881,7 @@ const FIELD_TRANSFORMS = {
   is_new:            (v) => Boolean(v),
   best_seller:       (v) => Boolean(v),
   a_pedido:          (v) => Boolean(v),
+  dias_entrega_pedido: (v) => (v === null || v === '' ? null : Math.max(1, Math.trunc(Number(v)))),
 }
 const EDITABLE_FIELDS = Object.keys(FIELD_TRANSFORMS)
 

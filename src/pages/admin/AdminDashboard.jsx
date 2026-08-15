@@ -589,7 +589,7 @@ const EMPTY = {
   description: '', image: '', hoverImage: '',
   lengthCm: '', widthCm: '', heightCm: '', weightKg: '',
   inStock: true, stock: '', colors: [], sizes: [], tones: [], variantStock: {}, variantRules: [],
-  published: true, isNew: false, bestSeller: false, aPedido: false,
+  published: true, isNew: false, bestSeller: false, aPedido: false, diasEntregaPedido: '',
 }
 
 // Normaliza una fila de la API para editar todos sus datos en un único modal.
@@ -633,6 +633,7 @@ function draftFromInventoryRow(inv) {
     isNew:       Boolean(inv.is_new),
     bestSeller:  Boolean(inv.best_seller),
     aPedido:     Boolean(inv.a_pedido),
+    diasEntregaPedido: inv.dias_entrega_pedido ?? '',
   }
 }
 
@@ -671,6 +672,7 @@ function toUnifiedProductPayload(data) {
     is_new: Boolean(data.isNew),
     best_seller: Boolean(data.bestSeller),
     a_pedido: Boolean(data.aPedido),
+    dias_entrega_pedido: data.diasEntregaPedido === '' || data.diasEntregaPedido == null ? null : Number(data.diasEntregaPedido),
   }
   if (data.stock !== undefined) payload.stock = data.stock === '' ? 0 : Number(data.stock)
   return payload
@@ -1077,9 +1079,24 @@ function ProductModal({ product, onSave, onClose, onVariantsChanged, publishOnSa
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, height: 38 }}>
                   <Toggle value={form.aPedido} onChange={v => set('aPedido', v)} />
                   <span style={{ fontSize: 13, color: form.aPedido ? C.green : C.text3, fontWeight: 600 }}>
-                    {form.aPedido ? 'Aparece en "Productos a pedido"' : 'No se muestra ahí'}
+                    {form.aPedido ? 'Se puede comprar sin stock, con plazo de entrega' : 'Sin stock no se puede comprar'}
                   </span>
                 </div>
+                {form.aPedido && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 4 }}>
+                    <label style={lbl}>Plazo de entrega (días hábiles)</label>
+                    <input
+                      type="number" min="1" step="1"
+                      value={form.diasEntregaPedido}
+                      onChange={e => set('diasEntregaPedido', e.target.value)}
+                      placeholder={`Default de la tienda: ${currencySettings.diasEntregaPedidoDefault || 7}`}
+                      style={{ ...inp, maxWidth: 240 }}
+                    />
+                    <span style={{ fontSize: 11, color: C.muted }}>
+                      Si lo dejás vacío, se usa el default de la tienda ({currencySettings.diasEntregaPedidoDefault || 7} días).
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
           </section>
@@ -4943,6 +4960,41 @@ function CurrencySettingsCard({ settings, onSave }) {
   )
 }
 
+function DeliveryDefaultCard({ settings, onSave }) {
+  const [value, setValue] = useState(String(settings.diasEntregaPedidoDefault || 7))
+  const [saving, setSaving] = useState(false)
+  const [message, setMessage] = useState('')
+
+  useEffect(() => setValue(String(settings.diasEntregaPedidoDefault || 7)), [settings.diasEntregaPedidoDefault])
+
+  const save = async () => {
+    const days = Math.trunc(Number(value))
+    if (!Number.isFinite(days) || days <= 0) { setMessage('Ingresá una cantidad de días válida.'); return }
+    setSaving(true)
+    setMessage('')
+    try {
+      await onSave(days)
+      setMessage('Plazo guardado.')
+    } catch (err) {
+      setMessage(err.message || 'No se pudo guardar.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div style={{ background: C.white, borderRadius: 10, border: `1px solid ${C.border}`, padding: '11px 13px', display: 'flex', flexDirection: 'column', gap: 5 }}>
+      <div style={{ fontSize: 12.5, fontWeight: 600, color: C.ink }}>Plazo de entrega "a pedido"</div>
+      <p style={{ fontSize: 10.5, color: C.muted, margin: 0 }}>Default para productos a pedido sin plazo propio cargado.</p>
+      <div style={{ display: 'flex', gap: 7 }}>
+        <input type="number" min="1" step="1" value={value} onChange={event => { setValue(event.target.value); setMessage('') }} aria-label="Días hábiles de entrega por default" style={{ ...inp, minWidth: 0 }} />
+        <button type="button" onClick={save} disabled={saving} style={{ ...outlineBtn, padding: '5px 9px', whiteSpace: 'nowrap' }}>{saving ? 'Guardando...' : 'Guardar'}</button>
+      </div>
+      <div style={{ minHeight: 14, fontSize: 10.5, color: message.includes('guardado') ? C.green : C.red }}>{message || `${Math.trunc(Number(value)) || 7} días hábiles`}</div>
+    </div>
+  )
+}
+
 function SupplierToolbar({ supplierNames, settings, inventory, selectedSupplier, usdArsRate, onSelect, onSave }) {
   const [value, setValue] = useState(selectedSupplier === 'Todos' ? '' : selectedSupplier)
   const [open, setOpen] = useState(false)
@@ -6846,7 +6898,7 @@ function UnifiedProductsTab() {
   const {
     inventory, inventoryTotal, inventorySuppliers, inventoryLoading, inventoryError,
     importResult, importLoading, importError,
-    currencySettings, updateCurrencySettings,
+    currencySettings, updateCurrencySettings, updateDeliverySettings,
     supplierSettings, updateSupplierCurrency,
     setPriceCodeCurrency, clearPriceCodeCurrency,
     fetchInventory, fetchInventoryItem, createInventoryItem, updateInventoryItem, updateProductCurrency, deleteInventoryItem, fetchCatalog,
@@ -7048,6 +7100,12 @@ function UnifiedProductsTab() {
     const result = await updateCurrencySettings(rate)
     await fetchCatalog()
     await fetchInventory(inventoryFilters)
+    return result
+  }
+
+  async function handleDeliveryDefaultSave(days) {
+    const result = await updateDeliverySettings(days)
+    await fetchCatalog()
     return result
   }
 
@@ -7428,6 +7486,7 @@ function UnifiedProductsTab() {
           </select>
         </ImportUploadCard>
         <CurrencySettingsCard settings={currencySettings} onSave={handleCurrencyRateSave} />
+        <DeliveryDefaultCard settings={currencySettings} onSave={handleDeliveryDefaultSave} />
       </div>
 
       {invoiceError && (
