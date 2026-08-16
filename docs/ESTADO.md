@@ -8,7 +8,7 @@
 > Un ajuste de padding, no.
 
 **Última actualización:** 15 de agosto de 2026
-**Commit de referencia:** `2cf994d`
+**Commit de referencia:** `2cf994d` + cambios locales sin commit
 
 ---
 
@@ -21,7 +21,7 @@
 | Importación de listas de precios | ✅ Funcionando | XLSX + PDF de factura |
 | Importación de imágenes de catálogo | ✅ Funcionando | Con revisión y borrador |
 | Variantes (color × medida × tono) | ✅ Funcionando | Stock por combinación exacta |
-| Carrito y checkout | ✅ Funcionando | Mercado Pago Checkout Pro |
+| Carrito y checkout | ✅ Funcionando | Mercado Pago + datos fiscales para Factura C |
 | Cotización de envío | 🟡 Provisorio | Tarifario manual por zona |
 | Envío gratis por monto | ✅ Funcionando | Umbral por env var |
 | Cupones de descuento | ✅ Funcionando | |
@@ -32,7 +32,7 @@
 | Newsletter | ✅ Funcionando | |
 | Productos a pedido | ✅ Funcionando | Compra sin stock con plazo de entrega — ver detalle abajo |
 | SEO | ✅ Funcionando | Helmet + sitemap + robots |
-| Facturación AFIP | ❌ No iniciado | Fuera de alcance por ahora |
+| Facturación electrónica ARCA | 🟡 Implementada, pendiente activación | WSAA + FEDummy homologación OK; falta migrar DB, configurar punto de venta y obtener el primer CAE |
 
 ---
 
@@ -149,6 +149,67 @@ el body raw antes del `express.json()`.
 3. Verificar que las 6 cuotas sin interés estén efectivamente activadas en el panel
    de comerciante de MP y que coincidan con lo que promete la UI.
 
+### Facturación electrónica ARCA
+
+Integración WSAA + WSFEv1 implementada para **Factura C exclusivamente**, con ES
+Modules, PostgreSQL y emisión manual. Todo el tráfico permanece en homologación;
+producción se bloquea antes de cualquier conexión salvo habilitación explícita con
+`ARCA_PRODUCTION_ENABLED=true`.
+
+**Implementado:**
+
+- Configuración central en `backend/config/arca.js`: endpoints, CUIT, punto de venta,
+  certificado, clave, datos del emisor y defaults fiscales. Las rutas sensibles se
+  resuelven desde la raíz de `backend`
+- WSAA con TRA firmado mediante OpenSSL, caché en memoria para el servidor y caché
+  local persistente para reutilizar el TA entre scripts Node. Incluye renovación
+  anticipada y lock entre procesos; los secretos y el CMS se redactan en errores y logs
+- Cliente WSFEv1 con `FEDummy`, puntos de venta, catálogos paramétricos, último
+  autorizado, consulta de comprobante y solicitud de CAE
+- Caché PostgreSQL de parámetros ARCA con fallback a la última respuesta válida
+- Datos fiscales del receptor capturados durante checkout. Pedidos históricos deben
+  confirmarlos antes de emitir; el DNI dejó de bloquear el carrito
+- Pedidos invitados reclamables únicamente por una cuenta verificada con el mismo email
+- Tabla `invoices`, snapshots inmutables y estados `pending`, `processing`,
+  `uncertain`, `authorized`, `rejected` y `error`
+- Locks consultivos por pedido y por `(CUIT, punto de venta, tipo)`. El número se toma
+  de `FECompUltimoAutorizado` y se persiste antes de llamar a `FECAESolicitar`
+- Validación estricta con `FEParamGetPtosVenta`; únicamente en homologación, su error
+  `602` habilita un fallback a `FECompUltimoAutorizado` para la combinación configurada
+- Recuperación de timeouts con `FECompConsultar`: solamente el código `602` se toma
+  como comprobante inexistente; el request fallido nunca reenvía automáticamente
+- Endpoints privados para confirmar receptor, emitir, consultar estado y descargar PDF
+- PDF en memoria con QR oficial ARCA, sin archivos públicos ni nueva solicitud de CAE
+- Scripts manuales para WSAA/FEDummy, puntos de venta, parámetros, último autorizado
+  y primera factura de homologación. El script de CAE exige `--confirm-homologation`
+- Documentación operativa en `backend/docs/ARCA.md`
+
+**Verificado:**
+
+- WSAA de homologación autenticó correctamente
+- `FEDummy`: `AppServer`, `DbServer` y `AuthServer` respondieron `OK`
+- 64 pruebas de backend pasan; la prueba descartable de constraints y concurrencia
+  queda omitida claramente cuando no existe `TEST_DATABASE_URL`
+- Los cuatro scripts ARCA ejecutados en procesos consecutivos reutilizan el TA y no
+  reciben `coe.alreadyAuthenticated`. `FEParamGetPtosVenta` responde actualmente
+  código `602`; en homologación la combinación punto 2 / Factura C se valida con
+  `FECompUltimoAutorizado`, que respondió último autorizado `0`
+- Build de producción del frontend correcto
+- Certificado y private key continúan ignorados por Git y no están trackeados
+
+**Pendiente para activar la primera factura:**
+
+1. Completar `ARCA_PTO_VTA` y los datos legales del emisor en `backend/.env`
+2. Ejecutar `npm run db:migrate` sobre la base correspondiente
+3. Consultar puntos de venta y elegir uno habilitado, sin bloqueo ni fecha de baja
+4. Consultar parámetros y último comprobante autorizado
+5. Crear o pagar un pedido de homologación con datos fiscales confirmados
+6. Ejecutar conscientemente `testArcaInvoice.js --order-id <uuid> --confirm-homologation`
+7. Verificar CAE persistido, repetición idempotente y descarga privada del PDF
+
+La migración sobre la base real y `FECAESolicitar` **todavía no fueron ejecutados**.
+El webhook de Mercado Pago no emite facturas; la automatización queda fuera de esta etapa.
+
 ### Cuentas, pedidos y comunicación
 
 - Registro con email + verificación, recuperación de contraseña, OAuth Google/Facebook
@@ -167,18 +228,36 @@ el body raw antes del `express.json()`.
 
 ## Pendientes priorizados
 
-1. **Cargar dimensiones y peso** en los productos reales — bloquea el cotizador real
-2. **Cuotas**: mover `INSTALLMENTS` al backend y agregar el mensaje en `ProductDetail`
-3. **Verificar cuotas sin interés** activas en el panel de MP
-4. **Terminar de poblar el catálogo** con productos e imágenes
-5. Credenciales de Correo Argentino y activación del adaptador real
-6. Refactor de `AdminDashboard.jsx` (8.100+ líneas en un solo archivo)
-7. Definir exclusiones de envío gratis, si las hubiera
-8. Habilitar cantidad > 1 en el selector de `ProductDetail` para items a pedido
+1. **Activar Factura C de homologación**: migrar DB, configurar punto de venta y
+   datos legales, ejecutar consultas paramétricas y obtener/verificar el primer CAE
+2. Ejecutar las pruebas PostgreSQL descartables de facturación con `TEST_DATABASE_URL`
+3. **Cargar dimensiones y peso** en los productos reales — bloquea el cotizador real
+4. **Cuotas**: mover `INSTALLMENTS` al backend y agregar el mensaje en `ProductDetail`
+5. **Verificar cuotas sin interés** activas en el panel de MP
+6. **Terminar de poblar el catálogo** con productos e imágenes
+7. Credenciales de Correo Argentino y activación del adaptador real
+8. Refactor de `AdminDashboard.jsx` (8.100+ líneas en un solo archivo)
+9. Definir exclusiones de envío gratis, si las hubiera
+10. Habilitar cantidad > 1 en el selector de `ProductDetail` para items a pedido
 
 ---
 
 ## Bitácora
+
+### 2026-08-15 · ARCA WSFEv1: Factura C manual en homologación
+
+Integración completa desde WSAA hasta la operación de `FECAESolicitar`, todavía sin
+ejecutar una emisión real. Configuración central con bloqueo de producción, firma CMS
+por OpenSSL, caché de Ticket de Acceso, cliente WSFEv1 y parámetros persistentes.
+Checkout con receptor fiscal, esquema `invoices`, snapshots, locks de numeración,
+idempotencia y recuperación de respuestas inciertas mediante `FECompConsultar`.
+Endpoints privados, reclamo seguro de pedidos invitados, PDF en memoria y QR oficial.
+WSAA + `FEDummy` homologación verificados en `OK`; 64 tests pasan y uno PostgreSQL se
+omite sin `TEST_DATABASE_URL`. El TA persistente fue reutilizado por cuatro scripts
+Node consecutivos sin `alreadyAuthenticated`. El `602` de puntos de venta quedó
+admitido solo en homologación cuando `FECompUltimoAutorizado` confirma la combinación;
+para punto 2 / Factura C respondió `0`. Frontend compila. Falta aplicar la migración a
+la base y solicitar el primer CAE de homologación. Sin commit todavía.
 
 ### 2026-08-15 · Productos a pedido: plazo de entrega y compra sin stock
 Cambio de semántica de `a_pedido`: de etiqueta suelta a "se puede comprar sin stock

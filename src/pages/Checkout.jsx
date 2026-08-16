@@ -36,7 +36,26 @@ function validateStep1(d) {
   else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(d.email)) e.email = 'Formato de email inválido'
   if (!d.telefono.trim())              e.telefono = 'El teléfono es requerido'
   else if (d.telefono.replace(/\D/g, '').length < 8) e.telefono = 'Mínimo 8 dígitos'
-  if (!/^\d{7,8}$/.test(d.dni)) e.dni = 'Ingresá un DNI válido (7 u 8 números)'
+  return e
+}
+
+function validateInvoiceRecipient(d, invoiceOptions) {
+  const e = {}
+  const docType = Number(d.invoiceDocType)
+  const docNumber = String(d.invoiceDocNumber || '').replace(/\D/g, '')
+  if (!d.invoiceName.trim()) e.invoiceName = 'Ingresá el nombre o razón social'
+  if (!invoiceOptions?.documents?.some((option) => option.id === docType)) {
+    e.invoiceDocType = 'Elegí un tipo de documento válido'
+  } else if (docType === 80 && !/^\d{11}$/.test(docNumber)) {
+    e.invoiceDocNumber = 'El CUIT debe tener 11 dígitos'
+  } else if (docType === 96 && !/^\d{7,8}$/.test(docNumber)) {
+    e.invoiceDocNumber = 'El DNI debe tener 7 u 8 dígitos'
+  } else if (![0, 99].includes(docType) && !docNumber) {
+    e.invoiceDocNumber = 'Ingresá el número de documento'
+  }
+  if (!invoiceOptions?.vatConditions?.some((option) => option.id === Number(d.invoiceVatConditionId))) {
+    e.invoiceVatConditionId = 'Elegí la condición frente al IVA'
+  }
   return e
 }
 
@@ -72,7 +91,7 @@ function validateBilling(d) {
 // ═══════════════════════════════════════════════════════════════════════════════
 export default function Checkout() {
   const navigate = useNavigate()
-  const { items, totalPrice, clearCart, dni, setDni, shippingConfig } = useCart()
+  const { items, totalPrice, clearCart, shippingConfig } = useCart()
   const { user, authLoading, updateProfile, logout } = useAuth()
   const [step, setStep]             = useState(1)
   const [errors, setErrors]         = useState({})
@@ -87,13 +106,18 @@ export default function Checkout() {
   const [appliedCoupon, setAppliedCoupon] = useState(null)
   const [couponChecking, setCouponChecking] = useState(false)
   const [couponError, setCouponError] = useState(null)
+  const [invoiceOptions, setInvoiceOptions] = useState(null)
+  const [invoiceOptionsError, setInvoiceOptionsError] = useState(null)
 
   const [formData, setFormData] = useState({
     nombre:       user?.firstName  || '',
     apellido:     user?.lastName   || '',
     email:        user?.email      || '',
     telefono:     user?.phone      || '',
-    dni,
+    invoiceName: `${user?.firstName || ''} ${user?.lastName || ''}`.trim(),
+    invoiceDocType: '',
+    invoiceDocNumber: '',
+    invoiceVatConditionId: '',
     deliveryType: 'delivery',
     paymentMethod: 'mercadopago',
     shippingService: 'clasico',
@@ -114,6 +138,21 @@ export default function Checkout() {
   const [deliveryEstimate, setDeliveryEstimate] = useState(null)
   const [deliveryEstimateLoading, setDeliveryEstimateLoading] = useState(false)
 
+  useEffect(() => {
+    const controller = new AbortController()
+    fetch(`${API_BASE}/api/arca/invoice-options?class=C`, { signal: controller.signal })
+      .then(async (response) => {
+        const data = await response.json().catch(() => ({}))
+        if (!response.ok) throw new Error(data.error || 'No pudimos obtener las opciones fiscales de ARCA.')
+        setInvoiceOptions(data)
+        setInvoiceOptionsError(null)
+      })
+      .catch((error) => {
+        if (error.name !== 'AbortError') setInvoiceOptionsError(error.message)
+      })
+    return () => controller.abort()
+  }, [])
+
   // Si el usuario entra directo a /checkout, el estado de sesión puede
   // resolverse recién después del primer render. Cuando termine de cargar
   // y haya un usuario, completamos los campos que sigan vacíos (sin pisar
@@ -133,6 +172,7 @@ export default function Checkout() {
       apellido:     savedDraft?.apellido     || prev.apellido     || user.lastName   || '',
       email:        user.email || '',
       telefono:     savedDraft?.telefono     || prev.telefono     || user.phone      || '',
+      invoiceName:  savedDraft?.invoiceName  || prev.invoiceName  || `${user.firstName || ''} ${user.lastName || ''}`.trim(),
       direccion:    savedDraft?.direccion    || prev.direccion    || user.address    || '',
       ciudad:       savedDraft?.ciudad       || prev.ciudad       || user.city       || '',
       codigoPostal: savedDraft?.codigoPostal || prev.codigoPostal || user.postalCode || '',
@@ -144,7 +184,7 @@ export default function Checkout() {
     apellido: !!user && !user.lastName?.trim(),
     telefono: !!user && !user.phone?.trim(),
   }
-  const needsPersonalData = !user || Object.values(missingAccountFields).some(Boolean) || !/^\d{7,8}$/.test(formData.dni)
+  const needsPersonalData = !user || Object.values(missingAccountFields).some(Boolean)
 
   useEffect(() => {
     if (authLoading || authResolved) return
@@ -245,9 +285,10 @@ export default function Checkout() {
   }, [formData.deliveryType, formData.codigoPostal, formData.shippingService, totalPrice])
 
   function setField(key, value) {
-    const normalizedValue = key === 'dni' ? value.replace(/\D/g, '').slice(0, 8) : value
+    const normalizedValue = key === 'invoiceDocNumber'
+      ? value.replace(/\D/g, '').slice(0, Number(formData.invoiceDocType) === 80 ? 11 : 20)
+      : value
     setFormData((prev) => ({ ...prev, [key]: normalizedValue }))
-    if (key === 'dni') setDni(normalizedValue)
     if (errors[key]) setErrors((prev) => { const e = { ...prev }; delete e[key]; return e })
     if (key === 'email') {
       setAccountLoginRequired(false)
@@ -355,6 +396,7 @@ export default function Checkout() {
       ...validateStep1(formData),
       ...validateStep2(formData, shippingZone),
       ...validateBilling(formData),
+      ...validateInvoiceRecipient(formData, invoiceOptions),
     }
     if (Object.keys(validationErrors).length) {
       setErrors(validationErrors)
@@ -382,7 +424,19 @@ export default function Checkout() {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ customer: formData, items, discountCode: appliedCoupon?.code || undefined }),
+        body: JSON.stringify({
+          customer: {
+            ...formData,
+            invoiceRecipient: {
+              name: formData.invoiceName,
+              docType: Number(formData.invoiceDocType),
+              docNumber: formData.invoiceDocNumber,
+              vatConditionId: Number(formData.invoiceVatConditionId),
+            },
+          },
+          items,
+          discountCode: appliedCoupon?.code || undefined,
+        }),
       })
       if (!res.ok) {
         const data = await res.json().catch(() => ({}))
@@ -483,6 +537,8 @@ export default function Checkout() {
               submitError={submitError}
               submitting={submitting || profileSaving || emailChecking}
               onConfirm={handleConfirm}
+              invoiceOptions={invoiceOptions}
+              invoiceOptionsError={invoiceOptionsError}
             />
             {false && <>
         {/* ── Step 1: Datos personales ── */}
@@ -518,9 +574,6 @@ export default function Checkout() {
                   <DarkInput type="tel" placeholder="11-1234-5678" value={formData.telefono} onChange={(v) => setField('telefono', v)} hasError={!!errors.telefono} />
                 </Field>
               )}
-              <Field label="DNI" error={errors.dni} className="sm:col-span-2">
-                <DarkInput inputMode="numeric" placeholder="Ej: 12345678" value={formData.dni} onChange={(v) => setField('dni', v)} hasError={!!errors.dni} />
-              </Field>
             </div>
             {profileError && (
               <p style={{ fontSize: '0.8rem', color: 'var(--color-primary)', marginTop: '1rem' }}>
@@ -873,6 +926,7 @@ function SinglePageCheckout({
   formData, errors, setField, user, onLogout, navigate, shippingZone,
   deliveryEstimate, deliveryEstimateMatches, deliveryEstimateLoading,
   accountLoginRequired, profileError, submitError, submitting, onConfirm,
+  invoiceOptions, invoiceOptionsError,
 }) {
   const [activePolicy, setActivePolicy] = useState(null)
   const [accountMenuOpen, setAccountMenuOpen] = useState(false)
@@ -969,10 +1023,6 @@ function SinglePageCheckout({
           </Field>
         </div>
 
-        <Field label="DNI" error={errors.dni}>
-          <DarkInput inputMode="numeric" placeholder="DNI" value={formData.dni} onChange={(value) => setField('dni', value)} hasError={!!errors.dni} />
-        </Field>
-
         {formData.deliveryType === 'delivery' ? (
           <>
             <Field label="Dirección" error={errors.direccion}>
@@ -1040,6 +1090,14 @@ function SinglePageCheckout({
         )}
       </section>
 
+      <InvoiceRecipientFields
+        formData={formData}
+        errors={errors}
+        setField={setField}
+        options={invoiceOptions}
+        loadingError={invoiceOptionsError}
+      />
+
       <section className="fnx-checkout-section">
         <h2>Pago</h2>
         <p className="fnx-section-caption">Todas las transacciones son seguras y están encriptadas.</p>
@@ -1055,8 +1113,8 @@ function SinglePageCheckout({
         <p className="fnx-checkout-submit-error">{profileError || submitError}</p>
       )}
 
-      <button type="button" className="fnx-pay-now" onClick={onConfirm} disabled={submitting}>
-        {submitting ? 'Procesando...' : 'Pagar ahora'}
+      <button type="button" className="fnx-pay-now" onClick={onConfirm} disabled={submitting || !invoiceOptions}>
+        {submitting ? 'Procesando...' : !invoiceOptions ? 'Cargando datos fiscales...' : 'Pagar ahora'}
       </button>
 
       <nav className="fnx-checkout-legal" aria-label="Información legal">
@@ -1098,6 +1156,71 @@ function SinglePageCheckout({
         </div>
       )}
     </div>
+  )
+}
+
+function InvoiceRecipientFields({ formData, errors, setField, options, loadingError }) {
+  const docType = Number(formData.invoiceDocType)
+  const chooseDocument = (value) => {
+    const nextType = Number(value)
+    setField('invoiceDocType', value)
+    setField('invoiceDocNumber', [0, 99].includes(nextType) ? '0' : '')
+  }
+
+  return (
+    <section className="fnx-checkout-section">
+      <h2>Datos para Factura C</h2>
+      <p className="fnx-section-caption">
+        Estos datos se confirman ahora y no modifican el importe del pedido.
+      </p>
+      {loadingError && <p className="fnx-checkout-submit-error">{loadingError}</p>}
+      {!options && !loadingError && <p className="fnx-section-caption">Consultando parámetros de ARCA...</p>}
+      {options && (
+        <>
+          <Field label="Nombre / Razón social" error={errors.invoiceName}>
+            <DarkInput
+              placeholder="Nombre o razón social"
+              value={formData.invoiceName}
+              onChange={(value) => setField('invoiceName', value)}
+              hasError={!!errors.invoiceName}
+            />
+          </Field>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <Field label="Tipo de documento" error={errors.invoiceDocType}>
+              <DarkSelect
+                value={formData.invoiceDocType}
+                onChange={chooseDocument}
+                hasError={!!errors.invoiceDocType}
+                placeholder="Elegí un documento"
+                options={options.documents}
+              />
+            </Field>
+            <Field label="Número" error={errors.invoiceDocNumber}>
+              <DarkInput
+                inputMode="numeric"
+                placeholder={docType === 80 ? 'CUIT, 11 dígitos' : docType === 96 ? 'DNI, 7 u 8 dígitos' : 'Número'}
+                value={formData.invoiceDocNumber}
+                onChange={(value) => setField('invoiceDocNumber', value)}
+                hasError={!!errors.invoiceDocNumber}
+                readOnly={[0, 99].includes(docType)}
+              />
+            </Field>
+          </div>
+          <Field label="Condición frente al IVA" error={errors.invoiceVatConditionId}>
+            <DarkSelect
+              value={formData.invoiceVatConditionId}
+              onChange={(value) => setField('invoiceVatConditionId', value)}
+              hasError={!!errors.invoiceVatConditionId}
+              placeholder="Elegí una condición"
+              options={options.vatConditions}
+            />
+          </Field>
+          {options.stale && (
+            <p className="fnx-section-caption">Se está usando la última respuesta válida guardada de ARCA.</p>
+          )}
+        </>
+      )}
+    </section>
   )
 }
 
@@ -1491,6 +1614,31 @@ function DarkInput({ type = 'text', inputMode, placeholder, value, onChange, has
       onFocus={(e) => { if (!hasError) e.currentTarget.style.borderColor = 'var(--color-primary)' }}
       onBlur={(e)  => { if (!hasError) e.currentTarget.style.borderColor = 'var(--color-border)' }}
     />
+  )
+}
+
+function DarkSelect({ value, onChange, options, placeholder, hasError }) {
+  return (
+    <select
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      className="dark-input"
+      style={{
+        width: '100%',
+        padding: '0.75rem 1rem',
+        borderRadius: '0.625rem',
+        fontSize: '0.9rem',
+        outline: 'none',
+        backgroundColor: 'var(--color-surface-2)',
+        border: `1.5px solid ${hasError ? 'var(--color-primary)' : 'var(--color-border)'}`,
+        color: 'var(--color-text)',
+      }}
+    >
+      <option value="">{placeholder}</option>
+      {options.map((option) => (
+        <option key={option.id} value={option.id}>{option.description || option.id}</option>
+      ))}
+    </select>
   )
 }
 

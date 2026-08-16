@@ -8,8 +8,9 @@
   },
   "scripts": {
     "postinstall": "npm --prefix backend ci --no-audit --no-fund",
-    "dev": "concurrently --kill-others-on-fail --names FRONTEND,BACKEND --prefix-colors cyan,yellow \"vite\" \"npm --prefix backend run dev\"",
+    "dev": "concurrently --kill-others-on-fail --names BACKEND,FRONTEND --prefix-colors yellow,cyan \"npm --prefix backend run dev\" \"npm run dev:frontend:ready\"",
     "dev:frontend": "vite",
+    "dev:frontend:ready": "node scripts/waitForBackend.js && vite",
     "dev:backend": "npm --prefix backend run dev",
     "build": "vite build",
     "start": "npm --prefix backend start",
@@ -19,10 +20,13 @@
     "db:seed:demo": "npm --prefix backend run db:seed:demo"
   },
   "dependencies": {
+    "axios": "^1.19.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-helmet-async": "^3.0.0",
-    "react-router-dom": "^7.17.0"
+    "react-router-dom": "^7.17.0",
+    "soap": "^1.10.0",
+    "xml2js": "^0.6.2"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.0",

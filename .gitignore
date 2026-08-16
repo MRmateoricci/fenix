@@ -4,3 +4,11 @@ dist
 .env.local
 .DS_Store
 backend/public/uploads
+arca_privatekey
+arca_request.csr
+*.key
+*.csr
+*.crt
+*.pem
+backend/config/arca/
+.cache/arca/

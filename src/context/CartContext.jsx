@@ -3,7 +3,6 @@ import { createContext, useContext, useReducer, useEffect, useState } from 'reac
 const CartContext = createContext(null)
 
 const STORAGE_KEY = 'fenix_cart'
-const DNI_STORAGE_KEY = 'fenix_checkout_dni'
 const API_BASE = import.meta.env.VITE_API_URL || ''
 
 // Dos líneas de carrito son "la misma" si comparten producto, color, tono y
@@ -55,7 +54,6 @@ export function CartProvider({ children }) {
       return []
     }
   })
-  const [dni, setDniState] = useState(() => localStorage.getItem(DNI_STORAGE_KEY) || '')
   const [lastAdded, setLastAdded] = useState(null)
   // Umbral y zonas de envío gratis: nunca hardcodeados en el frontend, se
   // reciben del backend (única fuente de verdad, configurable por env var).
@@ -83,12 +81,6 @@ export function CartProvider({ children }) {
     setLastAdded({ ...product, notificationId: Date.now() })
   }
 
-  function setDni(value) {
-    const normalized = String(value).replace(/\D/g, '').slice(0, 8)
-    setDniState(normalized)
-    try { localStorage.setItem(DNI_STORAGE_KEY, normalized) } catch { /* ignore */ }
-  }
-
   function removeItem(id, color = null, size = null, tone = null) {
     dispatch({ type: 'REMOVE_ITEM', id, color, size, tone })
   }
@@ -107,7 +99,7 @@ export function CartProvider({ children }) {
   return (
     <CartContext.Provider value={{
       items, addItem, removeItem, updateQuantity, clearCart, totalItems, totalPrice,
-      dni, setDni, lastAdded, dismissAddedNotification: () => setLastAdded(null),
+      lastAdded, dismissAddedNotification: () => setLastAdded(null),
       shippingConfig,
     }}>
       {children}
