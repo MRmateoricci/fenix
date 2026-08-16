@@ -10,9 +10,16 @@ import {
   publicInvoice,
 } from '../services/invoiceService.js';
 import { generateInvoicePdf } from '../services/invoicePdf.js';
+import {
+  getInvoiceJobForOrder,
+  markInvoiceJobFromManualResult,
+  publicInvoiceJob,
+  rescheduleInvoiceAfterFiscalUpdate,
+} from '../jobs/arcaInvoices.js';
 
 const router = Router();
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const clientInvoice = (invoice) => publicInvoice(invoice, { includeTechnicalMessages: false });
 
 async function ownedOrder(orderId, userId, client = pool) {
   if (!UUID_PATTERN.test(orderId)) return null;
@@ -25,10 +32,13 @@ async function ownedOrder(orderId, userId, client = pool) {
 
 function serviceErrorResponse(res, error) {
   const status = error.httpStatus || 500;
+  const publicMessage = error.code === 'ARCA_COMMUNICATION_UNCERTAIN'
+    ? 'La factura sigue en proceso. El sistema volverá a consultar sin duplicarla.'
+    : (status >= 500 ? 'No pudimos generar la factura en este momento.' : error.message);
   return res.status(status).json({
-    error: error.message,
+    error: publicMessage,
     code: error.code || 'INVOICE_ERROR',
-    invoice: publicInvoice(error.invoice),
+    invoice: clientInvoice(error.invoice),
   });
 }
 
@@ -115,15 +125,26 @@ router.put('/:orderId/invoice-recipient', requireAuth, async (req, res) => {
       );
     }
     await client.query('COMMIT');
+    let invoiceJob = null;
+    try {
+      const scheduled = await rescheduleInvoiceAfterFiscalUpdate(order.id);
+      invoiceJob = scheduled.job;
+    } catch (error) {
+      console.error(`[invoice-recipient] No se pudo reprogramar order=${order.id} code=${error.code || error.name}`);
+    }
     res.json({
       invoiceRecipient: receiver,
       confirmedAt: rows[0].invoice_data_confirmed_at,
+      invoiceJob: publicInvoiceJob(invoiceJob),
     });
   } catch (error) {
     await client.query('ROLLBACK').catch(() => {});
     const expected = error instanceof InvoiceValidationError;
-    if (!expected) console.error('[PUT /api/orders/:orderId/invoice-recipient]', error.code || error.name, error.message);
-    res.status(expected ? 400 : 503).json({ error: error.message, code: error.code });
+    if (!expected) console.error(`[invoice-recipient] order=${req.params.orderId} status=error code=${error.code || error.name}`);
+    res.status(expected ? 400 : 503).json({
+      error: expected ? error.message : 'No pudimos validar los datos fiscales en este momento.',
+      code: expected ? error.code : 'INVOICE_RECIPIENT_VALIDATION_UNAVAILABLE',
+    });
   } finally {
     client.release();
   }
@@ -133,9 +154,13 @@ router.get('/:orderId/invoice', requireAuth, async (req, res) => {
   try {
     const order = await ownedOrder(req.params.orderId, req.userId);
     if (!order) return res.status(404).json({ error: 'Pedido no encontrado' });
-    const invoice = await getInvoiceForOrder(order.id);
+    const [invoice, invoiceJob] = await Promise.all([
+      getInvoiceForOrder(order.id),
+      getInvoiceJobForOrder(order.id),
+    ]);
     res.json({
-      invoice: publicInvoice(invoice),
+      invoice: clientInvoice(invoice),
+      invoiceJob: publicInvoiceJob(invoiceJob),
       recipientConfirmed: Boolean(order.invoice_data_confirmed_at),
       invoiceRecipient: order.invoice_data_confirmed_at ? {
         name: order.invoice_recipient_name,
@@ -145,7 +170,7 @@ router.get('/:orderId/invoice', requireAuth, async (req, res) => {
       } : null,
     });
   } catch (error) {
-    console.error('[GET /api/orders/:orderId/invoice]', error.code || error.name, error.message);
+    console.error(`[invoice-status] order=${req.params.orderId} status=error code=${error.code || error.name}`);
     res.status(500).json({ error: 'No se pudo consultar la factura.' });
   }
 });
@@ -155,7 +180,10 @@ router.post('/:orderId/invoice', requireAuth, async (req, res) => {
     const order = await ownedOrder(req.params.orderId, req.userId);
     if (!order) return res.status(404).json({ error: 'Pedido no encontrado' });
     const result = await createInvoiceForOrder(order.id);
-    const invoice = publicInvoice(result.invoice);
+    await markInvoiceJobFromManualResult(order.id, result.invoice).catch((error) => {
+      console.error(`[invoice-manual] No se pudo sincronizar job order=${order.id} code=${error.code || error.name}`);
+    });
+    const invoice = clientInvoice(result.invoice);
     if (result.invoice.status === 'rejected') {
       return res.status(422).json({ error: 'ARCA rechazó el comprobante.', invoice });
     }
@@ -165,8 +193,8 @@ router.post('/:orderId/invoice', requireAuth, async (req, res) => {
     res.status(result.created ? 201 : 200).json({ invoice, recovered: result.recovered });
   } catch (error) {
     if (error instanceof InvoiceServiceError) return serviceErrorResponse(res, error);
-    console.error('[POST /api/orders/:orderId/invoice]', error.code || error.name, error.message);
-    res.status(500).json({ error: error.message, code: error.code || 'INVOICE_ERROR' });
+    console.error(`[invoice-manual] order=${req.params.orderId} status=error code=${error.code || error.name}`);
+    res.status(500).json({ error: 'No pudimos generar la factura en este momento.', code: 'INVOICE_ERROR' });
   }
 });
 
@@ -187,7 +215,7 @@ router.get('/:orderId/invoice/pdf', requireAuth, async (req, res) => {
     });
     res.send(pdf);
   } catch (error) {
-    console.error('[GET /api/orders/:orderId/invoice/pdf]', error.code || error.name, error.message);
+    console.error(`[invoice-pdf] order=${req.params.orderId} status=error code=${error.code || error.name}`);
     res.status(500).json({ error: 'No se pudo generar el PDF de la factura.' });
   }
 });

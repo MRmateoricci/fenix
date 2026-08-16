@@ -97,8 +97,33 @@ function InvoicePanel({ order, invoiceData, setInvoiceData }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const invoice = invoiceData?.invoice
+  const invoiceJob = invoiceData?.invoiceJob
   const canInvoice = PAID_STATUSES.includes(order.status)
-  const mustConfirm = !invoiceData?.recipientConfirmed || ['rejected', 'error'].includes(invoice?.status)
+  const authorized = invoice?.status === 'authorized'
+  const jobFailed = invoiceJob?.status === 'failed'
+  const jobInProgress = !authorized && ['queued', 'processing', 'retry_wait'].includes(invoiceJob?.status)
+  const invoiceInProgress = !authorized && !jobFailed && ['processing', 'uncertain'].includes(invoice?.status)
+  const inProgress = jobInProgress || invoiceInProgress
+  const failed = !authorized && (jobFailed || ['rejected', 'error'].includes(invoice?.status))
+  const mustConfirm = !authorized && (!invoiceData?.recipientConfirmed
+    || invoiceJob?.requiresRecipientData
+    || invoice?.status === 'rejected')
+
+  useEffect(() => {
+    if (!inProgress) return undefined
+    const refresh = async () => {
+      try {
+        const response = await fetch(`${API_BASE}/api/orders/${order.id}/invoice`, { credentials: 'include' })
+        if (!response.ok) return
+        setInvoiceData(await response.json())
+      } catch {
+        // El próximo intervalo vuelve a intentar; no reemplazamos el estado
+        // visible por un error técnico transitorio.
+      }
+    }
+    const timer = window.setInterval(refresh, 5000)
+    return () => window.clearInterval(timer)
+  }, [inProgress, order.id, setInvoiceData])
 
   const saveRecipient = async (invoiceRecipient) => {
     setBusy(true)
@@ -109,7 +134,13 @@ function InvoicePanel({ order, invoiceData, setInvoiceData }) {
       })
       const data = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(data.error || 'No pudimos confirmar los datos fiscales.')
-      setInvoiceData((current) => ({ ...current, invoice: null, recipientConfirmed: true, invoiceRecipient: data.invoiceRecipient }))
+      setInvoiceData((current) => ({
+        ...current,
+        invoice: null,
+        invoiceJob: data.invoiceJob || current?.invoiceJob,
+        recipientConfirmed: true,
+        invoiceRecipient: data.invoiceRecipient,
+      }))
       setError('')
     } finally {
       setBusy(false)
@@ -126,6 +157,8 @@ function InvoicePanel({ order, invoiceData, setInvoiceData }) {
       const data = await response.json().catch(() => ({}))
       if (data.invoice) setInvoiceData((current) => ({ ...current, invoice: data.invoice }))
       if (!response.ok) throw new Error(data.error || 'No pudimos emitir la factura.')
+      const refreshed = await fetch(`${API_BASE}/api/orders/${order.id}/invoice`, { credentials: 'include' })
+      if (refreshed.ok) setInvoiceData(await refreshed.json())
     } catch (reason) {
       setError(reason.message)
     } finally {
@@ -161,7 +194,9 @@ function InvoicePanel({ order, invoiceData, setInvoiceData }) {
       {!canInvoice && <p>La Factura C estará disponible cuando el pago quede acreditado.</p>}
       {canInvoice && mustConfirm && (
         <>
-          <p>{invoice?.status === 'rejected' ? 'ARCA rechazó la solicitud. Revisá los códigos y corregí los datos antes de volver a intentar.' : 'Confirmá los datos fiscales para este pedido.'}</p>
+          <p>{invoice?.status === 'rejected'
+            ? 'No pudimos generar la factura con esos datos. Revisalos antes de volver a intentar.'
+            : 'Completá tus datos fiscales para recibir la factura.'}</p>
           <FiscalForm initial={invoiceData?.invoiceRecipient || {
             name: order.invoice_recipient_name || order.customer_name,
             docType: order.invoice_doc_type,
@@ -170,19 +205,21 @@ function InvoicePanel({ order, invoiceData, setInvoiceData }) {
           }} onSaved={saveRecipient} busy={busy} />
         </>
       )}
-      {canInvoice && !mustConfirm && (!invoice || invoice.status === 'pending') && <button type="button" className="fnx-pay-now" onClick={issueInvoice} disabled={busy}>{busy ? 'Conectando con ARCA...' : 'Obtener factura'}</button>}
-      {invoice?.status === 'processing' && <p>La factura se está procesando. No cierres ni repitas la solicitud.</p>}
-      {invoice?.status === 'uncertain' && <p>ARCA no confirmó el resultado. Podés volver a consultar; el sistema no duplicará el comprobante.</p>}
-      {invoice?.status === 'uncertain' && <button type="button" className="fnx-pay-now" onClick={issueInvoice} disabled={busy}>Consultar nuevamente</button>}
+      {canInvoice && !mustConfirm && inProgress && <p>Factura en proceso. Te avisaremos acá cuando esté disponible.</p>}
+      {canInvoice && !mustConfirm && !inProgress && !failed && (!invoice || invoice.status === 'pending') && <button type="button" className="fnx-pay-now" onClick={issueInvoice} disabled={busy}>{busy ? 'Procesando...' : 'Obtener factura'}</button>}
+      {canInvoice && !mustConfirm && failed && (
+        <div>
+          <p>No pudimos generar la factura automáticamente. Tu pago y tu pedido siguen confirmados.</p>
+          <button type="button" className="fnx-pay-now" onClick={issueInvoice} disabled={busy}>{busy ? 'Procesando...' : 'Volver a intentar'}</button>
+        </div>
+      )}
       {invoice?.status === 'authorized' && (
         <div>
-          <p>Factura autorizada · N° {String(invoice.pointOfSale).padStart(5, '0')}-{String(invoice.voucherNumber).padStart(8, '0')}</p>
+          <p>Factura disponible · N° {String(invoice.pointOfSale).padStart(5, '0')}-{String(invoice.voucherNumber).padStart(8, '0')}</p>
           <p>CAE: {invoice.cae} · Vencimiento: {String(invoice.caeExpirationDate).slice(0, 10)}</p>
           <button type="button" className="fnx-pay-now" onClick={downloadPdf} disabled={busy}>{busy ? 'Preparando PDF...' : 'Descargar factura'}</button>
         </div>
       )}
-      {invoice?.observations?.length > 0 && <p>Observaciones ARCA: {invoice.observations.map((item) => `${item.code}: ${item.message}`).join(' · ')}</p>}
-      {invoice?.errors?.length > 0 && <p style={{ color: 'var(--color-primary)' }}>{invoice.errors.map((item) => `${item.code}: ${item.message}`).join(' · ')}</p>}
       {error && <p style={{ color: 'var(--color-primary)' }}>{error}</p>}
     </section>
   )

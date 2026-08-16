@@ -1,11 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { ArcaConfigError, backendRoot, getArcaConfig } from './arca.js';
+import {
+  ArcaConfigError,
+  backendRoot,
+  getArcaAutomationConfig,
+  getArcaConfig,
+} from './arca.js';
 
 const KEYS = [
   'ARCA_ENV', 'ARCA_PRODUCTION_ENABLED', 'ARCA_CUIT', 'ARCA_PTO_VTA',
   'ARCA_CERT_PATH', 'ARCA_KEY_PATH', 'ARCA_DEFAULT_CBTE_TIPO', 'ARCA_DEFAULT_CONCEPTO',
+  'ARCA_AUTO_INVOICE_ENABLED',
 ];
 
 function withEnvironment(values, callback) {
@@ -38,3 +44,39 @@ test('ARCA bloquea producción sin habilitación explícita', () => withEnvironm
     error instanceof ArcaConfigError && error.code === 'ARCA_PRODUCTION_DISABLED'
   ));
 }));
+
+test('la facturación automática nace desactivada y homologación exige opt-in', () => {
+  assert.equal(getArcaAutomationConfig({ ARCA_ENV: 'homologation' }).enabled, false);
+  assert.deepEqual(
+    getArcaAutomationConfig({
+      ARCA_ENV: 'homologation',
+      ARCA_AUTO_INVOICE_ENABLED: 'true',
+      ARCA_PRODUCTION_ENABLED: 'false',
+    }),
+    {
+      environment: 'homologation',
+      isProduction: false,
+      autoInvoiceRequested: true,
+      productionEnabled: false,
+      enabled: true,
+      disabledReason: null,
+    },
+  );
+});
+
+test('producción automática requiere ambas habilitaciones explícitas', () => {
+  const blocked = getArcaAutomationConfig({
+    ARCA_ENV: 'production',
+    ARCA_AUTO_INVOICE_ENABLED: 'true',
+    ARCA_PRODUCTION_ENABLED: 'false',
+  });
+  assert.equal(blocked.enabled, false);
+  assert.equal(blocked.disabledReason, 'production_disabled');
+
+  const enabled = getArcaAutomationConfig({
+    ARCA_ENV: 'production',
+    ARCA_AUTO_INVOICE_ENABLED: 'true',
+    ARCA_PRODUCTION_ENABLED: 'true',
+  });
+  assert.equal(enabled.enabled, true);
+});

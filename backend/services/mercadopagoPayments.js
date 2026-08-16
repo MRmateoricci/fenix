@@ -2,6 +2,7 @@ import { MercadoPagoConfig, Payment } from 'mercadopago'
 import { pool } from '../db/pool.js'
 import { releaseOrderStock } from './stockReservation.js'
 import { sendOrderConfirmationNotifications } from './orderNotifications.js'
+import { scheduleInvoiceForApprovedPayment } from '../jobs/arcaInvoices.js'
 import 'dotenv/config'
 
 const mpClient = new MercadoPagoConfig({ accessToken: process.env.MP_ACCESS_TOKEN })
@@ -18,6 +19,7 @@ export class PaymentReconciliationError extends Error {
 export function mapMpStatus(mpStatus) {
   if (mpStatus === 'approved') return 'paid'
   if (['rejected', 'cancelled'].includes(mpStatus)) return 'payment_failed'
+  if (['refunded', 'charged_back'].includes(mpStatus)) return 'cancelled'
   if (['pending', 'in_process', 'authorized'].includes(mpStatus)) return 'pending_payment'
   return null
 }
@@ -111,11 +113,27 @@ export async function reconcileMercadoPagoPayment({ paymentId, expectedOrderId =
     client.release()
   }
 
+  // La cola es una escritura local, deduplicada por order_id. Cualquier falla
+  // al programarla se registra pero nunca revierte el pago ni hace fallar el
+  // webhook. El worker es quien se conecta con ARCA fuera de este request.
+  try {
+    const scheduled = await scheduleInvoiceForApprovedPayment({ order, payment: mpPayment })
+    if (scheduled.scheduled) {
+      console.info(`[mercadopago] Factura programada order=${order.id} payment=${mpPayment.id}`)
+    }
+  } catch (error) {
+    console.error(`[mercadopago] No se pudo programar la factura order=${order.id} code=${error.code || error.name}`)
+  }
+
   if (order.status === 'payment_failed') {
-    await releaseOrderStock(order.id)
+    await releaseOrderStock(order.id).catch((error) => {
+      console.error(`[mercadopago] No se pudo liberar stock order=${order.id} code=${error.code || error.name}`)
+    })
   }
   if (PAID_ORDER_STATUSES.includes(order.status)) {
-    await sendOrderConfirmationNotifications(order.id)
+    await sendOrderConfirmationNotifications(order.id).catch((error) => {
+      console.error(`[mercadopago] No se pudo enviar notificación order=${order.id} code=${error.code || error.name}`)
+    })
   }
 
   console.log(`[mercadopago] Orden ${order.id} -> ${order.status} (MP: ${mpStatus})`)

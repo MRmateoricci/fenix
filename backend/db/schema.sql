@@ -699,6 +699,40 @@ CREATE TRIGGER invoices_updated_at
   BEFORE UPDATE ON invoices
   FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 
+-- Cola persistente para desacoplar la confirmación de Mercado Pago de WSFE.
+-- Una sola fila por pedido vuelve idempotentes webhooks duplicados y conserva
+-- reintentos aun cuando el proceso Node se reinicia.
+CREATE TABLE IF NOT EXISTS invoice_jobs (
+  id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  order_id           UUID NOT NULL UNIQUE REFERENCES orders(id) ON DELETE CASCADE,
+  status             VARCHAR(20) NOT NULL DEFAULT 'queued',
+  attempt_count      INTEGER NOT NULL DEFAULT 0,
+  run_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  locked_at          TIMESTAMPTZ,
+  last_error_code    VARCHAR(100),
+  last_error_message VARCHAR(500),
+  completed_at       TIMESTAMPTZ,
+  created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT invoice_jobs_status_check CHECK (
+    status IN ('queued', 'processing', 'retry_wait', 'needs_data', 'completed', 'failed')
+  ),
+  CONSTRAINT invoice_jobs_attempt_count_check CHECK (
+    attempt_count >= 0 AND attempt_count <= 5
+  )
+);
+
+CREATE INDEX IF NOT EXISTS idx_invoice_jobs_due
+  ON invoice_jobs(run_at, created_at)
+  WHERE status IN ('queued', 'retry_wait');
+CREATE INDEX IF NOT EXISTS idx_invoice_jobs_status_updated_at
+  ON invoice_jobs(status, updated_at DESC);
+
+DROP TRIGGER IF EXISTS invoice_jobs_updated_at ON invoice_jobs;
+CREATE TRIGGER invoice_jobs_updated_at
+  BEFORE UPDATE ON invoice_jobs
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
 -- Última respuesta paramétrica válida. Permite servir checkout aunque ARCA
 -- tenga una interrupción temporal, sin hardcodear condiciones fiscales.
 CREATE TABLE IF NOT EXISTS arca_parameter_cache (

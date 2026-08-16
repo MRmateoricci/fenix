@@ -1,11 +1,12 @@
 # ARCA WSFEv1 — Factura C
 
-La integración está preparada para emitir exclusivamente Factura C mediante WSFEv1. La emisión es manual desde el detalle privado de un pedido pagado o mediante el script explícito de homologación. El webhook de Mercado Pago no emite comprobantes.
+La integración emite exclusivamente Factura C mediante WSFEv1. La misma operación idempotente, `createInvoiceForOrder(orderId)`, sirve al botón manual, al script de homologación y al worker automático posterior a un pago aprobado de Mercado Pago.
 
 ## Seguridad y ambiente
 
 - `ARCA_ENV=homologation` usa únicamente WSAA y WSFEv1 de homologación.
 - Si se configura `ARCA_ENV=production`, toda conexión queda bloqueada salvo que también exista `ARCA_PRODUCTION_ENABLED=true`.
+- La emisión automática tiene un segundo control independiente: `ARCA_AUTO_INVOICE_ENABLED=true`. En producción deben estar habilitados ambos controles.
 - La clave privada, el certificado, el CMS, Token y Sign nunca se registran.
 - En homologación, el TA se reutiliza entre procesos mediante
   `.cache/arca/wsaa-homologation-wsfe.json`. El archivo está ignorado por Git,
@@ -23,6 +24,7 @@ Agregar a `backend/.env`:
 ```dotenv
 ARCA_ENV=homologation
 ARCA_PRODUCTION_ENABLED=false
+ARCA_AUTO_INVOICE_ENABLED=false
 ARCA_CUIT=
 ARCA_PTO_VTA=
 ARCA_CERT_PATH=./config/arca/arca_certificate.crt
@@ -87,7 +89,17 @@ node scripts/testArcaInvoice.js --order-id <uuid> --confirm-homologation
 
 El argumento `--confirm-homologation` es obligatorio y el script rechaza producción. La operación consulta el último número autorizado, persiste el candidato y recién después llama a `FECAESolicitar`.
 
-También puede emitirse desde “Mi cuenta → Pedido → Obtener factura”. Repetir la operación sobre una factura autorizada devuelve la misma factura y no solicita otro CAE.
+También puede emitirse desde “Mi cuenta → Pedido → Obtener factura”. Repetir la operación sobre una factura autorizada devuelve la misma factura y no solicita otro CAE. En homologación ya se validó una Factura C autorizada para punto de venta 2, tipo 11 y número 1, incluida su persistencia, PDF, QR e idempotencia.
+
+## Emisión automática posterior al pago
+
+El webhook usa el ID recibido solo como disparador, vuelve a consultar el pago con las credenciales privadas de Mercado Pago y persiste el resultado verificado. Solamente `payment.status=approved`, asociado al pedido correcto, crea una fila deduplicada en `invoice_jobs`. Después responde `200`; nunca espera WSAA, WSFE ni el PDF. Una falla transitoria al verificar o persistir el pago responde `500` para que Mercado Pago reintente, pero una falla al encolar o procesar ARCA no cambia la respuesta del pago confirmado.
+
+El worker se inicia con el backend cuando `ARCA_AUTO_INVOICE_ENABLED=true`. Consulta la cola cada 15 segundos y vuelve a validar en la base que `orders.mp_status=approved` antes de llamar a `createInvoiceForOrder()`. Webhooks repetidos convergen en una sola fila por `order_id`; los locks y la unicidad de `invoices` preservan un solo comprobante y un solo CAE.
+
+Si faltan datos fiscales, el trabajo queda en `needs_data` y el pedido sigue pagado. Al confirmarlos desde el detalle privado se reprograma el trabajo; el botón “Obtener factura” permanece como fallback manual. Estados `pending`, `in_process`, `rejected`, `cancelled`, `refunded` y `charged_back` de Mercado Pago no programan ni ejecutan una factura.
+
+Las devoluciones y contracargos posteriores a una factura autorizada requieren una Nota de Crédito. Ese flujo no está implementado y no se genera automáticamente en esta etapa.
 
 ## Recuperación e idempotencia
 
@@ -97,6 +109,16 @@ También puede emitirse desde “Mi cuenta → Pedido → Obtener factura”. Re
 - Solo el código oficial `602` se interpreta como comprobante inexistente.
 - El request que sufrió el timeout nunca reenvía. Una llamada posterior solo reutiliza el número si ARCA vuelve a confirmar `602` y el último autorizado continúa siendo el anterior.
 - Si la numeración avanzó o la consulta es ambigua, la factura permanece incierta para diagnóstico.
+- Los errores recuperables se reintentan como máximo cinco veces: inmediato, luego 1 minuto, 5 minutos, 15 minutos y 1 hora. Un rechazo fiscal, datos inválidos, pedido no pagado o configuración inválida no se reintentan automáticamente.
+- Cada ciclo revisa trabajos `processing` cuyo lease tenga más de diez minutos y los recupera, incluso si al reiniciar todavía eran demasiado recientes. Un intento anterior no puede sobrescribir al nuevo porque la persistencia verifica su número de intento. La cola es PostgreSQL, no memoria del proceso.
+
+Para revisar pendientes, intentos y el último error sanitizado se puede usar `getInvoiceAutomationMetrics()` de `jobs/arcaInvoices.js`. La recuperación manual de comprobantes `pending`, `uncertain` o `error` se ejecuta, desde `backend/`, con:
+
+```powershell
+node scripts/retryPendingInvoices.js --confirm-homologation
+```
+
+El script no reprograma facturas `rejected`. No se instaló ningún cron; el barrido normal lo realiza el worker embebido mientras el servidor está activo.
 
 ## PDF y QR
 
@@ -104,6 +126,16 @@ El PDF se genera en memoria desde snapshots persistidos y se descarga por una ru
 
 El QR usa `https://www.arca.gob.ar/fe/qr/?p=<JSON_BASE64>` y contiene los campos oficiales de versión, fecha, CUIT, punto de venta, tipo/número, importe, moneda/cotización, documento receptor y CAE.
 
-## Producción futura
+## Despliegue seguro a producción
 
-Antes de habilitar producción se necesitan certificado, clave, relación WSASS y punto de venta productivos, pruebas de recuperación e idempotencia y una revisión operativa. Recién entonces se podrá configurar `ARCA_ENV=production` y `ARCA_PRODUCTION_ENABLED=true`. Esta documentación no autoriza ese cambio ni activa emisión automática.
+La activación debe hacerse en dos etapas y nunca habilitando ambos controles al mismo tiempo:
+
+1. Desplegar el código con `ARCA_ENV=production`, `ARCA_PRODUCTION_ENABLED=false` y `ARCA_AUTO_INVOICE_ENABLED=false`.
+2. Configurar certificado, clave, relación WSASS, CUIT, datos legales y punto de venta productivos.
+3. Probar WSAA, `FEDummy`, parámetros, punto de venta y último autorizado. En producción no existe el fallback 602 de puntos de venta.
+4. Cambiar solamente `ARCA_PRODUCTION_ENABLED=true` y mantener la automatización apagada.
+5. Emitir una única factura real controlada mediante el flujo manual, y verificar CAE, persistencia, PDF y QR.
+6. Revisar idempotencia, recuperación, alertas y procedimiento operativo para rechazos y estados inciertos.
+7. Recién entonces cambiar `ARCA_AUTO_INVOICE_ENABLED=true`.
+
+Para detener inmediatamente nuevas emisiones automáticas, configurar `ARCA_AUTO_INVOICE_ENABLED=false` y reiniciar el backend. Esto no altera pagos, pedidos ni facturas ya autorizadas. El script de recuperación exige `--confirm-production` cuando se use en producción. Esta tarea no activa ni prueba el ambiente productivo.

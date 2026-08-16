@@ -51,9 +51,9 @@ function safeArcaResponse(response) {
   };
 }
 
-export function publicInvoice(invoice) {
+export function publicInvoice(invoice, { includeTechnicalMessages = true } = {}) {
   if (!invoice) return null;
-  return {
+  const result = {
     id: invoice.id,
     orderId: invoice.order_id,
     status: invoice.status,
@@ -65,11 +65,14 @@ export function publicInvoice(invoice) {
     currency: invoice.currency,
     cae: invoice.cae,
     caeExpirationDate: invoice.cae_expiration_date,
-    observations: invoice.observations || [],
-    errors: invoice.errors || [],
     createdAt: invoice.created_at,
     authorizedAt: invoice.authorized_at,
   };
+  if (includeTechnicalMessages) {
+    result.observations = invoice.observations || [];
+    result.errors = invoice.errors || [];
+  }
+  return result;
 }
 
 async function advisoryLock(client, key) {

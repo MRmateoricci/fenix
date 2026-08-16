@@ -39,6 +39,7 @@ test('constraints e idempotencia concurrente con PostgreSQL', {
     const { arcaEnvironments } = await import('../config/arca.js');
     const { setWsfeDependenciesForTests } = await import('./arcaWsfe.js');
     const { createInvoiceForOrder } = await import('./invoiceService.js');
+    const { recoverStaleInvoiceJobs } = await import('../jobs/arcaInvoices.js');
 
     let lastAuthorized = 0;
     let caeCalls = 0;
@@ -110,6 +111,30 @@ test('constraints e idempotencia concurrente con PostgreSQL', {
       ),
       (error) => error.code === '23505',
     );
+
+    await appPool.query(
+      `INSERT INTO invoice_jobs (order_id) VALUES ($1)`,
+      [firstOrder],
+    );
+    await assert.rejects(
+      appPool.query(`INSERT INTO invoice_jobs (order_id) VALUES ($1)`, [firstOrder]),
+      (error) => error.code === '23505',
+    );
+
+    await appPool.query(
+      `UPDATE invoice_jobs SET
+         status = 'processing', attempt_count = 1,
+         locked_at = NOW() - INTERVAL '11 minutes'
+       WHERE order_id = $1`,
+      [firstOrder],
+    );
+    assert.equal(await recoverStaleInvoiceJobs(appPool), 1);
+    const recoveredJob = await appPool.query(
+      'SELECT status, last_error_code FROM invoice_jobs WHERE order_id = $1',
+      [firstOrder],
+    );
+    assert.equal(recoveredJob.rows[0].status, 'retry_wait');
+    assert.equal(recoveredJob.rows[0].last_error_code, 'WORKER_INTERRUPTED');
   } finally {
     if (appPool) await appPool.end();
     await adminPool.query(`DROP SCHEMA ${schemaName} CASCADE`);

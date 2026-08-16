@@ -13,7 +13,8 @@
     "arca:test": "node scripts/testArca.js",
     "arca:points": "node scripts/testArcaPuntosVenta.js",
     "arca:parameters": "node scripts/testArcaParametros.js",
-    "arca:last": "node scripts/testArcaLastVoucher.js"
+    "arca:last": "node scripts/testArcaLastVoucher.js",
+    "arca:retry": "node scripts/retryPendingInvoices.js"
   },
   "dependencies": {
     "@napi-rs/canvas": "^1.0.2",

@@ -1,6 +1,9 @@
 import { Router } from 'express'
 import crypto from 'crypto'
-import { reconcileMercadoPagoPayment } from '../services/mercadopagoPayments.js'
+import {
+  PaymentReconciliationError,
+  reconcileMercadoPagoPayment,
+} from '../services/mercadopagoPayments.js'
 import 'dotenv/config'
 
 const router = Router()
@@ -56,9 +59,6 @@ export function verifyMpSignature(req) {
 // MercadoPago envía: { action: "payment.updated", type: "payment", data: { id: "12345" } }
 // ─────────────────────────────────────────────────────────────────────────────
 router.post('/mercadopago', async (req, res) => {
-  // Responder 200 rápido para que MP no reintente
-  res.status(200).send('OK')
-
   const signatureValid = verifyMpSignature(req)
   if (!signatureValid) {
     // No confiamos en el contenido del webhook. De todos modos podemos usar
@@ -73,12 +73,17 @@ router.post('/mercadopago', async (req, res) => {
     || requestUrl.searchParams.get('data.id')
     || requestUrl.searchParams.get('data_id')
 
-  if (type !== 'payment' || !paymentId) return
+  if (type !== 'payment' || !paymentId) return res.status(200).send('OK')
 
   try {
     await reconcileMercadoPagoPayment({ paymentId })
+    // La conciliación ya confirmó y persistió el pago. La emisión ARCA
+    // quedó solamente encolada y se ejecuta fuera de este request.
+    return res.status(200).send('OK')
   } catch (err) {
-    console.error('[webhook] Error procesando notificación:', err)
+    console.error(`[webhook] payment=${paymentId} status=error code=${err.code || err.name}`)
+    if (err instanceof PaymentReconciliationError) return res.status(200).send('IGNORED')
+    return res.status(500).send('RETRY')
   }
 })
 

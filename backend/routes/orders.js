@@ -491,7 +491,7 @@ router.post('/public/:id/reconcile-payment', async (req, res) => {
     if (err instanceof PaymentReconciliationError) {
       return res.status(err.statusCode).json({ error: err.message })
     }
-    console.error('[POST /api/orders/public/:id/reconcile-payment]', err)
+    console.error(`[payment-reconcile] order=${req.params.id} payment=${req.body?.paymentId || '-'} status=error code=${err.code || err.name}`)
     res.status(502).json({ error: 'No pudimos verificar el pago con Mercado Pago' })
   }
 })

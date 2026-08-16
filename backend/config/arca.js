@@ -80,6 +80,38 @@ function readEnvironment() {
   return environment;
 }
 
+function enabledFlag(value) {
+  return String(value ?? '').trim().toLowerCase() === 'true';
+}
+
+/**
+ * La activación del worker se evalúa sin cargar CUIT, certificados ni datos
+ * del emisor. Así el servidor puede iniciar con la automatización apagada y
+ * ninguna configuración incompleta termina abriendo una conexión con ARCA.
+ */
+export function getArcaAutomationConfig(environmentVariables = process.env) {
+  const environment = String(environmentVariables.ARCA_ENV || 'homologation').trim().toLowerCase();
+  const autoInvoiceRequested = enabledFlag(environmentVariables.ARCA_AUTO_INVOICE_ENABLED);
+  const productionEnabled = enabledFlag(environmentVariables.ARCA_PRODUCTION_ENABLED);
+  const validEnvironment = Boolean(ENVIRONMENTS[environment]);
+  const productionAllowed = environment !== 'production' || productionEnabled;
+  const enabled = validEnvironment && autoInvoiceRequested && productionAllowed;
+
+  let disabledReason = null;
+  if (!validEnvironment) disabledReason = 'invalid_environment';
+  else if (!autoInvoiceRequested) disabledReason = 'auto_invoice_disabled';
+  else if (!productionAllowed) disabledReason = 'production_disabled';
+
+  return Object.freeze({
+    environment,
+    isProduction: environment === 'production',
+    autoInvoiceRequested,
+    productionEnabled,
+    enabled,
+    disabledReason,
+  });
+}
+
 export function getArcaConfig({ requirePointOfSale = false, requireIssuerData = false } = {}) {
   const environment = readEnvironment();
   const endpoints = ENVIRONMENTS[environment];

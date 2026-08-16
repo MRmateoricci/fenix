@@ -24,6 +24,7 @@ import invoicesRouter from './routes/invoices.js'
 import { uploadsDir } from './config/uploads.js'
 import { createCorsOptionsDelegate } from './config/cors.js'
 import { startExpireReservationsJob } from './jobs/expireReservations.js'
+import { startArcaInvoiceJob } from './jobs/arcaInvoices.js'
 
 const app  = express()
 const PORT = process.env.PORT || 3001
@@ -122,4 +123,5 @@ app.use((err, _req, res, _next) => {
 app.listen(PORT, () => {
   console.log(`🔥 Fénix backend corriendo en http://localhost:${PORT}`)
   startExpireReservationsJob()
+  startArcaInvoiceJob()
 })
