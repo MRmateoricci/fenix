@@ -6,16 +6,22 @@
   "scripts": {
     "dev": "node --watch-path=index.js --watch-path=routes --watch-path=services --watch-path=config --watch-path=db --watch-path=jobs --watch-path=middleware --watch-path=utils index.js",
     "start": "node index.js",
+    "test": "node --test",
     "db:migrate": "node -e \"import('./db/pool.js').then(m => m.runSchema())\"",
     "db:seed": "node db/seedStorefront.js",
-    "db:seed:demo": "node db/seedDemoProducts.js"
+    "db:seed:demo": "node db/seedDemoProducts.js",
+    "arca:test": "node scripts/testArca.js",
+    "arca:points": "node scripts/testArcaPuntosVenta.js",
+    "arca:parameters": "node scripts/testArcaParametros.js",
+    "arca:last": "node scripts/testArcaLastVoucher.js"
   },
   "dependencies": {
     "@napi-rs/canvas": "^1.0.2",
+    "axios": "^1.19.0",
     "bcryptjs": "^3.0.3",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
-    "dotenv": "^16.4.5",
+    "dotenv": "^16.6.1",
     "express": "^4.19.2",
     "jsonwebtoken": "^9.0.3",
     "mercadopago": "^2.0.15",
@@ -23,7 +29,11 @@
     "nodemailer": "^9.0.3",
     "pdf-parse": "^1.1.1",
     "pdfjs-dist": "^6.1.200",
+    "pdfkit": "^0.19.1",
     "pg": "^8.12.0",
-    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
+    "qrcode": "^1.5.4",
+    "soap": "^1.10.0",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
+    "xml2js": "^0.6.2"
   }
 }

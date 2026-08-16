@@ -7,6 +7,7 @@ import { requireAuth } from '../middleware/requireAuth.js'
 import { emailVerificationEmail, passwordResetEmail, sendMail } from '../services/mailer.js'
 import { sendPendingReviewInvitationsForUser } from '../services/reviewInvitations.js'
 import { isValidEmail, normalizeEmail } from '../utils/email.js'
+import { claimGuestOrdersForUser } from '../services/orderClaims.js'
 import 'dotenv/config'
 
 const router = Router()
@@ -233,6 +234,7 @@ router.post('/verify-email', async (req, res) => {
       'UPDATE email_verification_tokens SET used_at = NOW() WHERE token_hash = $1',
       [tokenHash]
     )
+    await claimGuestOrdersForUser(userId, client)
     await client.query('COMMIT')
 
     sendPendingReviewInvitationsForUser(userId).catch((err) => {
@@ -393,6 +395,7 @@ router.get('/oauth/:provider/callback', async (req, res) => {
     const redirectUri = `${backendBaseUrl()}/api/auth/oauth/${provider}/callback`
     const profile = await socialProfile(provider, String(req.query.code), redirectUri)
     const user = await findOrCreateSocialUser(profile)
+    await claimGuestOrdersForUser(user.id)
     res.cookie(COOKIE_NAME, signToken(user.id), cookieOptions())
     res.redirect(redirectWithQuery(returnTo, 'socialLogin', 'success'))
   } catch (err) {
@@ -422,6 +425,7 @@ router.post('/login', async (req, res) => {
     const valid = await bcrypt.compare(password, user.password_hash)
     if (!valid) return genericError()
 
+    if (user.email_verified_at) await claimGuestOrdersForUser(user.id)
     res.cookie(COOKIE_NAME, signToken(user.id), cookieOptions())
     res.json({ user: toPublicUser(user) })
   } catch (err) {

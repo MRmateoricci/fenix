@@ -332,6 +332,17 @@ CREATE TRIGGER product_variant_rules_updated_at
   BEFORE UPDATE ON product_variant_rules
   FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 
+-- `supplier` inicialmente se infería del código con una columna generada. Se
+-- conserva el valor ya calculado, pero pasa a ser editable desde el producto.
+-- El trigger enumera `supplier` en UPDATE OF, por lo que PostgreSQL exige
+-- quitarlo antes de cambiar el tipo de la columna. Se recrea más abajo.
+DROP TRIGGER IF EXISTS products_sync_single_base_variant ON products;
+ALTER TABLE products ALTER COLUMN supplier DROP EXPRESSION IF EXISTS;
+ALTER TABLE products ALTER COLUMN supplier TYPE VARCHAR(80);
+ALTER TABLE products ALTER COLUMN supplier SET DEFAULT 'OTRO';
+UPDATE products SET supplier = 'OTRO' WHERE supplier IS NULL OR BTRIM(supplier) = '';
+ALTER TABLE products ALTER COLUMN supplier SET NOT NULL;
+
 -- Los importadores y ajustes rápidos históricos actualizan la fila `products`.
 -- Cuando el producto tiene una sola variante (la Base), reflejamos esos cambios
 -- en ella para que precio, stock y ficha técnica no queden desincronizados.
@@ -429,14 +440,6 @@ CREATE TABLE IF NOT EXISTS supplier_price_code_overrides (
   updated_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
   PRIMARY KEY (supplier, source_code_key)
 );
-
--- `supplier` inicialmente se infería del código con una columna generada. Se
--- conserva el valor ya calculado, pero pasa a ser editable desde el producto.
-ALTER TABLE products ALTER COLUMN supplier DROP EXPRESSION IF EXISTS;
-ALTER TABLE products ALTER COLUMN supplier TYPE VARCHAR(80);
-ALTER TABLE products ALTER COLUMN supplier SET DEFAULT 'OTRO';
-UPDATE products SET supplier = 'OTRO' WHERE supplier IS NULL OR BTRIM(supplier) = '';
-ALTER TABLE products ALTER COLUMN supplier SET NOT NULL;
 
 -- `cable_type` fue el primer filtro de nivel 3. `product_type` lo generaliza
 -- para todas las ramas del mismo árbol de categorías sin perder datos previos.
@@ -596,3 +599,116 @@ CREATE TRIGGER coupons_updated_at
 -- detalle del pedido y en el panel de admin.
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS coupon_code VARCHAR(40);
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS discount_amount NUMERIC(12,2) NOT NULL DEFAULT 0;
+
+-- Datos fiscales confirmados por el comprador. Permanecen nullable para que
+-- los pedidos históricos puedan confirmarlos antes de solicitar comprobante.
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS invoice_recipient_name VARCHAR(160);
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS invoice_doc_type INTEGER;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS invoice_doc_number VARCHAR(20);
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS invoice_vat_condition_id INTEGER;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS invoice_data_confirmed_at TIMESTAMPTZ;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS invoice_concept SMALLINT;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS invoice_service_from DATE;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS invoice_service_to DATE;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS invoice_payment_due DATE;
+
+ALTER TABLE orders DROP CONSTRAINT IF EXISTS orders_invoice_concept_check;
+ALTER TABLE orders ADD CONSTRAINT orders_invoice_concept_check CHECK (
+  invoice_concept IS NULL OR invoice_concept IN (1, 2, 3)
+);
+ALTER TABLE orders DROP CONSTRAINT IF EXISTS orders_invoice_service_dates_check;
+ALTER TABLE orders ADD CONSTRAINT orders_invoice_service_dates_check CHECK (
+  invoice_concept IS NULL
+  OR invoice_concept = 1
+  OR (
+    invoice_service_from IS NOT NULL
+    AND invoice_service_to IS NOT NULL
+    AND invoice_payment_due IS NOT NULL
+    AND invoice_service_from <= invoice_service_to
+  )
+);
+
+-- Comprobantes ARCA. Todos los datos que alimentan el PDF quedan congelados
+-- en snapshots; nunca se reconstruyen desde el catálogo mutable.
+CREATE TABLE IF NOT EXISTS invoices (
+  id                       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  order_id                 UUID NOT NULL UNIQUE REFERENCES orders(id) ON DELETE RESTRICT,
+  status                   VARCHAR(20) NOT NULL DEFAULT 'pending',
+  issuer_cuit              VARCHAR(11) NOT NULL,
+  pto_vta                  INTEGER NOT NULL,
+  cbte_tipo                INTEGER NOT NULL,
+  cbte_numero              BIGINT,
+  concepto                 SMALLINT NOT NULL DEFAULT 1,
+  fecha_comprobante        DATE,
+  fecha_servicio_desde     DATE,
+  fecha_servicio_hasta     DATE,
+  fecha_vencimiento_pago   DATE,
+  receiver_doc_type        INTEGER NOT NULL,
+  receiver_doc_number      VARCHAR(20) NOT NULL,
+  receiver_vat_condition_id INTEGER NOT NULL,
+  currency                 VARCHAR(3) NOT NULL DEFAULT 'PES',
+  currency_rate            NUMERIC(18,6) NOT NULL DEFAULT 1,
+  imp_total                NUMERIC(12,2) NOT NULL,
+  imp_neto                 NUMERIC(12,2) NOT NULL,
+  imp_iva                  NUMERIC(12,2) NOT NULL DEFAULT 0,
+  imp_trib                 NUMERIC(12,2) NOT NULL DEFAULT 0,
+  imp_tot_conc             NUMERIC(12,2) NOT NULL DEFAULT 0,
+  imp_op_ex                NUMERIC(12,2) NOT NULL DEFAULT 0,
+  cae                      VARCHAR(20),
+  cae_expiration_date      DATE,
+  arca_result              VARCHAR(1),
+  issuer_snapshot          JSONB NOT NULL,
+  receiver_snapshot        JSONB NOT NULL,
+  items_snapshot           JSONB NOT NULL,
+  arca_request             JSONB,
+  arca_response            JSONB,
+  arca_events              JSONB NOT NULL DEFAULT '[]',
+  observations             JSONB NOT NULL DEFAULT '[]',
+  errors                   JSONB NOT NULL DEFAULT '[]',
+  attempt_count            INTEGER NOT NULL DEFAULT 0,
+  last_attempt_at          TIMESTAMPTZ,
+  authorized_at            TIMESTAMPTZ,
+  created_at               TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at               TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT invoices_status_check CHECK (
+    status IN ('pending', 'processing', 'uncertain', 'authorized', 'rejected', 'error')
+  ),
+  CONSTRAINT invoices_voucher_identity_check CHECK (
+    pto_vta > 0 AND cbte_tipo > 0 AND (cbte_numero IS NULL OR cbte_numero > 0)
+  ),
+  CONSTRAINT invoices_amounts_check CHECK (
+    imp_total >= 0 AND imp_neto >= 0 AND imp_iva >= 0 AND imp_trib >= 0
+    AND imp_tot_conc >= 0 AND imp_op_ex >= 0
+  ),
+  CONSTRAINT invoices_authorized_check CHECK (
+    status <> 'authorized'
+    OR (cbte_numero IS NOT NULL AND cae IS NOT NULL AND cae_expiration_date IS NOT NULL)
+  ),
+  CONSTRAINT invoices_concept_check CHECK (concepto IN (1, 2, 3))
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_invoices_fiscal_number
+  ON invoices(issuer_cuit, pto_vta, cbte_tipo, cbte_numero)
+  WHERE cbte_numero IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_invoices_status_created_at ON invoices(status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_invoices_authorized_at ON invoices(authorized_at DESC)
+  WHERE authorized_at IS NOT NULL;
+
+DROP TRIGGER IF EXISTS invoices_updated_at ON invoices;
+CREATE TRIGGER invoices_updated_at
+  BEFORE UPDATE ON invoices
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+-- Última respuesta paramétrica válida. Permite servir checkout aunque ARCA
+-- tenga una interrupción temporal, sin hardcodear condiciones fiscales.
+CREATE TABLE IF NOT EXISTS arca_parameter_cache (
+  cache_key  VARCHAR(120) PRIMARY KEY,
+  payload    JSONB NOT NULL,
+  fetched_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+DROP TRIGGER IF EXISTS arca_parameter_cache_updated_at ON arca_parameter_cache;
+CREATE TRIGGER arca_parameter_cache_updated_at
+  BEFORE UPDATE ON arca_parameter_cache
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at();

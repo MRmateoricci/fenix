@@ -19,6 +19,8 @@ import googleReviewsRouter from './routes/googleReviews.js'
 import shippingRouter from './routes/shipping.js'
 import newsletterRouter from './routes/newsletter.js'
 import couponsRouter from './routes/coupons.js'
+import arcaRouter from './routes/arca.js'
+import invoicesRouter from './routes/invoices.js'
 import { uploadsDir } from './config/uploads.js'
 import { createCorsOptionsDelegate } from './config/cors.js'
 import { startExpireReservationsJob } from './jobs/expireReservations.js'
@@ -55,6 +57,8 @@ app.use('/uploads', express.static(uploadsDir))
 
 // ── Rutas ─────────────────────────────────────────────────────────────────────
 app.get('/api/health', (_req, res) => res.json({ ok: true, env: process.env.NODE_ENV || 'development' }))
+app.use('/api/arca', arcaRouter)
+app.use('/api/orders', invoicesRouter)
 app.use('/api/orders',   ordersRouter)
 app.use('/api/webhooks', webhooksRouter)
 app.use('/api/auth',     authRouter)

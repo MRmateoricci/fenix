@@ -14,6 +14,9 @@ import { isValidEmail, normalizeEmail } from '../utils/email.js'
 import { resolveVariantRule, ruleMatches } from '../services/productVariants.js'
 import { resolvePublicOptionPrice, resolvePublicPrice } from '../services/publicPricing.js'
 import { evaluateCoupon, findCouponByCode } from '../services/coupons.js'
+import { buildReceiverData, InvoiceValidationError } from '../services/invoiceFiscal.js'
+import { getInvoiceOptions } from '../services/arcaParameters.js'
+import { safeArcaErrorMessage } from '../services/arcaSafeLog.js'
 import 'dotenv/config'
 
 const router = Router()
@@ -174,14 +177,21 @@ router.post('/', attachUserIfPresent, async (req, res) => {
     let customerEmail   = normalizeEmail(customer?.email)
     let orderUserId     = req.userId || null
 
-    const customerDni = String(customer?.dni || '').replace(/\D/g, '')
+    const invoiceReceiver = buildReceiverData(customer)
+    const invoiceOptions = await getInvoiceOptions('C')
+    if (!invoiceOptions.documents.some(option => option.id === invoiceReceiver.docType)) {
+      return res.status(400).json({ error: 'El tipo de documento fiscal no fue informado por ARCA' })
+    }
+    if (!invoiceOptions.vatConditions.some(option => option.id === invoiceReceiver.vatConditionId)) {
+      return res.status(400).json({ error: 'La condición IVA no es válida para Factura C' })
+    }
+    const customerDni = invoiceReceiver.docType === 96
+      ? invoiceReceiver.docNumber
+      : String(customer?.dni || '').replace(/\D/g, '') || null
     const billingSameAsShipping = deliveryType === 'delivery' && customer?.billingSameAsShipping !== false
 
     if (!isValidEmail(customerEmail) || !customer?.nombre || !items?.length) {
       return res.status(400).json({ error: 'Faltan campos requeridos' })
-    }
-    if (!/^\d{7,8}$/.test(customerDni)) {
-      return res.status(400).json({ error: 'Ingresá un DNI válido (7 u 8 números)' })
     }
     if (!['pickup', 'delivery'].includes(deliveryType)) {
       return res.status(400).json({ error: 'Modalidad de entrega inválida' })
@@ -212,18 +222,6 @@ router.post('/', attachUserIfPresent, async (req, res) => {
       )
       if (!users.length) return res.status(401).json({ error: 'Sesión inválida' })
       customerEmail = users[0].email
-    } else {
-      // Si el email ya pertenece a una cuenta, asociamos el pedido igualmente.
-      // El cliente puede comprar como invitado y luego encontrar la compra al
-      // iniciar sesión con ese mismo email.
-      const existingUser = await pool.query(
-        'SELECT id, email FROM users WHERE email = $1 LIMIT 1',
-        [customerEmail]
-      )
-      if (existingUser.rows.length) {
-        orderUserId = existingUser.rows[0].id
-        customerEmail = existingUser.rows[0].email
-      }
     }
 
     // Precio y stock disponible se recalculan contra la DB — nunca se confía
@@ -353,9 +351,11 @@ router.post('/', attachUserIfPresent, async (req, res) => {
             payment_method, pickup_date, estimated_delivery_date, reservation_expires_at,
             items, user_id, customer_dni, address_extra, province, billing_same_as_shipping,
             billing_address, billing_address_extra, billing_city, billing_postal_code, billing_province,
-            coupon_code, discount_amount)
+            coupon_code, discount_amount, invoice_recipient_name, invoice_doc_type,
+            invoice_doc_number, invoice_vat_condition_id, invoice_data_confirmed_at, invoice_concept)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,
-                 $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29)
+                 $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29,
+                 $30, $31, $32, $33, NOW(), $34)
          RETURNING *`,
         [
           orderNumber, initialStatus,
@@ -386,6 +386,11 @@ router.post('/', attachUserIfPresent, async (req, res) => {
           billingSameAsShipping ? customer.provincia?.trim() || null : customer.billingProvince?.trim() || null,
           couponCode,
           discountAmount,
+          invoiceReceiver.name,
+          invoiceReceiver.docType,
+          invoiceReceiver.docNumber,
+          invoiceReceiver.vatConditionId,
+          1,
         ]
       )
       order = rows[0]
@@ -442,8 +447,18 @@ router.post('/', attachUserIfPresent, async (req, res) => {
       checkoutUrl,
     })
   } catch (err) {
-    console.error('[POST /api/orders]', err)
-    res.status(500).json({ error: 'Error interno al crear el pedido' })
+    if (err instanceof InvoiceValidationError) {
+      return res.status(400).json({ error: err.message, code: err.code })
+    }
+    if (err?.name === 'ArcaParameterError' || String(err?.code || '').startsWith('ARCA_')) {
+      console.error('[POST /api/orders]', err.code || err.name, safeArcaErrorMessage(err))
+    } else {
+      console.error('[POST /api/orders]', err)
+    }
+    res.status(err?.name === 'ArcaParameterError' ? 503 : 500).json({
+      error: err?.name === 'ArcaParameterError' ? err.message : 'Error interno al crear el pedido',
+      code: err?.code,
+    })
   }
 })
 
@@ -544,6 +559,9 @@ router.get('/mine/:id', requireAuth, async (req, res) => {
               delivery_type, address, address_extra, city, province, postal_code,
               billing_same_as_shipping, billing_address, billing_address_extra,
               billing_city, billing_province, billing_postal_code,
+              invoice_recipient_name, invoice_doc_type, invoice_doc_number,
+              invoice_vat_condition_id, invoice_data_confirmed_at, invoice_concept,
+              invoice_service_from, invoice_service_to, invoice_payment_due,
               total_amount, shipping_cost, shipping_service, payment_method,
               coupon_code, discount_amount,
               pickup_date, estimated_delivery_date, items, created_at, paid_at
