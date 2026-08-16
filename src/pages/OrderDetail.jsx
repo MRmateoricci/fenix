@@ -97,33 +97,15 @@ function InvoicePanel({ order, invoiceData, setInvoiceData }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const invoice = invoiceData?.invoice
-  const invoiceJob = invoiceData?.invoiceJob
+  const invoiceAttempt = invoiceData?.invoiceAttempt
   const canInvoice = PAID_STATUSES.includes(order.status)
   const authorized = invoice?.status === 'authorized'
-  const jobFailed = invoiceJob?.status === 'failed'
-  const jobInProgress = !authorized && ['queued', 'processing', 'retry_wait'].includes(invoiceJob?.status)
-  const invoiceInProgress = !authorized && !jobFailed && ['processing', 'uncertain'].includes(invoice?.status)
-  const inProgress = jobInProgress || invoiceInProgress
-  const failed = !authorized && (jobFailed || ['rejected', 'error'].includes(invoice?.status))
+  const attemptFailed = invoiceAttempt?.status === 'failed'
+  const inProgress = !authorized && (invoiceAttempt?.status === 'processing' || invoice?.status === 'processing')
+  const failed = !authorized && (attemptFailed || ['rejected', 'error', 'uncertain'].includes(invoice?.status))
   const mustConfirm = !authorized && (!invoiceData?.recipientConfirmed
-    || invoiceJob?.requiresRecipientData
+    || invoiceAttempt?.requiresRecipientData
     || invoice?.status === 'rejected')
-
-  useEffect(() => {
-    if (!inProgress) return undefined
-    const refresh = async () => {
-      try {
-        const response = await fetch(`${API_BASE}/api/orders/${order.id}/invoice`, { credentials: 'include' })
-        if (!response.ok) return
-        setInvoiceData(await response.json())
-      } catch {
-        // El próximo intervalo vuelve a intentar; no reemplazamos el estado
-        // visible por un error técnico transitorio.
-      }
-    }
-    const timer = window.setInterval(refresh, 5000)
-    return () => window.clearInterval(timer)
-  }, [inProgress, order.id, setInvoiceData])
 
   const saveRecipient = async (invoiceRecipient) => {
     setBusy(true)
@@ -137,7 +119,7 @@ function InvoicePanel({ order, invoiceData, setInvoiceData }) {
       setInvoiceData((current) => ({
         ...current,
         invoice: null,
-        invoiceJob: data.invoiceJob || current?.invoiceJob,
+        invoiceAttempt: data.invoiceAttempt || current?.invoiceAttempt,
         recipientConfirmed: true,
         invoiceRecipient: data.invoiceRecipient,
       }))
@@ -155,7 +137,13 @@ function InvoicePanel({ order, invoiceData, setInvoiceData }) {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: '{}',
       })
       const data = await response.json().catch(() => ({}))
-      if (data.invoice) setInvoiceData((current) => ({ ...current, invoice: data.invoice }))
+      if (data.invoice || data.invoiceAttempt) {
+        setInvoiceData((current) => ({
+          ...current,
+          invoice: data.invoice || current?.invoice,
+          invoiceAttempt: data.invoiceAttempt || current?.invoiceAttempt,
+        }))
+      }
       if (!response.ok) throw new Error(data.error || 'No pudimos emitir la factura.')
       const refreshed = await fetch(`${API_BASE}/api/orders/${order.id}/invoice`, { credentials: 'include' })
       if (refreshed.ok) setInvoiceData(await refreshed.json())
@@ -205,7 +193,7 @@ function InvoicePanel({ order, invoiceData, setInvoiceData }) {
           }} onSaved={saveRecipient} busy={busy} />
         </>
       )}
-      {canInvoice && !mustConfirm && inProgress && <p>Factura en proceso. Te avisaremos acá cuando esté disponible.</p>}
+      {canInvoice && !mustConfirm && inProgress && <p>Estamos generando tu factura. Actualizá la página en unos instantes para consultar el resultado.</p>}
       {canInvoice && !mustConfirm && !inProgress && !failed && (!invoice || invoice.status === 'pending') && <button type="button" className="fnx-pay-now" onClick={issueInvoice} disabled={busy}>{busy ? 'Procesando...' : 'Obtener factura'}</button>}
       {canInvoice && !mustConfirm && failed && (
         <div>

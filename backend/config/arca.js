@@ -85,8 +85,8 @@ function enabledFlag(value) {
 }
 
 /**
- * La activación del worker se evalúa sin cargar CUIT, certificados ni datos
- * del emisor. Así el servidor puede iniciar con la automatización apagada y
+ * La activación del intento automático se evalúa sin cargar CUIT, certificados
+ * ni datos del emisor. Así el servidor puede iniciar con la automatización apagada y
  * ninguna configuración incompleta termina abriendo una conexión con ARCA.
  */
 export function getArcaAutomationConfig(environmentVariables = process.env) {

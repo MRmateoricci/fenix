@@ -39,7 +39,6 @@ test('constraints e idempotencia concurrente con PostgreSQL', {
     const { arcaEnvironments } = await import('../config/arca.js');
     const { setWsfeDependenciesForTests } = await import('./arcaWsfe.js');
     const { createInvoiceForOrder } = await import('./invoiceService.js');
-    const { recoverStaleInvoiceJobs } = await import('../jobs/arcaInvoices.js');
 
     let lastAuthorized = 0;
     let caeCalls = 0;
@@ -123,18 +122,18 @@ test('constraints e idempotencia concurrente con PostgreSQL', {
 
     await appPool.query(
       `UPDATE invoice_jobs SET
-         status = 'processing', attempt_count = 1,
-         locked_at = NOW() - INTERVAL '11 minutes'
+         status = 'failed', attempt_count = 6,
+         last_attempt_origin = 'admin', last_error_code = 'TEST_ERROR'
        WHERE order_id = $1`,
       [firstOrder],
     );
-    assert.equal(await recoverStaleInvoiceJobs(appPool), 1);
-    const recoveredJob = await appPool.query(
-      'SELECT status, last_error_code FROM invoice_jobs WHERE order_id = $1',
+    const audit = await appPool.query(
+      'SELECT status, attempt_count, last_attempt_origin FROM invoice_jobs WHERE order_id = $1',
       [firstOrder],
     );
-    assert.equal(recoveredJob.rows[0].status, 'retry_wait');
-    assert.equal(recoveredJob.rows[0].last_error_code, 'WORKER_INTERRUPTED');
+    assert.equal(audit.rows[0].status, 'failed');
+    assert.equal(audit.rows[0].attempt_count, 6);
+    assert.equal(audit.rows[0].last_attempt_origin, 'admin');
   } finally {
     if (appPool) await appPool.end();
     await adminPool.query(`DROP SCHEMA ${schemaName} CASCADE`);

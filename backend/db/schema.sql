@@ -699,32 +699,50 @@ CREATE TRIGGER invoices_updated_at
   BEFORE UPDATE ON invoices
   FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 
--- Cola persistente para desacoplar la confirmación de Mercado Pago de WSFE.
--- Una sola fila por pedido vuelve idempotentes webhooks duplicados y conserva
--- reintentos aun cuando el proceso Node se reinicia.
+-- Auditoría persistente del último intento de facturación. La emisión no se
+-- procesa como cola: webhook, cliente, admin o script invocan el servicio
+-- inmediatamente y esta fila conserva origen, cantidad y último error.
 CREATE TABLE IF NOT EXISTS invoice_jobs (
   id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   order_id           UUID NOT NULL UNIQUE REFERENCES orders(id) ON DELETE CASCADE,
-  status             VARCHAR(20) NOT NULL DEFAULT 'queued',
+  status             VARCHAR(20) NOT NULL DEFAULT 'pending',
   attempt_count      INTEGER NOT NULL DEFAULT 0,
   run_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   locked_at          TIMESTAMPTZ,
   last_error_code    VARCHAR(100),
   last_error_message VARCHAR(500),
+  last_attempt_origin VARCHAR(30),
   completed_at       TIMESTAMPTZ,
   created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   CONSTRAINT invoice_jobs_status_check CHECK (
-    status IN ('queued', 'processing', 'retry_wait', 'needs_data', 'completed', 'failed')
+    status IN ('pending', 'processing', 'needs_data', 'completed', 'failed')
   ),
-  CONSTRAINT invoice_jobs_attempt_count_check CHECK (
-    attempt_count >= 0 AND attempt_count <= 5
+  CONSTRAINT invoice_jobs_attempt_count_check CHECK (attempt_count >= 0),
+  CONSTRAINT invoice_jobs_origin_check CHECK (
+    last_attempt_origin IS NULL OR last_attempt_origin IN ('webhook', 'customer', 'admin', 'manual_script')
   )
 );
 
-CREATE INDEX IF NOT EXISTS idx_invoice_jobs_due
-  ON invoice_jobs(run_at, created_at)
-  WHERE status IN ('queued', 'retry_wait');
+ALTER TABLE invoice_jobs
+  ADD COLUMN IF NOT EXISTS last_attempt_origin VARCHAR(30);
+ALTER TABLE invoice_jobs DROP CONSTRAINT IF EXISTS invoice_jobs_status_check;
+UPDATE invoice_jobs SET status = 'pending' WHERE status IN ('queued', 'retry_wait');
+ALTER TABLE invoice_jobs ALTER COLUMN status SET DEFAULT 'pending';
+ALTER TABLE invoice_jobs
+  ADD CONSTRAINT invoice_jobs_status_check CHECK (
+    status IN ('pending', 'processing', 'needs_data', 'completed', 'failed')
+  );
+ALTER TABLE invoice_jobs DROP CONSTRAINT IF EXISTS invoice_jobs_attempt_count_check;
+ALTER TABLE invoice_jobs
+  ADD CONSTRAINT invoice_jobs_attempt_count_check CHECK (attempt_count >= 0);
+ALTER TABLE invoice_jobs DROP CONSTRAINT IF EXISTS invoice_jobs_origin_check;
+ALTER TABLE invoice_jobs
+  ADD CONSTRAINT invoice_jobs_origin_check CHECK (
+    last_attempt_origin IS NULL OR last_attempt_origin IN ('webhook', 'customer', 'admin', 'manual_script')
+  );
+
+DROP INDEX IF EXISTS idx_invoice_jobs_due;
 CREATE INDEX IF NOT EXISTS idx_invoice_jobs_status_updated_at
   ON invoice_jobs(status, updated_at DESC);
 

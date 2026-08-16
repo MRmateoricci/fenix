@@ -592,12 +592,12 @@ router.get('/', requireAdmin, async (req, res) => {
     let idx = 1
 
     if (status) {
-      conditions.push(`status = $${idx++}`)
+      conditions.push(`o.status = $${idx++}`)
       params.push(status)
     }
     if (search) {
       conditions.push(
-        `(customer_email ILIKE $${idx} OR customer_name ILIKE $${idx} OR order_number ILIKE $${idx})`
+        `(o.customer_email ILIKE $${idx} OR o.customer_name ILIKE $${idx} OR o.order_number ILIKE $${idx})`
       )
       params.push(`%${search}%`)
       idx++
@@ -608,19 +608,69 @@ router.get('/', requireAdmin, async (req, res) => {
     const pagination = fetchAll ? '' : `LIMIT $${idx} OFFSET $${idx + 1}`
     const dataParams = fetchAll ? params : [...params, Number(limit), offset]
 
-    const [data, countResult] = await Promise.all([
+    const [data, countResult, invoiceSummaryResult] = await Promise.all([
       pool.query(
-        `SELECT id, order_number, status, customer_name, customer_email, customer_phone,
-                delivery_type, address, city, postal_code, total_amount, shipping_cost, shipping_service,
-                payment_method, pickup_date, estimated_delivery_date, items,
-                coupon_code, discount_amount,
-                created_at, updated_at, paid_at, mp_payment_id
-         FROM orders ${where}
-         ORDER BY created_at DESC
+        `SELECT o.id, o.order_number, o.status, o.customer_name, o.customer_email, o.customer_phone,
+                o.delivery_type, o.address, o.city, o.postal_code, o.total_amount,
+                o.shipping_cost, o.shipping_service, o.payment_method, o.mp_status,
+                o.pickup_date, o.estimated_delivery_date, o.items,
+                o.coupon_code, o.discount_amount, o.created_at, o.updated_at,
+                o.paid_at, o.mp_payment_id, o.invoice_data_confirmed_at,
+                o.invoice_recipient_name, o.invoice_doc_type, o.invoice_doc_number,
+                o.invoice_vat_condition_id,
+                i.id AS invoice_id, i.status AS invoice_status,
+                i.pto_vta AS invoice_pto_vta, i.cbte_tipo AS invoice_cbte_tipo,
+                i.cbte_numero AS invoice_cbte_numero, i.cae AS invoice_cae,
+                i.cae_expiration_date AS invoice_cae_expiration_date,
+                i.last_attempt_at AS invoice_last_attempt_at,
+                i.observations AS invoice_observations, i.errors AS invoice_errors,
+                j.status AS invoice_attempt_status,
+                j.attempt_count AS invoice_attempt_count,
+                j.last_error_code AS invoice_last_error_code,
+                j.last_error_message AS invoice_last_error_message,
+                j.last_attempt_origin AS invoice_last_attempt_origin,
+                j.updated_at AS invoice_attempt_updated_at,
+                CASE
+                  WHEN i.status IS NOT NULL THEN i.status
+                  WHEN j.status = 'needs_data' THEN 'needs_data'
+                  WHEN j.status = 'processing' THEN 'processing'
+                  WHEN j.status = 'failed' THEN 'error'
+                  WHEN o.payment_method = 'mercadopago' AND o.mp_status = 'approved'
+                       AND o.status IN ('paid', 'preparing', 'shipped', 'delivered')
+                       AND o.invoice_data_confirmed_at IS NULL THEN 'needs_data'
+                  WHEN o.payment_method = 'mercadopago' AND o.mp_status = 'approved'
+                       AND o.status IN ('paid', 'preparing', 'shipped', 'delivered') THEN 'pending'
+                  ELSE 'not_applicable'
+                END AS invoice_display_status,
+                (o.payment_method = 'mercadopago' AND o.mp_status = 'approved'
+                  AND o.status IN ('paid', 'preparing', 'shipped', 'delivered')
+                  AND i.status IS DISTINCT FROM 'authorized'
+                  AND o.paid_at < NOW() - INTERVAL '24 hours') AS invoice_overdue
+         FROM orders o
+         LEFT JOIN invoices i ON i.order_id = o.id
+         LEFT JOIN invoice_jobs j ON j.order_id = o.id
+         ${where}
+         ORDER BY o.created_at DESC
          ${pagination}`,
         dataParams
       ),
-      pool.query(`SELECT COUNT(*) FROM orders ${where}`, params),
+      pool.query(`SELECT COUNT(*) FROM orders o ${where}`, params),
+      pool.query(
+        `SELECT
+           COUNT(*) FILTER (
+             WHERE o.payment_method = 'mercadopago' AND o.mp_status = 'approved'
+               AND o.status IN ('paid', 'preparing', 'shipped', 'delivered')
+               AND i.status IS DISTINCT FROM 'authorized'
+           )::integer AS pending,
+           COUNT(*) FILTER (
+             WHERE o.payment_method = 'mercadopago' AND o.mp_status = 'approved'
+               AND o.status IN ('paid', 'preparing', 'shipped', 'delivered')
+               AND i.status IS DISTINCT FROM 'authorized'
+               AND o.paid_at < NOW() - INTERVAL '24 hours'
+           )::integer AS overdue
+         FROM orders o
+         LEFT JOIN invoices i ON i.order_id = o.id`,
+      ),
     ])
 
     res.json({
@@ -628,6 +678,7 @@ router.get('/', requireAdmin, async (req, res) => {
       total:  Number(countResult.rows[0].count),
       page:   Number(page),
       limit:  fetchAll ? data.rows.length : Number(limit),
+      invoiceSummary: invoiceSummaryResult.rows[0] || { pending: 0, overdue: 0 },
     })
   } catch (err) {
     console.error('[GET /api/orders]', err)

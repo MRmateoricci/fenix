@@ -2796,10 +2796,47 @@ function StatusBadge({ status }) {
   )
 }
 
-function OrderDetailModal({ order, onClose, onStatusChange }) {
+const INVOICE_LABEL = {
+  not_applicable: 'No aplica',
+  needs_data: 'Faltan datos',
+  pending: 'Pendiente',
+  processing: 'Procesando',
+  uncertain: 'Incierta',
+  authorized: 'Autorizada',
+  rejected: 'Rechazada',
+  error: 'Error',
+}
+
+const INVOICE_STYLE = {
+  not_applicable: { bg: '#F3F4F6', color: C.text3 },
+  needs_data: { bg: '#FFF7E6', color: '#9A6700' },
+  pending: { bg: '#EFF6FF', color: '#1D4ED8' },
+  processing: { bg: '#EFF6FF', color: '#1D4ED8' },
+  uncertain: { bg: '#FFF7E6', color: '#9A6700' },
+  authorized: { bg: '#EAF7EF', color: '#166534' },
+  rejected: { bg: '#FDECEC', color: '#991B1B' },
+  error: { bg: '#FDECEC', color: '#991B1B' },
+}
+const INVOICE_ICON = {
+  needs_data: '⚠ ', pending: '⚠ ', processing: '⚠ ', uncertain: '⚠ ',
+  rejected: '❌ ', error: '❌ ', authorized: '✓ ',
+}
+
+function InvoiceBadge({ order }) {
+  const status = order.invoice_display_status || 'not_applicable'
+  const style = INVOICE_STYLE[status] || INVOICE_STYLE.not_applicable
+  return (
+    <span style={{ ...pill(style.bg, style.color), whiteSpace: 'nowrap' }}>
+      {order.invoice_overdue ? '⚠ ' : (INVOICE_ICON[status] || '')}{INVOICE_LABEL[status] || status}
+    </span>
+  )
+}
+
+function OrderDetailModal({ order, onClose, onStatusChange, onInvoice, onInvoicePdf, invoiceSaving = false }) {
   const [newStatus, setNewStatus] = useState(order.status)
   const [saving, setSaving]       = useState(false)
   const [saved, setSaved]         = useState(false)
+  const [invoiceError, setInvoiceError] = useState('')
 
   async function handleSave() {
     if (newStatus === order.status) { onClose(); return }
@@ -2818,6 +2855,24 @@ function OrderDetailModal({ order, onClose, onStatusChange }) {
       setSaved(true)
       setTimeout(onClose, 800)
     } catch { setSaving(false) }
+  }
+
+  async function handleInvoice() {
+    setInvoiceError('')
+    try {
+      await onInvoice?.(order)
+    } catch (error) {
+      setInvoiceError(error.message || 'No se pudo facturar el pedido.')
+    }
+  }
+
+  async function handleInvoicePdf(inline) {
+    setInvoiceError('')
+    try {
+      await onInvoicePdf?.(order, inline)
+    } catch (error) {
+      setInvoiceError(error.message || 'No se pudo abrir la factura.')
+    }
   }
 
   return (
@@ -2894,6 +2949,53 @@ function OrderDetailModal({ order, onClose, onStatusChange }) {
             <span style={{ fontSize: 16, fontWeight: 600, color: C.ink }}>{fmt(order.total_amount)}</span>
           </div>
         </div>
+
+        {(order.invoice_display_status !== 'not_applicable' || order.invoice_id) && (
+          <div style={{
+            background: order.invoice_overdue ? '#FFF7ED' : C.white,
+            borderRadius: 8,
+            border: `1px solid ${order.invoice_overdue ? '#FDBA74' : C.border}`,
+            padding: '14px 18px',
+            marginBottom: 14,
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+              <p style={lbl}>Factura electrónica</p>
+              <InvoiceBadge order={order} />
+            </div>
+            {order.invoice_overdue && <p style={{ margin: '9px 0 0', color: '#9A3412', fontSize: 12, fontWeight: 700 }}>Pago aprobado hace más de 24 horas sin factura autorizada.</p>}
+            <p style={{ margin: '9px 0 0', fontSize: 11, color: C.text3 }}>Pago MP: {order.mp_status || 'sin estado'}</p>
+            {order.invoice_id && <p style={{ margin: '4px 0 0', fontSize: 11, color: C.text3 }}>Punto de venta: {order.invoice_pto_vta} · Tipo: {order.invoice_cbte_tipo}</p>}
+            {order.invoice_cbte_numero && <p style={{ margin: '4px 0 0', fontSize: 12, color: C.ink }}>Comprobante {String(order.invoice_pto_vta).padStart(5, '0')}-{String(order.invoice_cbte_numero).padStart(8, '0')}</p>}
+            {order.invoice_cae && <p style={{ margin: '4px 0 0', fontSize: 11, color: C.text3 }}>CAE: {order.invoice_cae} · Vence: {String(order.invoice_cae_expiration_date || '').slice(0, 10)}</p>}
+            {order.invoice_last_attempt_origin && <p style={{ margin: '4px 0 0', fontSize: 11, color: C.text3 }}>Último intento: {order.invoice_last_attempt_origin} · {Number(order.invoice_attempt_count || 0)} intento(s)</p>}
+            {order.invoice_attempt_updated_at && <p style={{ margin: '4px 0 0', fontSize: 11, color: C.text3 }}>Fecha del intento: {fmtDate(order.invoice_attempt_updated_at)}</p>}
+            {order.invoice_last_error_message && <p style={{ margin: '8px 0 0', color: C.red, fontSize: 12 }}>{order.invoice_last_error_code}: {order.invoice_last_error_message}</p>}
+            {Array.isArray(order.invoice_errors) && order.invoice_errors.slice(0, 3).map((item, index) => (
+              <p key={`invoice-error-${index}`} style={{ margin: '6px 0 0', color: C.red, fontSize: 12 }}>{item.code ? `${item.code}: ` : ''}{item.message}</p>
+            ))}
+            {Array.isArray(order.invoice_observations) && order.invoice_observations.slice(0, 3).map((item, index) => (
+              <p key={`invoice-observation-${index}`} style={{ margin: '6px 0 0', color: '#9A6700', fontSize: 12 }}>Observación {item.code ? `${item.code}: ` : ''}{item.message}</p>
+            ))}
+            {order.invoice_display_status === 'needs_data' && <p style={{ margin: '8px 0 0', color: C.text3, fontSize: 12 }}>El cliente debe confirmar sus datos fiscales antes de emitir.</p>}
+            {order.invoice_display_status === 'rejected' && <p style={{ margin: '8px 0 0', color: C.red, fontSize: 12 }}>ARCA rechazó el comprobante. Se deben corregir los datos fiscales antes de un nuevo intento.</p>}
+            {invoiceError && <p style={{ margin: '8px 0 0', color: C.red, fontSize: 12 }}>{invoiceError}</p>}
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 }}>
+              {order.invoice_display_status === 'authorized' ? (
+                <>
+                  <button type="button" onClick={() => handleInvoicePdf(true)} style={{ ...outlineBtn, color: C.ink }}>Ver factura</button>
+                  <button type="button" onClick={() => handleInvoicePdf(false)} style={{ ...solidBtn, background: C.dark, color: '#fff' }}>Descargar factura</button>
+                </>
+              ) : (
+                order.payment_method === 'mercadopago'
+                && order.mp_status === 'approved'
+                && ['paid', 'preparing', 'shipped', 'delivered'].includes(order.status)
+                && order.invoice_data_confirmed_at
+                && order.invoice_display_status !== 'rejected'
+                && <button type="button" onClick={handleInvoice} disabled={invoiceSaving} style={{ ...solidBtn, background: C.red, color: '#fff' }}>{invoiceSaving ? 'Facturando...' : 'Facturar ahora'}</button>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Estado + cambio */}
         <div style={{ background: C.white, borderRadius: 8, border: `1px solid ${C.border}`, padding: '14px 18px', marginBottom: 20 }}>
@@ -3349,11 +3451,16 @@ function CouponsTab() {
 }
 
 function OrdersTab() {
-  const { orders, ordersTotal, ordersLoading, ordersError, fetchOrders, updateOrderStatus } = useAdmin()
+  const {
+    orders, ordersTotal, invoiceSummary, ordersLoading, ordersError,
+    fetchOrders, updateOrderStatus, issueInvoiceAsAdmin, openAdminInvoicePdf,
+  } = useAdmin()
   const [statusFilter, setStatusFilter] = useState('all')
+  const [invoiceFilter, setInvoiceFilter] = useState('all')
   const [search, setSearch]             = useState('')
   const [selectedOrder, setSelectedOrder] = useState(null)
   const [updatingOrderIds, setUpdatingOrderIds] = useState(() => new Set())
+  const [invoicingOrderIds, setInvoicingOrderIds] = useState(() => new Set())
   const [quickStatusError, setQuickStatusError] = useState('')
   const [statusToast, setStatusToast] = useState(null)
 
@@ -3368,18 +3475,27 @@ function OrdersTab() {
   }, [statusToast])
 
   useEffect(() => {
-    fetchOrders({ limit: 500 })
+    fetchOrders({ all: true })
   }, [fetchOrders])
 
   const filteredOrders = useMemo(() => {
     const term = search.trim().toLowerCase()
     return orders.filter((order) => {
       if (statusFilter !== 'all' && order.status !== statusFilter) return false
+      const invoiceStatus = order.invoice_display_status || 'not_applicable'
+      const needsAttention = order.payment_method === 'mercadopago'
+        && order.mp_status === 'approved'
+        && ['paid', 'preparing', 'shipped', 'delivered'].includes(order.status)
+        && invoiceStatus !== 'authorized'
+      if (invoiceFilter === 'attention' && !needsAttention) return false
+      if (invoiceFilter === 'overdue' && !order.invoice_overdue) return false
+      if (invoiceFilter === 'without_invoice' && (!needsAttention || order.invoice_id)) return false
+      if (!['all', 'attention', 'overdue', 'without_invoice'].includes(invoiceFilter) && invoiceStatus !== invoiceFilter) return false
       if (!term) return true
       return [order.customer_name, order.customer_email, order.order_number]
         .some((value) => String(value || '').toLowerCase().includes(term))
     })
-  }, [orders, search, statusFilter])
+  }, [orders, search, statusFilter, invoiceFilter])
 
   const ordersToShip = useMemo(() =>
     orders
@@ -3409,7 +3525,7 @@ function OrdersTab() {
     const order = orders.find(item => item.id === id)
     try {
       await updateOrderStatus(id, status)
-      fetchOrders({ limit: 500 })
+      fetchOrders({ all: true })
       notifyStatus(`Pedido #${order?.order_number || id}: estado cambiado a ${STATUS_LABEL[status] || status}`)
     } catch (error) {
       notifyStatus(error.message || 'No se pudo actualizar el estado del pedido', 'error')
@@ -3439,6 +3555,34 @@ function OrdersTab() {
         return next
       })
     }
+  }
+
+  async function handleInvoice(order) {
+    if (invoicingOrderIds.has(order.id)) return
+    setInvoicingOrderIds((current) => new Set(current).add(order.id))
+    try {
+      const result = await issueInvoiceAsAdmin(order.id)
+      const data = await fetchOrders({ all: true })
+      const updated = data.orders?.find((item) => item.id === order.id)
+      if (updated) setSelectedOrder(updated)
+      notifyStatus(result.invoice?.status === 'authorized'
+        ? `Factura del pedido #${order.order_number} autorizada.`
+        : `Intento de factura del pedido #${order.order_number} finalizado.`)
+    } catch (error) {
+      await fetchOrders({ all: true })
+      notifyStatus(error.message || 'No se pudo facturar el pedido', 'error')
+      throw error
+    } finally {
+      setInvoicingOrderIds((current) => {
+        const next = new Set(current)
+        next.delete(order.id)
+        return next
+      })
+    }
+  }
+
+  async function handleInvoicePdf(order, inline) {
+    await openAdminInvoicePdf(order.id, order.order_number, { inline })
   }
 
   return (
@@ -3493,6 +3637,25 @@ function OrdersTab() {
         </div>
       </div>
 
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>
+        <button type="button" onClick={() => setInvoiceFilter(invoiceFilter === 'attention' ? 'all' : 'attention')} style={{
+          ...outlineBtn,
+          borderColor: invoiceFilter === 'attention' ? C.red : C.border,
+          color: invoiceFilter === 'attention' ? C.red : C.ink,
+          background: invoiceFilter === 'attention' ? C.redLight : C.white,
+        }}>
+          Facturas pendientes: {Number(invoiceSummary?.pending || 0)}
+        </button>
+        <button type="button" onClick={() => setInvoiceFilter(invoiceFilter === 'overdue' ? 'all' : 'overdue')} style={{
+          ...outlineBtn,
+          borderColor: invoiceFilter === 'overdue' ? '#C2410C' : '#FDBA74',
+          color: '#9A3412',
+          background: invoiceFilter === 'overdue' ? '#FFEDD5' : '#FFF7ED',
+        }}>
+          Más de 24 h: {Number(invoiceSummary?.overdue || 0)}
+        </button>
+      </div>
+
       {quickStatusError && (
         <div style={{ background: C.redLight, border: `1px solid ${C.red}`, borderRadius: 8, padding: '10px 14px', marginBottom: 14, color: C.red, fontSize: 12 }}>
           {quickStatusError}
@@ -3517,6 +3680,23 @@ function OrdersTab() {
             {s.label}
           </button>
         ))}
+      </div>
+
+      <div style={{ marginBottom: 16 }}>
+        <label style={{ ...lbl, display: 'block', marginBottom: 5 }}>Estado de factura</label>
+        <select value={invoiceFilter} onChange={(event) => setInvoiceFilter(event.target.value)} style={{ ...inp, maxWidth: 250 }}>
+          <option value="all">Todas</option>
+          <option value="attention">Pendientes de atención</option>
+          <option value="overdue">Demoradas más de 24 h</option>
+          <option value="needs_data">Faltan datos</option>
+          <option value="pending">Pendiente</option>
+          <option value="processing">Procesando</option>
+          <option value="uncertain">Incierta</option>
+          <option value="rejected">Rechazada</option>
+          <option value="error">Error</option>
+          <option value="without_invoice">Sin factura</option>
+          <option value="authorized">Autorizada</option>
+        </select>
       </div>
 
       {/* ── Buscador ── */}
@@ -3556,12 +3736,12 @@ function OrdersTab() {
               {/* Header de tabla */}
               <div style={{
                 display: 'grid',
-                gridTemplateColumns: '110px 130px 1fr 150px 90px 170px 80px',
+                gridTemplateColumns: '105px 120px 1fr 140px 85px 115px 160px 70px',
                 gap: 8, padding: '8px 14px',
                 borderBottom: `1px solid ${C.hairline}`,
                 background: C.paper,
               }}>
-                {['Número', 'Fecha', 'Cliente', 'Email', 'Total', 'Estado rápido', 'Acción'].map((h) => (
+                {['Número', 'Fecha', 'Cliente', 'Email', 'Total', 'Factura', 'Estado rápido', 'Acción'].map((h) => (
                   <span key={h} style={{ ...lbl }}>{h}</span>
                 ))}
               </div>
@@ -3571,7 +3751,7 @@ function OrdersTab() {
                   key={order.id}
                   style={{
                     display: 'grid',
-                    gridTemplateColumns: '110px 130px 1fr 150px 90px 170px 80px',
+                    gridTemplateColumns: '105px 120px 1fr 140px 85px 115px 160px 70px',
                     gap: 8, padding: '10px 14px', alignItems: 'center',
                     borderBottom: i < filteredOrders.length - 1 ? `1px solid ${C.hairline}` : 'none',
                     transition: 'background 0.12s',
@@ -3594,6 +3774,7 @@ function OrdersTab() {
                   <span style={{ fontSize: 13, fontWeight: 600, color: C.ink }}>
                     {fmt(order.total_amount)}
                   </span>
+                  <InvoiceBadge order={order} />
                   <QuickStatusSelect
                     order={order}
                     onChange={handleQuickStatusChange}
@@ -3618,6 +3799,9 @@ function OrdersTab() {
           order={selectedOrder}
           onClose={() => setSelectedOrder(null)}
           onStatusChange={handleStatusChange}
+          onInvoice={handleInvoice}
+          onInvoicePdf={handleInvoicePdf}
+          invoiceSaving={invoicingOrderIds.has(selectedOrder.id)}
         />
       )}
 

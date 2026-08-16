@@ -1,25 +1,25 @@
 import { Router } from 'express';
 import { pool } from '../db/pool.js';
 import { requireAuth } from '../middleware/requireAuth.js';
+import { requireAdmin } from '../middleware/requireAdmin.js';
 import { buildReceiverData, InvoiceValidationError } from '../services/invoiceFiscal.js';
 import { getInvoiceOptions } from '../services/arcaParameters.js';
 import {
-  createInvoiceForOrder,
   getInvoiceForOrder,
   InvoiceServiceError,
   publicInvoice,
 } from '../services/invoiceService.js';
 import { generateInvoicePdf } from '../services/invoicePdf.js';
 import {
-  getInvoiceJobForOrder,
-  markInvoiceJobFromManualResult,
-  publicInvoiceJob,
-  rescheduleInvoiceAfterFiscalUpdate,
-} from '../jobs/arcaInvoices.js';
+  attemptInvoiceForOrder,
+  getInvoiceAttemptForOrder,
+  publicInvoiceAttempt,
+} from '../services/invoiceAttempts.js';
 
 const router = Router();
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const clientInvoice = (invoice) => publicInvoice(invoice, { includeTechnicalMessages: false });
+const adminInvoice = (invoice) => publicInvoice(invoice, { includeTechnicalMessages: true });
 
 async function ownedOrder(orderId, userId, client = pool) {
   if (!UUID_PATTERN.test(orderId)) return null;
@@ -30,15 +30,60 @@ async function ownedOrder(orderId, userId, client = pool) {
   return rows[0] || null;
 }
 
+async function adminOrder(orderId, client = pool) {
+  if (!UUID_PATTERN.test(orderId)) return null;
+  const { rows } = await client.query('SELECT * FROM orders WHERE id = $1', [orderId]);
+  return rows[0] || null;
+}
+
+function sendInvoicePdf(res, order, pdf, disposition = 'attachment') {
+  res.set({
+    'Content-Type': 'application/pdf',
+    'Content-Disposition': `${disposition}; filename="factura-${order.order_number}.pdf"`,
+    'Cache-Control': 'private, no-store',
+    'Content-Length': String(pdf.length),
+  });
+  res.send(pdf);
+}
+
 function serviceErrorResponse(res, error) {
   const status = error.httpStatus || 500;
   const publicMessage = error.code === 'ARCA_COMMUNICATION_UNCERTAIN'
-    ? 'La factura sigue en proceso. El sistema volverá a consultar sin duplicarla.'
+    ? 'No pudimos confirmar la factura. Un nuevo intento la consultará sin duplicarla.'
     : (status >= 500 ? 'No pudimos generar la factura en este momento.' : error.message);
   return res.status(status).json({
     error: publicMessage,
     code: error.code || 'INVOICE_ERROR',
     invoice: clientInvoice(error.invoice),
+  });
+}
+
+function attemptHttpResponse(res, attempt, { admin = false } = {}) {
+  const invoice = (admin ? adminInvoice : clientInvoice)(attempt.invoice);
+  const invoiceAttempt = publicInvoiceAttempt(attempt.audit, { includeTechnicalMessages: admin });
+  const payload = { invoice, invoiceAttempt };
+
+  if (attempt.code === 'ORDER_NOT_FOUND') return res.status(404).json({ error: attempt.message, ...payload });
+  if (['ORDER_NOT_BILLABLE', 'PAYMENT_NOT_APPROVED', 'INVOICE_RECIPIENT_NOT_CONFIRMED'].includes(attempt.code)) {
+    return res.status(409).json({ error: attempt.message, code: attempt.code, ...payload });
+  }
+  if (invoice?.status === 'rejected' || attempt.code === 'ARCA_REJECTED') {
+    return res.status(422).json({ error: 'ARCA rechazó el comprobante.', code: 'ARCA_REJECTED', ...payload });
+  }
+  if (['processing', 'uncertain'].includes(invoice?.status)) {
+    return res.status(invoice.status === 'uncertain' ? 503 : 202).json(payload);
+  }
+  if (attempt.error instanceof InvoiceServiceError) return serviceErrorResponse(res, attempt.error);
+  if (attempt.status === 'failed') {
+    return res.status(503).json({
+      error: admin ? attempt.message : 'No pudimos generar la factura en este momento.',
+      code: attempt.code,
+      ...payload,
+    });
+  }
+  return res.status(attempt.result?.created ? 201 : 200).json({
+    ...payload,
+    recovered: attempt.result?.recovered || false,
   });
 }
 
@@ -125,17 +170,24 @@ router.put('/:orderId/invoice-recipient', requireAuth, async (req, res) => {
       );
     }
     await client.query('COMMIT');
-    let invoiceJob = null;
+    let invoiceAttempt = null;
     try {
-      const scheduled = await rescheduleInvoiceAfterFiscalUpdate(order.id);
-      invoiceJob = scheduled.job;
+      const { rows: attempts } = await pool.query(
+        `UPDATE invoice_jobs SET
+           status = 'pending', locked_at = NULL, last_error_code = NULL,
+           last_error_message = NULL, completed_at = NULL
+         WHERE order_id = $1
+         RETURNING *`,
+        [order.id],
+      );
+      invoiceAttempt = attempts[0] || null;
     } catch (error) {
-      console.error(`[invoice-recipient] No se pudo reprogramar order=${order.id} code=${error.code || error.name}`);
+      console.error(`[invoice-recipient] No se pudo actualizar auditoría order=${order.id} code=${error.code || error.name}`);
     }
     res.json({
       invoiceRecipient: receiver,
       confirmedAt: rows[0].invoice_data_confirmed_at,
-      invoiceJob: publicInvoiceJob(invoiceJob),
+      invoiceAttempt: publicInvoiceAttempt(invoiceAttempt),
     });
   } catch (error) {
     await client.query('ROLLBACK').catch(() => {});
@@ -154,13 +206,13 @@ router.get('/:orderId/invoice', requireAuth, async (req, res) => {
   try {
     const order = await ownedOrder(req.params.orderId, req.userId);
     if (!order) return res.status(404).json({ error: 'Pedido no encontrado' });
-    const [invoice, invoiceJob] = await Promise.all([
+    const [invoice, invoiceAttempt] = await Promise.all([
       getInvoiceForOrder(order.id),
-      getInvoiceJobForOrder(order.id),
+      getInvoiceAttemptForOrder(order.id),
     ]);
     res.json({
       invoice: clientInvoice(invoice),
-      invoiceJob: publicInvoiceJob(invoiceJob),
+      invoiceAttempt: publicInvoiceAttempt(invoiceAttempt),
       recipientConfirmed: Boolean(order.invoice_data_confirmed_at),
       invoiceRecipient: order.invoice_data_confirmed_at ? {
         name: order.invoice_recipient_name,
@@ -179,22 +231,37 @@ router.post('/:orderId/invoice', requireAuth, async (req, res) => {
   try {
     const order = await ownedOrder(req.params.orderId, req.userId);
     if (!order) return res.status(404).json({ error: 'Pedido no encontrado' });
-    const result = await createInvoiceForOrder(order.id);
-    await markInvoiceJobFromManualResult(order.id, result.invoice).catch((error) => {
-      console.error(`[invoice-manual] No se pudo sincronizar job order=${order.id} code=${error.code || error.name}`);
-    });
-    const invoice = clientInvoice(result.invoice);
-    if (result.invoice.status === 'rejected') {
-      return res.status(422).json({ error: 'ARCA rechazó el comprobante.', invoice });
-    }
-    if (['processing', 'uncertain'].includes(result.invoice.status)) {
-      return res.status(202).json({ invoice });
-    }
-    res.status(result.created ? 201 : 200).json({ invoice, recovered: result.recovered });
+    const attempt = await attemptInvoiceForOrder({ orderId: order.id, origin: 'customer' });
+    return attemptHttpResponse(res, attempt);
   } catch (error) {
     if (error instanceof InvoiceServiceError) return serviceErrorResponse(res, error);
     console.error(`[invoice-manual] order=${req.params.orderId} status=error code=${error.code || error.name}`);
     res.status(500).json({ error: 'No pudimos generar la factura en este momento.', code: 'INVOICE_ERROR' });
+  }
+});
+
+router.post('/:orderId/invoice/admin', requireAdmin, async (req, res) => {
+  try {
+    if (Object.keys(req.body || {}).length) {
+      return res.status(400).json({ error: 'Este endpoint no acepta datos fiscales ni financieros.' });
+    }
+    const order = await adminOrder(req.params.orderId);
+    if (!order) return res.status(404).json({ error: 'Pedido no encontrado' });
+    if (order.payment_method !== 'mercadopago' || order.mp_status !== 'approved') {
+      return res.status(409).json({
+        error: 'Mercado Pago no confirmó este pago como approved.',
+        code: 'PAYMENT_NOT_APPROVED',
+      });
+    }
+    const attempt = await attemptInvoiceForOrder({
+      orderId: order.id,
+      origin: 'admin',
+      requireMercadoPagoApproval: true,
+    });
+    return attemptHttpResponse(res, attempt, { admin: true });
+  } catch (error) {
+    console.error(`[invoice-admin] order=${req.params.orderId} status=error code=${error.code || error.name}`);
+    return res.status(500).json({ error: 'No se pudo intentar la factura.', code: error.code || 'INVOICE_ERROR' });
   }
 });
 
@@ -207,15 +274,25 @@ router.get('/:orderId/invoice/pdf', requireAuth, async (req, res) => {
       return res.status(409).json({ error: 'La factura todavía no está autorizada.' });
     }
     const pdf = await generateInvoicePdf(invoice);
-    res.set({
-      'Content-Type': 'application/pdf',
-      'Content-Disposition': `attachment; filename="factura-${order.order_number}.pdf"`,
-      'Cache-Control': 'private, no-store',
-      'Content-Length': String(pdf.length),
-    });
-    res.send(pdf);
+    sendInvoicePdf(res, order, pdf);
   } catch (error) {
     console.error(`[invoice-pdf] order=${req.params.orderId} status=error code=${error.code || error.name}`);
+    res.status(500).json({ error: 'No se pudo generar el PDF de la factura.' });
+  }
+});
+
+router.get('/:orderId/invoice/pdf/admin', requireAdmin, async (req, res) => {
+  try {
+    const order = await adminOrder(req.params.orderId);
+    if (!order) return res.status(404).json({ error: 'Pedido no encontrado' });
+    const invoice = await getInvoiceForOrder(order.id);
+    if (!invoice || invoice.status !== 'authorized') {
+      return res.status(409).json({ error: 'La factura todavía no está autorizada.' });
+    }
+    const pdf = await generateInvoicePdf(invoice);
+    sendInvoicePdf(res, order, pdf, req.query.disposition === 'inline' ? 'inline' : 'attachment');
+  } catch (error) {
+    console.error(`[invoice-pdf-admin] order=${req.params.orderId} status=error code=${error.code || error.name}`);
     res.status(500).json({ error: 'No se pudo generar el PDF de la factura.' });
   }
 });

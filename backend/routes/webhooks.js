@@ -58,8 +58,11 @@ export function verifyMpSignature(req) {
 // POST /api/webhooks/mercadopago
 // MercadoPago envía: { action: "payment.updated", type: "payment", data: { id: "12345" } }
 // ─────────────────────────────────────────────────────────────────────────────
-router.post('/mercadopago', async (req, res) => {
-  const signatureValid = verifyMpSignature(req)
+export async function handleMercadoPagoWebhook(req, res, {
+  reconcile = reconcileMercadoPagoPayment,
+  verifySignature = verifyMpSignature,
+} = {}) {
+  const signatureValid = verifySignature(req)
   if (!signatureValid) {
     // No confiamos en el contenido del webhook. De todos modos podemos usar
     // únicamente su ID como disparador y consultar el pago con nuestro access
@@ -76,15 +79,17 @@ router.post('/mercadopago', async (req, res) => {
   if (type !== 'payment' || !paymentId) return res.status(200).send('OK')
 
   try {
-    await reconcileMercadoPagoPayment({ paymentId })
-    // La conciliación ya confirmó y persistió el pago. La emisión ARCA
-    // quedó solamente encolada y se ejecuta fuera de este request.
+    await reconcile({ paymentId })
+    // La conciliación confirma el pago y, si la automatización está activa,
+    // hace un intento inmediato. Un error ARCA nunca cambia este 200.
     return res.status(200).send('OK')
   } catch (err) {
     console.error(`[webhook] payment=${paymentId} status=error code=${err.code || err.name}`)
     if (err instanceof PaymentReconciliationError) return res.status(200).send('IGNORED')
     return res.status(500).send('RETRY')
   }
-})
+}
+
+router.post('/mercadopago', handleMercadoPagoWebhook)
 
 export default router

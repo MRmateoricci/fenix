@@ -179,13 +179,17 @@ producción se bloquea antes de cualquier conexión salvo habilitación explíci
 - Recuperación de timeouts con `FECompConsultar`: solamente el código `602` se toma
   como comprobante inexistente; el request fallido nunca reenvía automáticamente
 - Endpoints privados para confirmar receptor, emitir, consultar estado y descargar PDF
-- Cola PostgreSQL `invoice_jobs`, deduplicada por pedido, conectada a la conciliación
-  segura de pagos `approved` de Mercado Pago. El webhook nunca espera una conexión ARCA
-- Worker persistente con cinco intentos (inmediato, +1m, +5m, +15m, +1h), recuperación
-  tras reinicios y reintentos exclusivos para fallas temporales. Pagos no aprobados,
-  rechazos fiscales y configuración inválida no se reintentan
-- Estado `needs_data` del job para pedidos pagados sin receptor fiscal confirmado;
-  al completar los datos se reprograma, sin afectar el pago ni el pedido
+- Intento inmediato de Factura C dentro de la conciliación segura de un pago
+  `approved` de Mercado Pago, con límite de espera de 20 segundos. Cualquier falla
+  ARCA se aísla del pago, pedido, stock, envío y respuesta `200` del webhook
+- Servicio único `attemptInvoiceForOrder()` para webhook, cliente, admin y script;
+  conserva los locks, idempotencia y recuperación con `FECompConsultar`
+- `invoice_jobs` retenida sólo como auditoría del último intento, cantidad, origen y
+  error sanitizado. No existe cola, worker, cron, scheduler ni polling de facturas
+- Pedidos pagos sin datos fiscales quedan visibles como `needs_data` y no llaman a
+  ARCA; cliente o admin pueden intentar manualmente después de confirmar los datos
+- Panel admin con estado fiscal, alerta de más de 24 horas, contadores/filtros,
+  “Facturar ahora” para pagos MP aprobados y acceso privado al PDF autorizado
 - Feature flag independiente `ARCA_AUTO_INVOICE_ENABLED`; en producción exige además
   `ARCA_PRODUCTION_ENABLED=true`
 - PDF en memoria con QR oficial ARCA, sin archivos públicos ni nueva solicitud de CAE
@@ -197,7 +201,7 @@ producción se bloquea antes de cualquier conexión salvo habilitación explíci
 
 - WSAA de homologación autenticó correctamente
 - `FEDummy`: `AppServer`, `DbServer` y `AuthServer` respondieron `OK`
-- 77 pruebas de backend pasan; la prueba descartable de constraints y concurrencia
+- 81 pruebas de backend pasan; la prueba descartable de constraints y concurrencia
   queda omitida claramente cuando no existe `TEST_DATABASE_URL`
 - Los cuatro scripts ARCA ejecutados en procesos consecutivos reutilizan el TA y no
   reciben `coe.alreadyAuthenticated`. `FEParamGetPtosVenta` responde actualmente
@@ -208,8 +212,8 @@ producción se bloquea antes de cualquier conexión salvo habilitación explíci
 - Factura C de homologación 00002-00000001 autorizada con CAE; repetir el pedido
   devolvió la misma factura sin solicitar otro comprobante
 
-**Pendiente antes de producción:** aplicar la migración con `invoice_jobs`, probar la
-automatización completa en homologación con `ARCA_AUTO_INVOICE_ENABLED=true`, preparar
+**Pendiente antes de producción:** aplicar la migración de auditoría de `invoice_jobs`,
+probar el intento inmediato en homologación con `ARCA_AUTO_INVOICE_ENABLED=true`, preparar
 credenciales y punto de venta productivos, validar manualmente una única factura real
 con la automatización todavía apagada y definir el flujo separado de Nota de Crédito
 para devoluciones/contracargos.
@@ -232,8 +236,8 @@ para devoluciones/contracargos.
 
 ## Pendientes priorizados
 
-1. **Validar automatización de Factura C en homologación**: migrar `invoice_jobs`,
-   activar el feature flag y comprobar pago approved → job → factura disponible
+1. **Validar automatización de Factura C en homologación**: aplicar la migración,
+   activar el feature flag y comprobar pago approved → intento inmediato → factura disponible
 2. Ejecutar las pruebas PostgreSQL descartables de facturación con `TEST_DATABASE_URL`
 3. **Cargar dimensiones y peso** en los productos reales — bloquea el cotizador real
 4. **Cuotas**: mover `INSTALLMENTS` al backend y agregar el mensaje en `ProductDetail`
@@ -248,23 +252,24 @@ para devoluciones/contracargos.
 
 ## Bitácora
 
-### 2026-08-15 · Facturación automática después de Mercado Pago
+### 2026-08-15 · Facturación inmediata sin worker
 
-La conciliación segura de un pago `approved` programa una cola PostgreSQL deduplicada
-sin esperar ARCA desde el webhook. Worker con reintentos persistentes, backoff,
-recuperación tras reinicios, control previo del estado real del pago y bloqueo de
-rechazos/configuración inválida. Los datos fiscales faltantes quedan en `needs_data`;
-la UI muestra estados no técnicos y conserva el fallback manual idempotente. Nuevo
-script de recuperación y monitoreo. Producción requiere dos flags independientes y
-continúa desactivada. 77 tests pasan y uno PostgreSQL se omite sin `TEST_DATABASE_URL`.
+Se retiró el worker permanente y todo polling/temporización de facturas. Después de
+persistir un pago Mercado Pago verificado como `approved`, el webhook intenta emitir
+inmediatamente mediante el mismo servicio usado por cliente, administrador y script.
+La espera del webhook tiene un límite de 20 segundos y toda falla ARCA queda aislada:
+el pago, pedido, stock y envío permanecen confirmados y el webhook responde `200`.
+`invoice_jobs` quedó únicamente como auditoría de intentos y orígenes. El panel admin
+incorpora estados, error sanitizado, alerta de más de 24 horas, contadores, filtros,
+reintento manual y PDF privado. Producción continúa bloqueada.
 
-### 2026-08-15 · Recuperación de un worker interrumpido
+### 2026-08-15 · Recuperación histórica de una emisión interrumpida
 
 Un reinicio de Node ocurrió después de que ARCA autorizara el comprobante 00002-00000002
 y antes de persistir el CAE. `FECompConsultar` confirmó `Resultado=A`; se recuperó el
-CAE sin volver a llamar a `FECAESolicitar`. El worker ahora revisa leases `processing`
-vencidos en cada ciclo, no sólo al arrancar, y los intentos viejos no pueden pisar el
-resultado de un intento recuperado.
+CAE sin volver a llamar a `FECAESolicitar`. La arquitectura posterior retiró el worker;
+una acción manual sobre un estado incierto conserva esta misma recuperación previa por
+consulta y nunca reenvía a ciegas.
 
 ### 2026-08-15 · ARCA WSFEv1: base manual de Factura C en homologación
 

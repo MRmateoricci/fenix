@@ -1,5 +1,6 @@
 import { getArcaConfig } from '../config/arca.js';
-import { createInvoiceForOrder, publicInvoice } from '../services/invoiceService.js';
+import { publicInvoice } from '../services/invoiceService.js';
+import { attemptInvoiceForOrder } from '../services/invoiceAttempts.js';
 import { pool } from '../db/pool.js';
 import { safeArcaErrorMessage } from '../services/arcaSafeLog.js';
 
@@ -20,7 +21,8 @@ async function main() {
   }
 
   console.log(`Emitiendo Factura C de homologación para pedido ${orderId}...`);
-  const result = await createInvoiceForOrder(orderId);
+  const result = await attemptInvoiceForOrder({ orderId, origin: 'manual_script' });
+  if (result.error) throw result.error;
   const invoice = publicInvoice(result.invoice);
   console.log(`Estado: ${invoice.status}`);
   console.log(`Comprobante: ${invoice.pointOfSale}-${invoice.voucherNumber || 'pendiente'}`);

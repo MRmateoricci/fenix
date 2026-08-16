@@ -1,39 +1,43 @@
 import 'dotenv/config';
 import { pool } from '../db/pool.js';
-import { getArcaAutomationConfig } from '../config/arca.js';
+import { getArcaConfig } from '../config/arca.js';
 import { safeArcaErrorMessage } from '../services/arcaSafeLog.js';
-import {
-  getInvoiceAutomationMetrics,
-  requeueRecoverableInvoices,
-  runInvoiceJobSweep,
-} from '../jobs/arcaInvoices.js';
+import { attemptInvoiceForOrder } from '../services/invoiceAttempts.js';
 
 function hasArgument(name) {
   return process.argv.slice(2).includes(name);
 }
 
 function assertExplicitEnvironmentConfirmation() {
-  const automation = getArcaAutomationConfig();
-  if (!automation.enabled) {
-    throw new Error(`La automatización ARCA está desactivada (${automation.disabledReason}).`);
-  }
-  if (automation.isProduction && !hasArgument('--confirm-production')) {
-    throw new Error('Producción requiere --confirm-production además de las dos variables de habilitación.');
-  }
-  if (!automation.isProduction && !hasArgument('--confirm-homologation')) {
-    throw new Error('Homologación requiere --confirm-homologation.');
-  }
-  return automation;
+  const config = getArcaConfig({ requirePointOfSale: true, requireIssuerData: true });
+  if (config.isProduction) throw new Error('Este script de emergencia no permite producción.');
+  if (!hasArgument('--confirm-homologation')) throw new Error('Homologación requiere --confirm-homologation.');
+  return config;
 }
 
 try {
-  const automation = assertExplicitEnvironmentConfirmation();
-  console.log(`Recuperación de facturas ARCA (${automation.environment})...`);
-  const jobs = await requeueRecoverableInvoices();
-  console.log(`Trabajos preparados: ${jobs.length}`);
-  const processed = await runInvoiceJobSweep({ limit: Math.max(jobs.length, 1) });
-  console.log(`Trabajos procesados: ${processed.length}`);
-  console.log(JSON.stringify(await getInvoiceAutomationMetrics(), null, 2));
+  const config = assertExplicitEnvironmentConfirmation();
+  console.log(`Recuperación manual de facturas ARCA (${config.environment})...`);
+  const { rows } = await pool.query(
+    `SELECT o.id, o.order_number
+     FROM orders o
+     LEFT JOIN invoices i ON i.order_id = o.id
+     WHERE o.payment_method = 'mercadopago'
+       AND o.mp_status = 'approved'
+       AND o.status IN ('paid', 'preparing', 'shipped', 'delivered')
+       AND o.invoice_data_confirmed_at IS NOT NULL
+       AND (i.id IS NULL OR i.status IN ('pending', 'processing', 'uncertain', 'error'))
+     ORDER BY o.paid_at NULLS LAST, o.created_at`,
+  );
+  console.log(`Pedidos a intentar: ${rows.length}`);
+  for (const order of rows) {
+    const result = await attemptInvoiceForOrder({
+      orderId: order.id,
+      origin: 'manual_script',
+      requireMercadoPagoApproval: true,
+    });
+    console.log(`Pedido ${order.order_number}: ${result.invoice?.status || result.status} (${result.code || 'OK'})`);
+  }
 } catch (error) {
   console.error(`Error: ${safeArcaErrorMessage(error)}`);
   process.exitCode = 1;

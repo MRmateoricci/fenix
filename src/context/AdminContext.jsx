@@ -68,6 +68,7 @@ export function AdminProvider({ children }) {
   // ── Pedidos ───────────────────────────────────────────────────────────────
   const [orders, setOrders]             = useState([])
   const [ordersTotal, setOrdersTotal]   = useState(0)
+  const [invoiceSummary, setInvoiceSummary] = useState({ pending: 0, overdue: 0 })
   const [ordersLoading, setOrdersLoading] = useState(false)
   const [ordersError, setOrdersError]   = useState(null)
 
@@ -135,6 +136,7 @@ export function AdminProvider({ children }) {
       const data = await res.json()
       setOrders(data.orders || [])
       setOrdersTotal(data.total || 0)
+      setInvoiceSummary(data.invoiceSummary || { pending: 0, overdue: 0 })
       return data
     } catch (err) {
       setOrdersError(err.message)
@@ -142,6 +144,44 @@ export function AdminProvider({ children }) {
     } finally {
       setOrdersLoading(false)
     }
+  }, [])
+
+  const issueInvoiceAsAdmin = useCallback(async (id) => {
+    const res = await fetch(`${API_BASE}/api/orders/${id}/invoice/admin`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-admin-token': ADMIN_PASSWORD },
+      body: '{}',
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      const error = new Error(data.error || 'No se pudo facturar el pedido')
+      error.code = data.code
+      error.data = data
+      throw error
+    }
+    return data
+  }, [])
+
+  const openAdminInvoicePdf = useCallback(async (id, orderNumber, { inline = false } = {}) => {
+    const query = inline ? '?disposition=inline' : ''
+    const res = await fetch(`${API_BASE}/api/orders/${id}/invoice/pdf/admin${query}`, {
+      headers: { 'x-admin-token': ADMIN_PASSWORD },
+    })
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}))
+      throw new Error(data.error || 'No se pudo obtener la factura')
+    }
+    const url = URL.createObjectURL(await res.blob())
+    if (inline) {
+      window.open(url, '_blank', 'noopener,noreferrer')
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
+      return
+    }
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `factura-${orderNumber}.pdf`
+    link.click()
+    URL.revokeObjectURL(url)
   }, [])
 
   // ── updateOrderStatus — cambia el estado de un pedido ────────────────────
@@ -985,8 +1025,8 @@ export function AdminProvider({ children }) {
       isAdmin, products, productsLoading, productsError, fetchCatalog,
       login, logout,
       updateProduct, addProduct, deleteProduct,
-      orders, ordersTotal, ordersLoading, ordersError,
-      fetchOrders, updateOrderStatus,
+      orders, ordersTotal, invoiceSummary, ordersLoading, ordersError,
+      fetchOrders, updateOrderStatus, issueInvoiceAsAdmin, openAdminInvoicePdf,
       inventory, inventoryTotal, inventorySuppliers, inventoryLoading, inventoryError,
       importResult, importLoading, importError,
       currencySettings, fetchCurrencySettings, updateCurrencySettings, updateDeliverySettings,
