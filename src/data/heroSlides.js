@@ -11,6 +11,11 @@ import nuevosIngresosImg from '../assets/carru1.png'
 // Slides whose photo already has its own title/CTA baked into the design should
 // set `textOverlay: false` so Home.jsx doesn't draw a second title/subtitle/button
 // on top of it — the whole slide becomes a clickable banner to `ctaHref` instead.
+//
+// For the mobile banner, import the portrait asset and assign it to
+// `mobileImageUrl`. `mobileAspectRatio` defaults to 4 / 5 and can be adjusted to
+// match the exported artwork. While it is null, mobile keeps using the desktop
+// banner and its original wide aspect ratio.
 export const HERO_SLIDES = [
   {
     title: 'Nuestras herramientas más vendidas',
@@ -18,6 +23,8 @@ export const HERO_SLIDES = [
     ctaText: 'Ver herramientas',
     ctaHref: '/products?category=Herramientas',
     imageUrl: herramientasImg,
+    mobileImageUrl: null,
+    mobileAspectRatio: '4 / 5',
     textOverlay: false,
   },
   {
@@ -26,6 +33,8 @@ export const HERO_SLIDES = [
     ctaText: 'Ver promociones',
     ctaHref: '/products?category=Promociones',
     imageUrl: promocionesImg,
+    mobileImageUrl: null,
+    mobileAspectRatio: '4 / 5',
     textOverlay: false,
   },
   {
@@ -34,6 +43,8 @@ export const HERO_SLIDES = [
     ctaText: 'Ver productos',
     ctaHref: '/products',
     imageUrl: nuevosIngresosImg,
+    mobileImageUrl: null,
+    mobileAspectRatio: '4 / 5',
     textOverlay: false,
   },
 ]

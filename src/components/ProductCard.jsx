@@ -127,6 +127,7 @@ export default function ProductCard({ product }) {
 
   return (
     <div
+      className="fnx-product-card"
       style={{
         display: 'flex', flexDirection: 'column', height: '100%',
         transform: cardHovered ? 'translateY(-5px)' : 'translateY(0)',
@@ -138,7 +139,7 @@ export default function ProductCard({ product }) {
       {/* Image + floating add-to-cart button (wrapper stays overflow-visible so the button can overlap the image edge) */}
       <div style={{ position: 'relative' }}>
         <Link to={`/products/${product.id}`} style={{ textDecoration: 'none', color: 'inherit' }}>
-          <div style={{
+          <div className="fnx-product-card__image" style={{
             position: 'relative',
             aspectRatio: '1 / 1',
             background: T.surface2,
@@ -186,7 +187,7 @@ export default function ProductCard({ product }) {
             }
 
             {!product.inStock && (
-              <span style={{
+              <span className="fnx-product-card__stock" style={{
                 position: 'absolute', top: 12, right: 13, zIndex: 1,
                 fontFamily: "'Inter', system-ui, sans-serif",
                 fontSize: 10, letterSpacing: '.06em', textTransform: 'uppercase',
@@ -201,6 +202,7 @@ export default function ProductCard({ product }) {
             {/* Favorite button */}
             <button
               type="button"
+              className="fnx-product-card__favorite"
               onClick={handleToggleFavorite}
               aria-label={favorite ? 'Quitar de favoritos' : 'Agregar a favoritos'}
               style={{
@@ -243,6 +245,7 @@ export default function ProductCard({ product }) {
         {/* Floating add-to-cart button, half-overlapping the image's bottom edge */}
         <button
           type="button"
+          className="fnx-product-card__cart"
           onClick={handleAdd}
           disabled={!product.inStock || added}
           aria-label={product.variantRules?.length ? 'Elegir opciones' : added ? 'Agregado al carrito' : product.inStock ? 'Agregar al carrito' : 'Sin stock'}
@@ -274,9 +277,9 @@ export default function ProductCard({ product }) {
       </div>
 
       {/* Info below image */}
-      <div style={{ padding: '24px 2px 0', display: 'flex', flexDirection: 'column', gap: 10, flex: 1 }}>
+      <div className="fnx-product-card__info" style={{ padding: '24px 2px 0', display: 'flex', flexDirection: 'column', gap: 10, flex: 1 }}>
         <Link to={`/products/${product.id}`} style={{ textDecoration: 'none', color: 'inherit' }}>
-          <h3 style={{
+          <h3 className="fnx-product-card__title" style={{
             fontFamily: "'Inter', system-ui, sans-serif",
             fontWeight: 400, fontSize: 14, lineHeight: 1.4,
             margin: 0, color: T.ink,
@@ -297,7 +300,7 @@ export default function ProductCard({ product }) {
             colors have no photo assigned) still show a single bordered
             thumbnail of the product itself, for the same look — a flat hex
             swatch with no picture reads as a UI glitch, not a color option. */}
-        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, minHeight: 32 }}>
+        <div className="fnx-product-card__variants" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, minHeight: 32 }}>
           {product.colors?.some((c) => c.image)
             ? product.colors.filter((c) => c.image).map((c) => {
                 const isSelected = selectedColor?.name === c.name
@@ -331,7 +334,7 @@ export default function ProductCard({ product }) {
 
         {/* Badges */}
         {(product.isNew || product.bestSeller) && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div className="fnx-product-card__badges" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             {product.isNew && (
               <span style={{
                 display: 'inline-flex', alignItems: 'center',
@@ -356,15 +359,15 @@ export default function ProductCard({ product }) {
           </div>
         )}
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-          <span style={{
+        <div className="fnx-product-card__pricing" style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <span className="fnx-product-card__price" style={{
             fontFamily: "'Inter', system-ui, sans-serif",
             fontSize: 19, fontWeight: 600, color: T.ink,
           }}>
             {product.priceFrom && <span style={{ fontSize: '0.72em', fontWeight: 500, marginRight: 5 }}>Desde</span>}
             {fmt(displayPrice)}
           </span>
-          <span style={{ fontFamily: "'Inter', system-ui, sans-serif", fontSize: 12, color: T.text3 }}>
+          <span className="fnx-product-card__installments" style={{ fontFamily: "'Inter', system-ui, sans-serif", fontSize: 12, color: T.text3 }}>
             Hasta {INSTALLMENTS} cuotas sin interés de <strong style={{ fontWeight: 600 }}>{fmt(displayPrice / INSTALLMENTS)}</strong>
           </span>
           {!product.inStock && product.aPedido && (
@@ -372,12 +375,12 @@ export default function ProductCard({ product }) {
               <ClockIcon /> A pedido · llega en ~{product.diasEntregaPedido} días hábiles
             </span>
           )}
-          <span style={{ fontFamily: "'Inter', system-ui, sans-serif", fontSize: 11, color: T.muted2 }}>
+          <span className="fnx-product-card__tax" style={{ fontFamily: "'Inter', system-ui, sans-serif", fontSize: 11, color: T.muted2 }}>
             Precio sin impuestos nacionales: {fmt(displayPrice * (1 - NATIONAL_TAX_RATE))}
           </span>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 'auto' }}>
+        <div className="fnx-product-card__reviews" style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 'auto' }}>
           <StarRow value={rating} />
           <span style={{ fontFamily: "'Inter', system-ui, sans-serif", fontSize: 11.5, color: T.text3 }}>
             {reviews} {reviews === 1 ? 'reseña' : 'reseñas'}

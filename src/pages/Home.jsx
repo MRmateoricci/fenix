@@ -200,7 +200,9 @@ function HeroSection() {
   return (
     <header
       className="fnx-hero-light-on fnx-hero"
+      data-has-mobile-image={Boolean(HERO_SLIDES[activeIndex]?.mobileImageUrl)}
       style={{
+        '--fnx-hero-mobile-ratio': HERO_SLIDES[activeIndex]?.mobileAspectRatio || '4 / 5',
         position: 'relative',
         marginTop: 64,
         minHeight: 'clamp(620px, 72vh, 840px)',
@@ -234,7 +236,8 @@ function HeroSection() {
                 className="fnx-hero-slide-bg"
                 style={{
                   position: 'absolute', inset: 0,
-                  backgroundImage: `url(${slide.imageUrl})`,
+                  '--fnx-hero-image-desktop': `url(${slide.imageUrl})`,
+                  '--fnx-hero-image-mobile': `url(${slide.mobileImageUrl || slide.imageUrl})`,
                   backgroundSize: 'cover',
                   backgroundPosition: 'center 66%',
                 }}
@@ -242,7 +245,8 @@ function HeroSection() {
             ) : (
               <div className="fnx-hero-slide-bg" style={{
                 position: 'absolute', inset: 0,
-                backgroundImage: `url(${slide.imageUrl})`,
+                '--fnx-hero-image-desktop': `url(${slide.imageUrl})`,
+                '--fnx-hero-image-mobile': `url(${slide.mobileImageUrl || slide.imageUrl})`,
                 backgroundSize: 'cover',
                 backgroundPosition: 'center 66%',
               }} />
@@ -391,6 +395,7 @@ function HeroSection() {
         .fnx-hero-arrow svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
         .fnx-hero-arrow--previous { left: 24px; }
         .fnx-hero-arrow--next { right: 24px; }
+        .fnx-hero-slide-bg { background-image: var(--fnx-hero-image-desktop); }
         @media (min-width: 900px) {
           .fnx-hero-arrow { display: flex; }
         }
@@ -400,7 +405,11 @@ function HeroSection() {
            own aspect ratio instead, so the full banner (text included) stays visible. */
         @media (max-width: 700px) {
           .fnx-hero { min-height: 0 !important; aspect-ratio: 1916 / 821; }
-          .fnx-hero-slide-bg { background-position: center !important; }
+          .fnx-hero[data-has-mobile-image="true"] { aspect-ratio: var(--fnx-hero-mobile-ratio); }
+          .fnx-hero-slide-bg {
+            background-image: var(--fnx-hero-image-mobile);
+            background-position: center !important;
+          }
         }
         .fnx-hero-dots {
           position: absolute; left: 50%; bottom: 28px; transform: translateX(-50%);
@@ -424,6 +433,7 @@ function CategoriasSection() {
   return (
     <section
       id="categorias"
+      className="fnx-categories-section"
       style={{
         maxWidth: 1440, margin: '0 auto', padding: '90px 40px 56px', position: 'relative', zIndex: 3, scrollMarginTop: 90,
       }}
@@ -438,12 +448,16 @@ function CategoriasSection() {
       </div>
       <style>{`
         @media (max-width: 700px) {
+          .fnx-categories-section {
+            padding: 48px 0 34px !important;
+          }
           .fnx-cat-grid {
             display: flex !important;
             overflow-x: auto;
             overflow-y: hidden;
-            gap: 20px !important;
-            padding-bottom: 8px;
+            gap: 10px !important;
+            padding: 0 10px 8px;
+            scroll-padding-inline: 10px;
             scroll-snap-type: x proximity;
             -webkit-overflow-scrolling: touch;
             scrollbar-width: none;
@@ -451,10 +465,14 @@ function CategoriasSection() {
           .fnx-cat-grid::-webkit-scrollbar { display: none; }
           .fnx-cat-card {
             flex: 0 0 auto;
-            width: 44vw;
-            max-width: 200px;
+            width: 30vw;
+            min-width: 86px;
+            max-width: 110px;
             scroll-snap-align: start;
           }
+          .fnx-cat-card__media { height: 76px !important; }
+          .fnx-cat-card__label { padding: 6px 2px 2px !important; }
+          .fnx-cat-card__label span { font-size: 12px !important; }
         }
       `}</style>
     </section>
@@ -482,7 +500,7 @@ function CategoryCard({ cat, onClick }) {
           transition: 'box-shadow .35s ease, border-color .25s ease',
         }}
       >
-        <div style={{
+        <div className="fnx-cat-card__media" style={{
           position: 'relative',
           height: cat.productShot ? 'clamp(104px, 9.5vw, 152px)' : undefined,
           aspectRatio: cat.productShot ? undefined : '4/4.3',
@@ -522,7 +540,7 @@ function CategoryCard({ cat, onClick }) {
             )
           }
         </div>
-        <div style={{ padding: '14px 4px 4px', textAlign: 'center' }}>
+        <div className="fnx-cat-card__label" style={{ padding: '14px 4px 4px', textAlign: 'center' }}>
           <span style={{ fontFamily: "var(--font-sans)", fontWeight: 700, fontSize: 18, color: T.ink }}>
             {cat.name}
           </span>
@@ -602,6 +620,7 @@ function DestacadosSection() {
   return (
     <section
       id="destacados"
+      className="fnx-home-product-section"
       style={{
         margin: '18px 0 0',
         padding: '14px 24px',
@@ -635,6 +654,7 @@ function ProductosAPedidoSection() {
   return (
     <section
       id="productos-a-pedido"
+      className="fnx-home-product-section"
       style={{
         margin: '18px 0 0',
         padding: '14px 24px',
@@ -685,6 +705,7 @@ function MostSearchedSection() {
   return (
     <section
       id="mas-buscados"
+      className="fnx-home-product-section"
       style={{
         margin: 0,
         padding: '14px 24px',

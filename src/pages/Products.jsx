@@ -147,7 +147,7 @@ function CatalogHeader({ filters, categoryTree }) {
   const headerImgPosition = CATEGORY_IMAGE_POSITION[headerImgKey] || 'left center'
 
   return (
-    <div style={{ position: 'relative', padding: '96px 0 32px', borderBottom: `1px solid ${T.hairline}`, marginBottom: 36 }}>
+    <div className="fnx-catalog-header" style={{ position: 'relative', padding: '96px 0 32px', borderBottom: `1px solid ${T.hairline}`, marginBottom: 36 }}>
       {headerImg && (
         <div
           aria-hidden="true"
@@ -163,7 +163,7 @@ function CatalogHeader({ filters, categoryTree }) {
         />
       )}
       {/* Breadcrumb */}
-      <div style={{
+      <div className="fnx-catalog-breadcrumb" style={{
         position: 'relative', zIndex: 1,
         display: 'flex', alignItems: 'center', gap: 8,
         fontFamily: "'Inter', system-ui, sans-serif",
@@ -199,7 +199,7 @@ function CatalogHeader({ filters, categoryTree }) {
       </div>
 
       {/* Page title */}
-      <h1 style={{
+      <h1 className="fnx-catalog-title" style={{
         position: 'relative', zIndex: 1,
         fontFamily: 'var(--font-sans)',
         fontWeight: 400, fontSize: 'clamp(40px, 5vw, 68px)',
@@ -222,7 +222,6 @@ export default function Products() {
   const filters = useFilterParams(priceMax)
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false)
   const activeCategoryForSubs = filters.selectedCategories.length === 1 ? filters.selectedCategories[0] : null
-  const hasMobileSubFilters = activeCategoryForSubs ? getSubcategoryOptions(activeCategoryForSubs, categoryTree).length > 0 : false
 
   useEffect(() => { setMobileFiltersOpen(false) }, [activeCategoryForSubs])
   const filtered = useMemo(() => {
@@ -268,7 +267,7 @@ export default function Products() {
     <>
     <PageSEO title={seoTitle} description={seoDesc} url="/products" />
     <div style={{ background: T.paper, minHeight: '100vh', color: T.ink, overflowX: 'hidden' }}>
-      <div style={{ maxWidth: 1320, margin: '0 auto', padding: '0 40px 80px' }}>
+      <div className="fnx-products-page" style={{ maxWidth: 1320, margin: '0 auto', padding: '0 40px 80px' }}>
 
         {/* ── Header ─────────────────────────────────────────────────────── */}
         <CatalogHeader filters={filters} categoryTree={categoryTree} />
@@ -283,9 +282,9 @@ export default function Products() {
         </div>
 
         {/* ── Search + sort row ───────────────────────────────────────────── */}
-        <div style={{ display: 'flex', gap: 12, marginBottom: 28, flexWrap: 'wrap', alignItems: 'center' }}>
+        <div className="fnx-products-toolbar" style={{ display: 'flex', gap: 12, marginBottom: 28, flexWrap: 'wrap', alignItems: 'center' }}>
           {/* Search */}
-          <div style={{ position: 'relative', flex: '1 1 280px' }}>
+          <div className="fnx-products-search" style={{ position: 'relative', flex: '1 1 280px' }}>
             <svg
               viewBox="0 0 24 24" width="15" height="15" fill="none"
               stroke={T.muted2} strokeWidth="1.7" strokeLinecap="round"
@@ -294,6 +293,7 @@ export default function Products() {
               <circle cx="11" cy="11" r="7" /><path d="m20 20-3.4-3.4" />
             </svg>
             <input
+              className="fnx-products-search__input"
               type="search"
               placeholder="Buscar productos…"
               value={filters.query}
@@ -313,6 +313,7 @@ export default function Products() {
 
           {/* Sort */}
           <select
+            className="fnx-products-sort"
             value={filters.sortBy}
             onChange={(e) => filters.set('sort', e.target.value)}
             style={{
@@ -327,10 +328,7 @@ export default function Products() {
             {SORT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
 
-        </div>
-
-        {/* ── Mobile filter toggle (< 768px only) — subcategory + tipo live in the drawer ── */}
-        {hasMobileSubFilters && (
+          {/* Mobile filter toggle (< 768px only) */}
           <button
             type="button"
             className="fnx-products-filter-toggle"
@@ -344,12 +342,12 @@ export default function Products() {
             }}
           >
             <FilterIcon />
-            {filters.productType || filters.sub ? `Filtrar · ${filters.productType || filters.sub}` : 'Filtrar'}
+            Filtrar
           </button>
-        )}
+        </div>
 
         {/* Count */}
-        <div style={{
+        <div className="fnx-products-count" style={{
           fontFamily: "'Inter', system-ui, sans-serif",
           fontSize: 12, color: T.muted2, marginBottom: 32,
         }}>
@@ -360,7 +358,7 @@ export default function Products() {
         {filtered.length === 0
           ? <EmptyState onClear={filters.clearAll} />
           : (
-            <div style={{
+            <div className="fnx-products-grid" style={{
               display: 'grid',
               gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
               gap: 28,
@@ -395,8 +393,8 @@ function CategoryTabs({ filters }) {
   ]
 
   return (
-    <div style={{ position: 'relative', marginBottom: 28 }}>
-      <div style={{
+    <div className="fnx-products-categories" style={{ position: 'relative', marginBottom: 28 }}>
+      <div className="fnx-products-categories__rail" style={{
         display: 'flex', gap: 0,
         borderBottom: `1px solid ${T.hairline}`,
         overflowX: 'auto',
@@ -409,6 +407,7 @@ function CategoryTabs({ filters }) {
 
           return (
             <button
+              className="fnx-products-category-tab"
               key={tab.label}
               onClick={() => filters.selectCategory(tab.value)}
               style={{
@@ -533,8 +532,7 @@ function ProductTypeTabs({ filters }) {
   )
 }
 
-// ─── Mobile filter drawer (< 768px only) — subcategory + tipo, kept off the
-// initial scroll so the product grid is reachable right after the toggle ──────
+// ─── Mobile filter drawer (< 768px only) ─────────────────────────────────────
 function MobileFilterDrawer({ open, onClose, filters, products }) {
   useEffect(() => {
     document.body.style.overflow = open ? 'hidden' : ''
@@ -592,9 +590,10 @@ function MobileFilterDrawer({ open, onClose, filters, products }) {
             </svg>
           </button>
         </div>
-        <div style={{ flex: 1, overflowY: 'auto', padding: '18px 20px 8px' }}>
+        <div className="fnx-mobile-filter-content" style={{ flex: 1, overflowY: 'auto', padding: '18px 20px 8px' }}>
           <SubcategoryTabs filters={filters} />
           <ProductTypeTabs filters={filters} />
+          <FilterPanel filters={filters} products={products} />
         </div>
         <div style={{ padding: '14px 20px', borderTop: `1px solid ${T.hairline}`, flexShrink: 0 }}>
           <button
