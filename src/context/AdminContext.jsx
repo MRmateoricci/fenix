@@ -357,7 +357,8 @@ export function AdminProvider({ children }) {
     await fetchCatalog()
   }, [updateInventoryItem, fetchCatalog])
 
-  // ── uploadProductImage — con ID edita; sin ID prepara una foto para un alta
+  // ── uploadProductImage — sube el archivo y devuelve su URL. La asociación
+  // con el producto recién se persiste cuando el formulario completo se guarda.
   const uploadProductImage = useCallback(async (id, file) => {
     const formData = new FormData()
     formData.append('file', file)

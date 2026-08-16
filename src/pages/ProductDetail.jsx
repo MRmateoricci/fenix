@@ -9,9 +9,9 @@ import PageSEO from '../components/SEO'
 import FenixLogo from '../assets/FenixLogo'
 import { SEO as seoCfg } from '../config/seo'
 import {
+  findCompatiblePublicSelection,
   hasMatchingPublicRule,
   hasPublicAxisFallback,
-  isPublicAxisValueAvailable,
   resolvePublicVariantRule,
 } from '../utils/productVariants'
 
@@ -124,8 +124,11 @@ export default function ProductDetail() {
   // sigue siendo el stock único de siempre.
   const hasRuleStock = (product?.variantRules || []).some(rule => rule.stock != null)
   const hasVariantStock = Object.keys(product?.variantStock || {}).length > 0
+  const hasValidVariantSelection = !product?.variantRules?.length || hasMatchingPublicRule(product.variantRules, ruleSelection)
   const variantRowKey = combineVariantRowKey(selectedColor?.name, selectedTone?.name)
-  const availableStock = hasRuleStock
+  const availableStock = !hasValidVariantSelection
+    ? 0
+    : hasRuleStock
     ? Number(selectedStockRule?.stock ?? 0)
     : hasVariantStock
     ? Number(product.variantStock[variantRowKey]?.[selectedSize?.label ?? '_'] ?? 0)
@@ -135,6 +138,49 @@ export default function ProductDetail() {
   // general: si hay variantes, lo que importa es si ESA combinación (availableStock)
   // tiene stock, no el stock agregado del producto.
   const isAPedido = !variantInStock && Boolean(product?.aPedido)
+
+  const publicVariantChoices = {
+    color: (product?.colors || []).map(option => option.name).filter(Boolean),
+    size: (product?.sizes || []).map(option => option.label).filter(Boolean),
+    tone: (product?.tones || []).map(option => option.name).filter(Boolean),
+  }
+  const sameOption = (left, right) => String(left || '').localeCompare(String(right || ''), 'es-AR', { sensitivity: 'base' }) === 0
+  const findPublicOption = (axis, value) => {
+    if (!value) return null
+    const config = {
+      color: [product?.colors || [], 'name'],
+      size: [product?.sizes || [], 'label'],
+      tone: [product?.tones || [], 'name'],
+    }[axis]
+    return config?.[0].find(option => sameOption(option?.[config[1]], value)) || null
+  }
+  const getVariantOptionState = (axis, value) => {
+    if (!product?.variantRules?.length) return { selectable: true, direct: true }
+    const direct = hasMatchingPublicRule(product.variantRules, { ...ruleSelection, [axis]: value || undefined })
+    const compatible = findCompatiblePublicSelection(
+      product.variantRules,
+      publicVariantChoices,
+      ruleSelection,
+      axis,
+      value
+    )
+    return { selectable: Boolean(compatible), direct }
+  }
+  const selectVariantOption = (axis, value) => {
+    const next = findCompatiblePublicSelection(
+      product?.variantRules,
+      publicVariantChoices,
+      ruleSelection,
+      axis,
+      value
+    )
+    if (!next) return
+    setSelectedColor(findPublicOption('color', next.color))
+    setSelectedSize(findPublicOption('size', next.size))
+    setSelectedTone(findPublicOption('tone', next.tone))
+    setImgError(false)
+  }
+  const defaultColorState = getVariantOptionState('color', null)
 
   useEffect(() => {
     let nextColor = product?.colors?.[0] ?? null
@@ -203,7 +249,7 @@ export default function ProductDetail() {
   }
 
   function handleAdd() {
-    if ((!variantInStock && !isAPedido) || added) return
+    if (!hasValidVariantSelection || (!variantInStock && !isAPedido) || added) return
     for (let i = 0; i < qty; i++) {
       addItem({
         id:       product.id,
@@ -465,8 +511,9 @@ export default function ProductDetail() {
                     {hasDefaultColorOption && (
                       <button
                         type="button"
-                        onClick={() => { setSelectedColor(null); setImgError(false) }}
-                        title="Sin color (opción predeterminada)"
+                        onClick={() => selectVariantOption('color', null)}
+                        disabled={!defaultColorState.selectable}
+                        title={defaultColorState.direct ? 'Sin color (opción predeterminada)' : 'Sin color (cambia también la combinación)'}
                         aria-label="Sin color"
                         aria-pressed={!selectedColor}
                         style={{
@@ -478,7 +525,8 @@ export default function ProductDetail() {
                           outline: !selectedColor ? '2px solid var(--color-bg)' : 'none',
                           outlineOffset: !selectedColor ? '-4px' : '0',
                           boxShadow: !selectedColor ? '0 0 0 1.5px var(--color-text)' : 'none',
-                          cursor: 'pointer', padding: 0,
+                          cursor: defaultColorState.selectable ? 'pointer' : 'not-allowed', padding: 0,
+                          opacity: defaultColorState.direct ? 1 : defaultColorState.selectable ? .55 : .28,
                           transition: 'box-shadow .15s, border-color .15s',
                         }}
                       >
@@ -491,14 +539,14 @@ export default function ProductDetail() {
                     )}
                     {(product.colors || []).map((c) => {
                       const isSelected = selectedColor?.name === c.name
-                      const enabled = !product.variantRules?.length || isPublicAxisValueAvailable(product.variantRules, 'color', c.name)
+                      const optionState = getVariantOptionState('color', c.name)
                       return (
                         <button
                           key={c.name}
                           type="button"
-                          onClick={() => { if (enabled) { setSelectedColor(c); setImgError(false) } }}
-                          disabled={!enabled}
-                          title={c.name}
+                          onClick={() => selectVariantOption('color', c.name)}
+                          disabled={!optionState.selectable}
+                          title={optionState.direct ? c.name : optionState.selectable ? `${c.name} (cambia también la combinación)` : `${c.name} no disponible`}
                           aria-label={c.name}
                           aria-pressed={isSelected}
                           style={{
@@ -510,7 +558,8 @@ export default function ProductDetail() {
                             outline: isSelected ? '2px solid var(--color-bg)' : 'none',
                             outlineOffset: isSelected ? '-4px' : '0',
                             boxShadow: isSelected ? '0 0 0 1.5px var(--color-text)' : 'none',
-                            cursor: enabled ? 'pointer' : 'not-allowed', padding: 0, opacity: enabled ? 1 : 0.28,
+                            cursor: optionState.selectable ? 'pointer' : 'not-allowed', padding: 0,
+                            opacity: optionState.direct ? 1 : optionState.selectable ? .55 : .28,
                             transition: 'box-shadow .15s, border-color .15s',
                           }}
                         />
@@ -533,14 +582,14 @@ export default function ProductDetail() {
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
                     {product.tones.map((t) => {
                       const isSelected = selectedTone?.name === t.name
-                      const enabled = !product.variantRules?.length || isPublicAxisValueAvailable(product.variantRules, 'tone', t.name)
+                      const optionState = getVariantOptionState('tone', t.name)
                       return (
                         <button
                           key={t.name}
                           type="button"
-                          onClick={() => { if (enabled) setSelectedTone(t) }}
-                          disabled={!enabled}
-                          title={t.name}
+                          onClick={() => selectVariantOption('tone', t.name)}
+                          disabled={!optionState.selectable}
+                          title={optionState.direct ? t.name : optionState.selectable ? `${t.name} (cambia también la combinación)` : `${t.name} no disponible`}
                           aria-label={t.name}
                           aria-pressed={isSelected}
                           style={{
@@ -552,7 +601,8 @@ export default function ProductDetail() {
                             outline: isSelected ? '2px solid var(--color-bg)' : 'none',
                             outlineOffset: isSelected ? '-4px' : '0',
                             boxShadow: isSelected ? '0 0 0 1.5px var(--color-text)' : 'none',
-                            cursor: enabled ? 'pointer' : 'not-allowed', padding: 0, opacity: enabled ? 1 : 0.28,
+                            cursor: optionState.selectable ? 'pointer' : 'not-allowed', padding: 0,
+                            opacity: optionState.direct ? 1 : optionState.selectable ? .55 : .28,
                             transition: 'box-shadow .15s, border-color .15s',
                           }}
                         />
@@ -575,13 +625,14 @@ export default function ProductDetail() {
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
                     {product.sizes.map((s) => {
                       const isSelected = selectedSize?.label === s.label
-                      const enabled = !product.variantRules?.length || isPublicAxisValueAvailable(product.variantRules, 'size', s.label)
+                      const optionState = getVariantOptionState('size', s.label)
                       return (
                         <button
                           key={s.label}
                           type="button"
-                          onClick={() => { if (enabled) setSelectedSize(s) }}
-                          disabled={!enabled}
+                          onClick={() => selectVariantOption('size', s.label)}
+                          disabled={!optionState.selectable}
+                          title={optionState.direct ? s.label : optionState.selectable ? `${s.label} (cambia también la combinación)` : `${s.label} no disponible`}
                           aria-pressed={isSelected}
                           style={{
                             padding: '8px 16px', borderRadius: 4,
@@ -589,7 +640,8 @@ export default function ProductDetail() {
                             color: isSelected ? '#fff' : 'var(--color-text)',
                             backgroundColor: isSelected ? 'var(--color-text)' : 'transparent',
                             border: `1.5px solid ${isSelected ? 'var(--color-text)' : 'var(--color-border)'}`,
-                            cursor: enabled ? 'pointer' : 'not-allowed', opacity: enabled ? 1 : 0.42,
+                            cursor: optionState.selectable ? 'pointer' : 'not-allowed',
+                            opacity: optionState.direct ? 1 : optionState.selectable ? .58 : .32,
                             transition: 'background-color .15s, border-color .15s, color .15s',
                           }}
                         >

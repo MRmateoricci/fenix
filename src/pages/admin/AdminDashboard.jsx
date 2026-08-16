@@ -772,6 +772,12 @@ function ProductModal({ product, onSave, onClose, onVariantsChanged, publishOnSa
   const [useVariantStock, setUseVariantStock] = useState(
     () => Object.keys(product?.variantStock || {}).length > 0
   )
+  const initialFormSnapshotRef = useRef(JSON.stringify(form))
+  const initialUseVariantStockRef = useRef(useVariantStock)
+  const hasUnsavedChanges = useMemo(
+    () => JSON.stringify(form) !== initialFormSnapshotRef.current || useVariantStock !== initialUseVariantStockRef.current,
+    [form, useVariantStock]
+  )
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
   const willBePublished = publishOnSave || form.published
@@ -925,6 +931,28 @@ function ProductModal({ product, onSave, onClose, onVariantsChanged, publishOnSa
   const [variantDetailsIndex, setVariantDetailsIndex] = useState(null)
   const [detachCandidate, setDetachCandidate] = useState(null)
   const [detaching, setDetaching] = useState(false)
+  const [discardChangesOpen, setDiscardChangesOpen] = useState(false)
+  const didSaveRef = useRef(false)
+
+  useEffect(() => {
+    if (!hasUnsavedChanges || didSaveRef.current) return undefined
+
+    const warnBeforeUnload = event => {
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    window.addEventListener('beforeunload', warnBeforeUnload)
+    return () => window.removeEventListener('beforeunload', warnBeforeUnload)
+  }, [hasUnsavedChanges])
+
+  const requestClose = () => {
+    if (saving || detaching) return
+    if (hasUnsavedChanges) {
+      setDiscardChangesOpen(true)
+      return
+    }
+    onClose()
+  }
 
   const handleDetachVariant = async () => {
     if (!detachCandidate || detaching) return
@@ -984,6 +1012,7 @@ function ProductModal({ product, onSave, onClose, onVariantsChanged, publishOnSa
       if (!productId) throw new Error('El producto se creó pero no se recibió su identificador')
       await updateProductVariantRules(productId, out.variantRules)
       await onVariantsChanged?.()
+      didSaveRef.current = true
       onClose()
     } catch (error) {
       setSaveError(error.message || 'No se pudieron guardar los cambios')
@@ -994,7 +1023,7 @@ function ProductModal({ product, onSave, onClose, onVariantsChanged, publishOnSa
 
   return (
     <div
-      onMouseDown={event => { if (event.target === event.currentTarget) onClose() }}
+      onMouseDown={event => { if (event.target === event.currentTarget) requestClose() }}
       style={{
         position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -1013,10 +1042,17 @@ function ProductModal({ product, onSave, onClose, onVariantsChanged, publishOnSa
           display: 'flex', justifyContent: 'space-between', alignItems: 'center',
           padding: '24px 28px 18px', borderBottom: `1px solid ${C.border}`, flexShrink: 0,
         }}>
-          <h2 style={{ fontFamily: ADMIN_FONT, fontSize: 22, color: C.ink, margin: 0, fontWeight: 500 }}>
-            {publishOnSave ? 'Configurar y publicar' : isNew ? 'Nuevo producto' : 'Editar producto'}
-          </h2>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.text3, fontSize: 18, lineHeight: 1 }}>✕</button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <h2 style={{ fontFamily: ADMIN_FONT, fontSize: 22, color: C.ink, margin: 0, fontWeight: 500 }}>
+              {publishOnSave ? 'Configurar y publicar' : isNew ? 'Nuevo producto' : 'Editar producto'}
+            </h2>
+            {hasUnsavedChanges && (
+              <span role="status" style={{ padding: '4px 9px', borderRadius: 999, background: C.amberLight, color: C.amberDark, fontSize: 10.5, fontWeight: 700 }}>
+                Cambios sin guardar
+              </span>
+            )}
+          </div>
+          <button onClick={requestClose} disabled={saving || detaching} aria-label="Cerrar editor" style={{ background: 'none', border: 'none', cursor: saving || detaching ? 'not-allowed' : 'pointer', color: C.text3, fontSize: 18, lineHeight: 1, opacity: saving || detaching ? .5 : 1 }}>✕</button>
         </div>
 
         <div className="adm-product-modal__body" style={{ overflowY: 'auto', padding: '24px 28px', flex: 1, minHeight: 0 }}>
@@ -1387,7 +1423,7 @@ function ProductModal({ product, onSave, onClose, onVariantsChanged, publishOnSa
               <div>
                 <label style={{ ...lbl, color: C.ink }}>Variantes</label>
                 <p style={{ fontSize: 11, color: C.muted, margin: '4px 0 0', lineHeight: 1.4 }}>
-                  Todo producto tiene al menos una variante. Cada fila concentra código, Color + Tono + Medida, ficha individual, precio, foto y stock; “Cualquiera” funciona como opción general.
+                  La tienda sólo permite combinaciones cubiertas por estas filas. Cada variante concentra código, Color + Tono + Medida, ficha individual, precio, foto y stock; “Cualquiera” funciona como comodín para ese atributo.
                 </p>
               </div>
               <button type="button" onClick={addGroupedRule} style={{ ...outlineBtn, padding: '5px 10px', fontSize: 10.5, whiteSpace: 'nowrap' }}>+ Agregar variante</button>
@@ -1539,8 +1575,10 @@ function ProductModal({ product, onSave, onClose, onVariantsChanged, publishOnSa
           display: 'flex', gap: 10, justifyContent: 'flex-end',
           padding: '16px 28px', borderTop: `1px solid ${C.border}`, flexShrink: 0,
         }}>
-          {saveError && <span style={{ marginRight: 'auto', alignSelf: 'center', color: C.red, fontSize: 11.5 }}>{saveError}</span>}
-          <button onClick={onClose} style={outlineBtn}>Cancelar</button>
+          {saveError
+            ? <span style={{ marginRight: 'auto', alignSelf: 'center', color: C.red, fontSize: 11.5 }}>{saveError}</span>
+            : hasUnsavedChanges && <span style={{ marginRight: 'auto', alignSelf: 'center', color: C.amberDark, fontSize: 11.5 }}>Guardá los cambios para que se reflejen en la tienda.</span>}
+          <button onClick={requestClose} disabled={saving || detaching} style={{ ...outlineBtn, opacity: saving || detaching ? .5 : 1 }}>Cancelar</button>
           <button
             onClick={handleSave}
             disabled={!valid || saving}
@@ -1555,6 +1593,14 @@ function ProductModal({ product, onSave, onClose, onVariantsChanged, publishOnSa
             confirmLabel={detaching ? 'Separando...' : 'Separar producto'}
             onConfirm={handleDetachVariant}
             onCancel={() => { if (!detaching) setDetachCandidate(null) }}
+          />
+        )}
+        {discardChangesOpen && (
+          <ConfirmModal
+            message="Hay cambios sin guardar. Si cerrás ahora, la tienda seguirá mostrando la información anterior."
+            confirmLabel="Descartar cambios"
+            onConfirm={onClose}
+            onCancel={() => setDiscardChangesOpen(false)}
           />
         )}
         {variantDetailsIndex != null && form.variantRules[variantDetailsIndex] && (
