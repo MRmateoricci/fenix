@@ -1,5 +1,6 @@
 import { pool } from '../db/pool.js';
-import { getArcaConfig } from '../config/arca.js';
+import { assertArcaEmissionAllowed, getArcaConfig } from '../config/arca.js';
+import { DEFAULT_VAT_RATE } from '../config/tax.js';
 import {
   createCAE,
   getLastAuthorized,
@@ -11,8 +12,13 @@ import {
   buildInvoiceAmounts,
   buildInvoiceRequest,
   buildReceiverData,
+  validateReceiverForVoucher,
+  voucherPresentation,
 } from './invoiceFiscal.js';
-import { validateInvoiceParameters } from './arcaParameters.js';
+import {
+  resolveReceiverInvoiceProfile,
+  validateInvoiceParameters,
+} from './arcaParameters.js';
 
 const BILLABLE_ORDER_STATUSES = new Set(['paid', 'preparing', 'shipped', 'delivered']);
 
@@ -53,15 +59,24 @@ function safeArcaResponse(response) {
 
 export function publicInvoice(invoice, { includeTechnicalMessages = true } = {}) {
   if (!invoice) return null;
+  const presentation = voucherPresentation(
+    invoice.cbte_tipo,
+    invoice.issuer_snapshot?.aAuthorizationMode,
+  );
   const result = {
     id: invoice.id,
     orderId: invoice.order_id,
     status: invoice.status,
     pointOfSale: invoice.pto_vta,
     voucherType: invoice.cbte_tipo,
+    voucherClass: presentation.letter,
+    voucherName: presentation.name,
     voucherNumber: invoice.cbte_numero == null ? null : Number(invoice.cbte_numero),
     voucherDate: invoice.fecha_comprobante,
     total: Number(invoice.imp_total),
+    net: Number(invoice.imp_neto),
+    vat: Number(invoice.imp_iva),
+    vatBreakdown: invoice.iva_breakdown || [],
     currency: invoice.currency,
     cae: invoice.cae,
     caeExpirationDate: invoice.cae_expiration_date,
@@ -93,18 +108,22 @@ async function findInvoice(client, orderId) {
   return rows[0] || null;
 }
 
-function snapshots(order, receiver, config) {
+function snapshots(order, receiver, config, fiscal) {
   return {
     issuer: {
       cuit: config.cuit,
       legalName: config.issuer.legalName,
       taxAddress: config.issuer.taxAddress,
       taxCondition: config.issuer.taxCondition,
+      taxCategory: config.issuer.taxCategory,
+      aAuthorizationMode: config.issuer.aAuthorizationMode,
       grossIncome: config.issuer.grossIncome,
       activityStartDate: config.issuer.activityStartDate,
     },
     receiver: {
       ...receiver,
+      vatConditionDescription: fiscal.condition.description,
+      vatCategory: fiscal.condition.category,
       address: order.billing_address || order.address || '',
     },
     items: {
@@ -113,30 +132,50 @@ function snapshots(order, receiver, config) {
       couponCode: order.coupon_code || null,
       shippingCost: Number(order.shipping_cost || 0),
       total: Number(order.total_amount),
+      vatRate: fiscal.vatRate,
+      vatBreakdown: fiscal.amounts.ivaBreakdown,
     },
   };
 }
 
-async function ensureInvoiceRow(client, order, receiver, config) {
-  const amounts = buildInvoiceAmounts(order);
-  const frozen = snapshots(order, receiver, config);
+async function ensureInvoiceRow(client, order, receiver, config, fiscal) {
+  const { amounts } = fiscal;
+  const frozen = snapshots(order, receiver, config, fiscal);
   const { rows } = await client.query(
     `INSERT INTO invoices (
        order_id, status, issuer_cuit, pto_vta, cbte_tipo, concepto,
        receiver_doc_type, receiver_doc_number, receiver_vat_condition_id,
        imp_total, imp_neto, imp_iva, imp_trib, imp_tot_conc, imp_op_ex,
-       issuer_snapshot, receiver_snapshot, items_snapshot
+       issuer_snapshot, receiver_snapshot, items_snapshot, iva_breakdown
      ) VALUES (
        $1, 'pending', $2, $3, $4, $5, $6, $7, $8,
-       $9, $10, $11, $12, $13, $14, $15::jsonb, $16::jsonb, $17::jsonb
+       $9, $10, $11, $12, $13, $14, $15::jsonb, $16::jsonb, $17::jsonb, $18::jsonb
      )
-     ON CONFLICT (order_id) DO NOTHING
+     ON CONFLICT (order_id) DO UPDATE SET
+       issuer_cuit = EXCLUDED.issuer_cuit,
+       pto_vta = EXCLUDED.pto_vta,
+       cbte_tipo = EXCLUDED.cbte_tipo,
+       concepto = EXCLUDED.concepto,
+       receiver_doc_type = EXCLUDED.receiver_doc_type,
+       receiver_doc_number = EXCLUDED.receiver_doc_number,
+       receiver_vat_condition_id = EXCLUDED.receiver_vat_condition_id,
+       imp_total = EXCLUDED.imp_total,
+       imp_neto = EXCLUDED.imp_neto,
+       imp_iva = EXCLUDED.imp_iva,
+       imp_trib = EXCLUDED.imp_trib,
+       imp_tot_conc = EXCLUDED.imp_tot_conc,
+       imp_op_ex = EXCLUDED.imp_op_ex,
+       issuer_snapshot = EXCLUDED.issuer_snapshot,
+       receiver_snapshot = EXCLUDED.receiver_snapshot,
+       items_snapshot = EXCLUDED.items_snapshot,
+       iva_breakdown = EXCLUDED.iva_breakdown
+     WHERE invoices.cbte_numero IS NULL AND invoices.status IN ('pending', 'error')
      RETURNING *`,
     [
       order.id,
       config.cuit,
       config.pointOfSale,
-      config.defaultVoucherType,
+      fiscal.voucherType,
       Number(order.invoice_concept || config.defaultConcept),
       receiver.docType,
       receiver.docNumber,
@@ -150,6 +189,7 @@ async function ensureInvoiceRow(client, order, receiver, config) {
       json(frozen.issuer),
       json(frozen.receiver),
       json(frozen.items),
+      json(amounts.ivaBreakdown),
     ],
   );
   return rows[0] || findInvoice(client, order.id);
@@ -358,27 +398,50 @@ export async function createInvoiceForOrder(orderId) {
       });
     }
 
-    const config = getArcaConfig({ requirePointOfSale: true, requireIssuerData: true });
-    if (config.defaultVoucherType !== 11) {
-      throw new InvoiceServiceError('Esta etapa solo permite emitir Factura C (tipo 11).', {
-        code: 'INVOICE_TYPE_NOT_SUPPORTED',
-        httpStatus: 409,
-      });
-    }
-    const receiver = buildReceiverData({}, order);
-    await validateInvoiceParameters({
-      pointOfSale: config.pointOfSale,
-      voucherType: config.defaultVoucherType,
-      receiver,
-      environment: config.environment,
-    });
-
     let invoice = await findInvoice(client, order.id);
     if (invoice?.status === 'authorized') return { invoice, created: false, recovered: false };
     if (invoice?.status === 'rejected') return { invoice, created: false, recovered: false };
-    invoice ||= await ensureInvoiceRow(client, order, receiver, config);
 
-    sequenceLock = `arca:sequence:${config.cuit}:${config.pointOfSale}:${config.defaultVoucherType}`;
+    // El primer control ocurre antes de parámetros, numeración o escrituras
+    // fiscales. createCAE repite este control como defensa final.
+    let config = getArcaConfig({ requirePointOfSale: true });
+    assertArcaEmissionAllowed(config);
+    config = getArcaConfig({ requirePointOfSale: true, requireIssuerData: true });
+
+    const receiverBase = buildReceiverData({}, order);
+    const { condition } = await resolveReceiverInvoiceProfile(receiverBase.vatConditionId, config);
+    const voucherType = condition.voucherType;
+    const receiver = validateReceiverForVoucher({
+      receiver: receiverBase,
+      receiverVatCondition: condition.category,
+      voucherType,
+      totalAmount: order.total_amount,
+    });
+    const parameterValidation = await validateInvoiceParameters({
+      pointOfSale: config.pointOfSale,
+      voucherType,
+      invoiceClass: condition.invoiceClass,
+      receiver,
+      environment: config.environment,
+      vatRate: DEFAULT_VAT_RATE,
+    });
+    const fiscal = {
+      voucherType,
+      invoiceClass: condition.invoiceClass,
+      condition,
+      vatRate: DEFAULT_VAT_RATE,
+      vatRateId: parameterValidation.vatType?.id || null,
+      amounts: buildInvoiceAmounts(order, { voucherType, vatRate: DEFAULT_VAT_RATE }),
+    };
+    if (invoice?.cbte_numero && Number(invoice.cbte_tipo) !== voucherType) {
+      throw new InvoiceServiceError(
+        'La configuración fiscal cambió mientras existía un comprobante con numeración reservada.',
+        { code: 'INVOICE_FISCAL_CONFIGURATION_CHANGED', httpStatus: 409, invoice },
+      );
+    }
+    invoice = await ensureInvoiceRow(client, order, receiver, config, fiscal);
+
+    sequenceLock = `arca:sequence:${config.cuit}:${config.pointOfSale}:${voucherType}`;
     await advisoryLock(client, sequenceLock);
 
     let candidateNumber;
@@ -395,7 +458,7 @@ export async function createInvoiceForOrder(orderId) {
       }
       candidateNumber = Number(invoice.cbte_numero);
     } else {
-      const last = await getLastAuthorized(config.pointOfSale, config.defaultVoucherType);
+      const last = await getLastAuthorized(config.pointOfSale, voucherType);
       if (last.errors.length) {
         throw new InvoiceServiceError('ARCA no pudo informar el último comprobante autorizado.', {
           code: 'ARCA_LAST_VOUCHER_ERROR',
@@ -409,10 +472,12 @@ export async function createInvoiceForOrder(orderId) {
       order,
       receiver,
       pointOfSale: config.pointOfSale,
-      voucherType: config.defaultVoucherType,
+      voucherType,
       voucherNumber: candidateNumber,
       configuredConcept: config.defaultConcept,
       voucherDate: argentinaDate(),
+      vatRate: fiscal.vatRate,
+      vatRateId: fiscal.vatRateId,
     });
     invoice = await persistProcessing(client, invoice, built, candidateNumber);
     return await sendRequest(client, invoice, built.request);

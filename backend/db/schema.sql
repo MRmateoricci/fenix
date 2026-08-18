@@ -764,3 +764,8 @@ DROP TRIGGER IF EXISTS arca_parameter_cache_updated_at ON arca_parameter_cache;
 CREATE TRIGGER arca_parameter_cache_updated_at
   BEFORE UPDATE ON arca_parameter_cache
   FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+-- Composicion fiscal congelada al emitir (alicuota, base imponible e IVA).
+-- Se agrega al final como migracion compatible para instalaciones existentes.
+ALTER TABLE invoices
+  ADD COLUMN IF NOT EXISTS iva_breakdown JSONB NOT NULL DEFAULT '[]'::jsonb;

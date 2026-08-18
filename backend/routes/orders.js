@@ -14,9 +14,14 @@ import { isValidEmail, normalizeEmail } from '../utils/email.js'
 import { resolveVariantRule, ruleMatches } from '../services/productVariants.js'
 import { resolvePublicOptionPrice, resolvePublicPrice } from '../services/publicPricing.js'
 import { evaluateCoupon, findCouponByCode } from '../services/coupons.js'
-import { buildReceiverData, InvoiceValidationError } from '../services/invoiceFiscal.js'
+import {
+  buildReceiverData,
+  InvoiceValidationError,
+  validateReceiverForVoucher,
+} from '../services/invoiceFiscal.js'
 import { getInvoiceOptions } from '../services/arcaParameters.js'
 import { safeArcaErrorMessage } from '../services/arcaSafeLog.js'
+import { DEFAULT_VAT_RATE } from '../config/tax.js'
 import 'dotenv/config'
 
 const router = Router()
@@ -178,12 +183,17 @@ router.post('/', attachUserIfPresent, async (req, res) => {
     let orderUserId     = req.userId || null
 
     const invoiceReceiver = buildReceiverData(customer)
-    const invoiceOptions = await getInvoiceOptions('C')
+    const invoiceOptions = await getInvoiceOptions()
     if (!invoiceOptions.documents.some(option => option.id === invoiceReceiver.docType)) {
       return res.status(400).json({ error: 'El tipo de documento fiscal no fue informado por ARCA' })
     }
-    if (!invoiceOptions.vatConditions.some(option => option.id === invoiceReceiver.vatConditionId)) {
-      return res.status(400).json({ error: 'La condición IVA no es válida para Factura C' })
+    const receiverVatCondition = invoiceOptions.vatConditions
+      .find(option => option.id === invoiceReceiver.vatConditionId)
+    if (!receiverVatCondition) {
+      return res.status(400).json({ error: 'La condición IVA no es válida para el emisor configurado' })
+    }
+    if (!receiverVatCondition.allowedDocumentTypeIds.includes(invoiceReceiver.docType)) {
+      return res.status(400).json({ error: 'El documento no corresponde a la condición IVA elegida' })
     }
     const customerDni = invoiceReceiver.docType === 96
       ? invoiceReceiver.docNumber
@@ -277,6 +287,7 @@ router.post('/', attachUserIfPresent, async (req, res) => {
         color:    i.color || null,
         size:     i.size || null,
         tone:     i.tone || null,
+        vatRate:  DEFAULT_VAT_RATE,
         colorKey: variantPath ? variantPath.colorKey : null,
         sizeKey:  variantPath ? variantPath.sizeKey : null,
         variantRuleId: variantPath?.variantRuleId || null,
@@ -322,6 +333,12 @@ router.post('/', attachUserIfPresent, async (req, res) => {
     }
 
     const total = productsTotal - discountAmount + shippingCost
+    validateReceiverForVoucher({
+      receiver: invoiceReceiver,
+      receiverVatCondition: receiverVatCondition.category,
+      voucherType: receiverVatCondition.voucherType,
+      totalAmount: total.toFixed(2),
+    })
 
     let reservationExpiresAt = null
     if (paymentMethod === 'mercadopago') {

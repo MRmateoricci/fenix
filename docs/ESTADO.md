@@ -7,7 +7,7 @@
 > Si el cambio merece un commit con mensaje propio, merece una entrada acá.
 > Un ajuste de padding, no.
 
-**Última actualización:** 15 de agosto de 2026
+**Última actualización:** 18 de agosto de 2026
 **Commit de referencia:** `2cf994d` + cambios locales sin commit
 
 ---
@@ -21,7 +21,7 @@
 | Importación de listas de precios | ✅ Funcionando | XLSX + PDF de factura |
 | Importación de imágenes de catálogo | ✅ Funcionando | Con revisión y borrador |
 | Variantes (color × medida × tono) | ✅ Funcionando | Stock por combinación exacta |
-| Carrito y checkout | ✅ Funcionando | Mercado Pago + datos fiscales para Factura C |
+| Carrito y checkout | ✅ Funcionando | Mercado Pago + datos fiscales dinámicos A/B/C |
 | Cotización de envío | 🟡 Provisorio | Tarifario manual por zona |
 | Envío gratis por monto | ✅ Funcionando | Umbral por env var |
 | Cupones de descuento | ✅ Funcionando | |
@@ -32,7 +32,7 @@
 | Newsletter | ✅ Funcionando | |
 | Productos a pedido | ✅ Funcionando | Compra sin stock con plazo de entrega — ver detalle abajo |
 | SEO | ✅ Funcionando | Helmet + sitemap + robots |
-| Facturación electrónica ARCA | 🟡 Implementada, pendiente activación | WSAA + FEDummy homologación OK; falta migrar DB, configurar punto de venta y obtener el primer CAE |
+| Facturación electrónica ARCA | 🟡 Implementada, producción bloqueada | A/B para RI y C para Monotributo; falta confirmar habilitación A real de Fenix |
 
 ---
 
@@ -151,22 +151,25 @@ el body raw antes del `express.json()`.
 
 ### Facturación electrónica ARCA
 
-Integración WSAA + WSFEv1 implementada para **Factura C exclusivamente**, con ES
-Modules, PostgreSQL y emisión automática opt-in más fallback manual. Todo el tráfico permanece en homologación;
-producción se bloquea antes de cualquier conexión salvo habilitación explícita con
-`ARCA_PRODUCTION_ENABLED=true`.
+Integración WSAA + WSFEv1 con estrategia según emisor y receptor: un Responsable
+Inscripto emite A/ALEY o B; Monotributo y Exento conservan Factura C. Las consultas
+productivas están permitidas, pero `FECAESolicitar` continúa bloqueado mientras
+`ARCA_PRODUCTION_ENABLED=false`.
 
 **Implementado:**
 
 - Configuración central en `backend/config/arca.js`: endpoints, CUIT, punto de venta,
-  certificado, clave, datos del emisor y defaults fiscales. Las rutas sensibles se
-  resuelven desde la raíz de `backend`
+  certificado, clave, datos del emisor y concepto. Para Responsable Inscripto,
+  `ARCA_A_AUTHORIZATION_MODE` es obligatorio y no asume `standard`
 - WSAA con TRA firmado mediante OpenSSL, caché en memoria para el servidor y caché
   local persistente para reutilizar el TA entre scripts Node. Incluye renovación
   anticipada y lock entre procesos; los secretos y el CMS se redactan en errores y logs
 - Cliente WSFEv1 con `FEDummy`, puntos de venta, catálogos paramétricos, último
   autorizado, consulta de comprobante y solicitud de CAE
-- Caché PostgreSQL de parámetros ARCA con fallback a la última respuesta válida
+- Agente TLS exclusivo para WSFE producción: admite el DHE 1024 del servidor legacy
+  manteniendo TLS 1.2, AES-GCM y validación de certificado, sin bajar OpenSSL global
+- Caché PostgreSQL de parámetros ARCA, separada por ambiente y CUIT, con fallback a
+  la última respuesta válida
 - Datos fiscales del receptor capturados durante checkout. Pedidos históricos deben
   confirmarlos antes de emitir; el DNI dejó de bloquear el carrito
 - Pedidos invitados reclamables únicamente por una cuenta verificada con el mismo email
@@ -179,7 +182,7 @@ producción se bloquea antes de cualquier conexión salvo habilitación explíci
 - Recuperación de timeouts con `FECompConsultar`: solamente el código `602` se toma
   como comprobante inexistente; el request fallido nunca reenvía automáticamente
 - Endpoints privados para confirmar receptor, emitir, consultar estado y descargar PDF
-- Intento inmediato de Factura C dentro de la conciliación segura de un pago
+- Intento inmediato del comprobante fiscal determinado dentro de la conciliación segura de un pago
   `approved` de Mercado Pago, con límite de espera de 20 segundos. Cualquier falla
   ARCA se aísla del pago, pedido, stock, envío y respuesta `200` del webhook
 - Servicio único `attemptInvoiceForOrder()` para webhook, cliente, admin y script;
@@ -192,16 +195,21 @@ producción se bloquea antes de cualquier conexión salvo habilitación explíci
   “Facturar ahora” para pagos MP aprobados y acceso privado al PDF autorizado
 - Feature flag independiente `ARCA_AUTO_INVOICE_ENABLED`; en producción exige además
   `ARCA_PRODUCTION_ENABLED=true`
-- PDF en memoria con QR oficial ARCA, sin archivos públicos ni nueva solicitud de CAE
+- PDF A/B/C en memoria con neto, IVA, total, condiciones fiscales y QR oficial ARCA,
+  sin archivos públicos ni nueva solicitud de CAE
 - Scripts manuales para WSAA/FEDummy, puntos de venta, parámetros, último autorizado
-  y primera factura de homologación. El script de CAE exige `--confirm-homologation`
+  y primera factura. Los scripts de consulta muestran que no emiten; el de CAE exige
+  confirmación distinta por ambiente y, en producción, también el flag de emisión
+- Los precios finales persistidos son la fuente fiscal. La regla global histórica
+  del 21 % quedó centralizada; A/B guardan neto, IVA y desglose, y validan el ID de
+  alícuota mediante `FEParamGetTiposIva`
 - Documentación operativa en `backend/docs/ARCA.md`
 
 **Verificado:**
 
 - WSAA de homologación autenticó correctamente
 - `FEDummy`: `AppServer`, `DbServer` y `AuthServer` respondieron `OK`
-- 81 pruebas de backend pasan; la prueba descartable de constraints y concurrencia
+- 101 pruebas de backend pasan; la prueba descartable de constraints y concurrencia
   queda omitida claramente cuando no existe `TEST_DATABASE_URL`
 - Los cuatro scripts ARCA ejecutados en procesos consecutivos reutilizan el TA y no
   reciben `coe.alreadyAuthenticated`. `FEParamGetPtosVenta` responde actualmente
@@ -211,12 +219,14 @@ producción se bloquea antes de cualquier conexión salvo habilitación explíci
 - Certificado y private key continúan ignorados por Git y no están trackeados
 - Factura C de homologación 00002-00000001 autorizada con CAE; repetir el pedido
   devolvió la misma factura sin solicitar otro comprobante
+- Producción segura: WSAA autenticó, `FEDummy` respondió `OK/OK/OK`, parámetros
+  respondieron, los puntos 1 y 3 figuran CAE/RI no bloqueados y el último autorizado
+  del punto 3 es `0` tanto para Factura A (1) como B (6)
 
-**Pendiente antes de producción:** aplicar la migración de auditoría de `invoice_jobs`,
-probar el intento inmediato en homologación con `ARCA_AUTO_INVOICE_ENABLED=true`, preparar
-credenciales y punto de venta productivos, validar manualmente una única factura real
-con la automatización todavía apagada y definir el flujo separado de Nota de Crédito
-para devoluciones/contracargos.
+**Pendiente antes de producción:** aplicar la columna `invoices.iva_breakdown`, confirmar
+en ARCA el modo A real de Fenix, completar razón social/IIBB y comprobar que el catálogo real no contiene otras
+alícuotas, ejecutar solo las consultas productivas seguras y validar el punto de venta
+3. Después, autorizar manualmente una única factura real con la automatización apagada.
 
 ### Cuentas, pedidos y comunicación
 
@@ -236,21 +246,38 @@ para devoluciones/contracargos.
 
 ## Pendientes priorizados
 
-1. **Validar automatización de Factura C en homologación**: aplicar la migración,
-   activar el feature flag y comprobar pago approved → intento inmediato → factura disponible
-2. Ejecutar las pruebas PostgreSQL descartables de facturación con `TEST_DATABASE_URL`
-3. **Cargar dimensiones y peso** en los productos reales — bloquea el cotizador real
-4. **Cuotas**: mover `INSTALLMENTS` al backend y agregar el mensaje en `ProductDetail`
-5. **Verificar cuotas sin interés** activas en el panel de MP
-6. **Terminar de poblar el catálogo** con productos e imágenes
-7. Credenciales de Correo Argentino y activación del adaptador real
-8. Refactor de `AdminDashboard.jsx` (8.100+ líneas en un solo archivo)
-9. Definir exclusiones de envío gratis, si las hubiera
-10. Habilitar cantidad > 1 en el selector de `ProductDetail` para items a pedido
+1. **Confirmar la habilitación A real de Fenix** y configurar
+   `ARCA_A_AUTHORIZATION_MODE` sin asumir `standard`
+2. Confirmar la única alícuota del catálogo; el PERÍODO DESDE ya quedó fijado en `2024-01`
+3. Aplicar la migración y ejecutar las consultas productivas seguras para el punto 3
+4. Ejecutar las pruebas PostgreSQL descartables de facturación con `TEST_DATABASE_URL`
+5. **Cargar dimensiones y peso** en los productos reales — bloquea el cotizador real
+6. **Cuotas**: mover `INSTALLMENTS` al backend y agregar el mensaje en `ProductDetail`
+7. **Verificar cuotas sin interés** activas en el panel de MP
+8. **Terminar de poblar el catálogo** con productos e imágenes
+9. Credenciales de Correo Argentino y activación del adaptador real
+10. Refactor de `AdminDashboard.jsx` (8.100+ líneas en un solo archivo)
 
 ---
 
 ## Bitácora
+
+### 2026-08-18 · ARCA para Responsable Inscripto, con producción bloqueada
+
+Se eliminó el default de Factura C y se incorporó la selección A/ALEY/B para un
+emisor Responsable Inscripto, conservando C para Monotributo/Exento. El modo de
+habilitación A es obligatorio y no tiene fallback; las condiciones, documentos y
+alícuota se validan contra parámetros WSFE. Los importes finales persistidos se
+descomponen en neto e IVA con aritmética de centavos, snapshot y PDF fiscal dinámico.
+Las consultas productivas quedaron separadas de la emisión: WSAA, FEDummy, parámetros,
+puntos de venta y último autorizado pueden probarse con el flag apagado, mientras
+`FECAESolicitar` se bloquea centralmente. Sistema Registral confirmó el PERÍODO DESDE
+`01/2024`; se guarda `2024-01`, se muestra mes/año y no se exige ni inventa un día.
+El WSDL productivo quedó diagnosticado: Node 24/OpenSSL 3.5 rechaza su DHE 1024 por
+defecto y conecta con un agente `SECLEVEL=1` limitado a WSFE, certificado validado.
+Se ejecutaron únicamente el diagnóstico TLS, WSAA/FEDummy, parámetros, puntos de
+venta y último autorizado. No se invocó `FECAESolicitar` ni se emitió un comprobante
+productivo. Quedan pendientes datos fiscales del emisor y confirmar el catálogo.
 
 ### 2026-08-15 · Facturación inmediata sin worker
 

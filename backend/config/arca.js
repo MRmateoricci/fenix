@@ -17,6 +17,12 @@ const ENVIRONMENTS = Object.freeze({
   }),
 });
 
+const A_AUTHORIZATION_MODES = Object.freeze([
+  'standard',
+  'cbu_informed',
+  'subject_to_withholding',
+]);
+
 export class ArcaConfigError extends Error {
   constructor(message, code = 'ARCA_CONFIG_ERROR') {
     super(message);
@@ -46,6 +52,69 @@ function integer(name, value, { requiredValue = false, defaultValue } = {}) {
   return parsed;
 }
 
+function normalizedLabel(value) {
+  return String(value ?? '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ');
+}
+
+export function issuerVatCategory(value) {
+  const normalized = normalizedLabel(value);
+  if (/responsable (?:inscripto|inscrito)/.test(normalized)) return 'registered';
+  if (/monotribut/.test(normalized)) return 'monotributo';
+  if (/\bexent[oa]\b/.test(normalized)) return 'exempt';
+  throw new ArcaConfigError(
+    'ARCA_TAX_CONDITION debe identificar al emisor como Responsable Inscripto, Monotributo o Exento.',
+    'ARCA_TAX_CONDITION_INVALID',
+  );
+}
+
+function readAAuthorizationMode(taxCategory) {
+  const mode = String(process.env.ARCA_A_AUTHORIZATION_MODE || '').trim().toLowerCase();
+  if (taxCategory === 'registered' && !mode) {
+    throw new ArcaConfigError(
+      'ARCA_A_AUTHORIZATION_MODE es obligatorio para un emisor Responsable Inscripto. No se asume habilitación A standard.',
+      'ARCA_A_AUTHORIZATION_MODE_REQUIRED',
+    );
+  }
+  if (mode && !A_AUTHORIZATION_MODES.includes(mode)) {
+    throw new ArcaConfigError(
+      `ARCA_A_AUTHORIZATION_MODE debe ser ${A_AUTHORIZATION_MODES.join(', ')}.`,
+      'ARCA_A_AUTHORIZATION_MODE_INVALID',
+    );
+  }
+  return mode || null;
+}
+
+function readActivityStartDate(value, { requiredValue = false } = {}) {
+  const normalized = String(value ?? '').trim();
+  if (!normalized && !requiredValue) return '';
+  if (!normalized) return required('ACTIVITY_START_DATE', normalized);
+  if (!/^\d{4}-\d{2}(?:-\d{2})?$/.test(normalized)) {
+    throw new ArcaConfigError(
+      'ARCA_ACTIVITY_START_DATE debe usar YYYY-MM o YYYY-MM-DD.',
+      'ARCA_ACTIVITY_START_DATE_INVALID',
+    );
+  }
+  const month = Number(normalized.slice(5, 7));
+  if (month < 1 || month > 12) {
+    throw new ArcaConfigError(
+      'ARCA_ACTIVITY_START_DATE no contiene un mes válido.',
+      'ARCA_ACTIVITY_START_DATE_INVALID',
+    );
+  }
+  if (normalized.length === 10 && Number.isNaN(Date.parse(`${normalized}T12:00:00Z`))) {
+    throw new ArcaConfigError(
+      'ARCA_ACTIVITY_START_DATE no contiene una fecha válida.',
+      'ARCA_ACTIVITY_START_DATE_INVALID',
+    );
+  }
+  return normalized;
+}
+
 export function resolveBackendPath(filePath) {
   const configuredPath = required('PATH', filePath);
   return path.isAbsolute(configuredPath)
@@ -69,14 +138,6 @@ function readEnvironment() {
       'ARCA_ENV_INVALID',
     );
   }
-
-  if (environment === 'production' && process.env.ARCA_PRODUCTION_ENABLED !== 'true') {
-    throw new ArcaConfigError(
-      'Las conexiones ARCA de producción están bloqueadas. Configure ARCA_PRODUCTION_ENABLED=true de forma explícita para habilitarlas.',
-      'ARCA_PRODUCTION_DISABLED',
-    );
-  }
-
   return environment;
 }
 
@@ -92,9 +153,9 @@ function enabledFlag(value) {
 export function getArcaAutomationConfig(environmentVariables = process.env) {
   const environment = String(environmentVariables.ARCA_ENV || 'homologation').trim().toLowerCase();
   const autoInvoiceRequested = enabledFlag(environmentVariables.ARCA_AUTO_INVOICE_ENABLED);
-  const productionEnabled = enabledFlag(environmentVariables.ARCA_PRODUCTION_ENABLED);
+  const productionEmissionEnabled = enabledFlag(environmentVariables.ARCA_PRODUCTION_ENABLED);
   const validEnvironment = Boolean(ENVIRONMENTS[environment]);
-  const productionAllowed = environment !== 'production' || productionEnabled;
+  const productionAllowed = environment !== 'production' || productionEmissionEnabled;
   const enabled = validEnvironment && autoInvoiceRequested && productionAllowed;
 
   let disabledReason = null;
@@ -106,7 +167,7 @@ export function getArcaAutomationConfig(environmentVariables = process.env) {
     environment,
     isProduction: environment === 'production',
     autoInvoiceRequested,
-    productionEnabled,
+    productionEmissionEnabled,
     enabled,
     disabledReason,
   });
@@ -118,32 +179,36 @@ export function getArcaConfig({ requirePointOfSale = false, requireIssuerData = 
   const pointOfSale = integer('PTO_VTA', process.env.ARCA_PTO_VTA, {
     requiredValue: requirePointOfSale,
   });
+  const taxCondition = required('TAX_CONDITION', process.env.ARCA_TAX_CONDITION);
+  const taxCategory = issuerVatCategory(taxCondition);
+  const aAuthorizationMode = readAAuthorizationMode(taxCategory);
 
   const issuer = {
     legalName: String(process.env.ARCA_LEGAL_NAME || '').trim(),
     taxAddress: String(process.env.ARCA_TAX_ADDRESS || '').trim(),
-    taxCondition: String(process.env.ARCA_TAX_CONDITION || 'Monotributo').trim(),
+    taxCondition,
+    taxCategory,
+    aAuthorizationMode,
     grossIncome: String(process.env.ARCA_IIBB || '').trim(),
-    activityStartDate: String(process.env.ARCA_ACTIVITY_START_DATE || '').trim(),
+    activityStartDate: readActivityStartDate(process.env.ARCA_ACTIVITY_START_DATE, {
+      requiredValue: requireIssuerData,
+    }),
   };
 
   if (requireIssuerData) {
     issuer.legalName = required('LEGAL_NAME', issuer.legalName);
     issuer.taxAddress = required('TAX_ADDRESS', issuer.taxAddress);
-    issuer.activityStartDate = required('ACTIVITY_START_DATE', issuer.activityStartDate);
   }
 
   return Object.freeze({
     environment,
     isProduction: environment === 'production',
+    productionEmissionEnabled: enabledFlag(process.env.ARCA_PRODUCTION_ENABLED),
     wsaaWsdl: endpoints.wsaaWsdl,
     wsfeWsdl: endpoints.wsfeWsdl,
     service: 'wsfe',
     cuit: normalizeCuit(process.env.ARCA_CUIT),
     pointOfSale,
-    defaultVoucherType: integer('DEFAULT_CBTE_TIPO', process.env.ARCA_DEFAULT_CBTE_TIPO, {
-      defaultValue: 11,
-    }),
     defaultConcept: integer('DEFAULT_CONCEPTO', process.env.ARCA_DEFAULT_CONCEPTO, {
       defaultValue: 1,
     }),
@@ -158,4 +223,16 @@ export function getArcaConfig({ requirePointOfSale = false, requireIssuerData = 
   });
 }
 
+export function assertArcaEmissionAllowed(config = getArcaConfig()) {
+  if (!config.isProduction) return config;
+  if (!config.productionEmissionEnabled) {
+    throw new ArcaConfigError(
+      'FECAESolicitar está bloqueado en producción. ARCA_PRODUCTION_ENABLED debe ser true para emitir.',
+      'ARCA_PRODUCTION_EMISSION_DISABLED',
+    );
+  }
+  return config;
+}
+
 export const arcaEnvironments = ENVIRONMENTS;
+export const arcaAAuthorizationModes = A_AUTHORIZATION_MODES;

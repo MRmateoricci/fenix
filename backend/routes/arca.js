@@ -5,7 +5,7 @@ const router = Router();
 
 router.get('/invoice-options', async (req, res) => {
   try {
-    const options = await getInvoiceOptions(req.query.class || 'C');
+    const options = await getInvoiceOptions();
     res.json(options);
   } catch (error) {
     console.error('[GET /api/arca/invoice-options]', error.code || error.name, error.message);

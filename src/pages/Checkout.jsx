@@ -44,16 +44,20 @@ function validateInvoiceRecipient(d, invoiceOptions) {
   const docType = Number(d.invoiceDocType)
   const docNumber = String(d.invoiceDocNumber || '').replace(/\D/g, '')
   if (!d.invoiceName.trim()) e.invoiceName = 'Ingresá el nombre o razón social'
+  const vatCondition = invoiceOptions?.vatConditions
+    ?.find((option) => option.id === Number(d.invoiceVatConditionId))
   if (!invoiceOptions?.documents?.some((option) => option.id === docType)) {
     e.invoiceDocType = 'Elegí un tipo de documento válido'
+  } else if (vatCondition && !vatCondition.allowedDocumentTypeIds.includes(docType)) {
+    e.invoiceDocType = 'El documento no corresponde a la condición IVA elegida'
   } else if (docType === 80 && !/^\d{11}$/.test(docNumber)) {
     e.invoiceDocNumber = 'El CUIT debe tener 11 dígitos'
   } else if (docType === 96 && !/^\d{7,8}$/.test(docNumber)) {
     e.invoiceDocNumber = 'El DNI debe tener 7 u 8 dígitos'
-  } else if (![0, 99].includes(docType) && !docNumber) {
+  } else if (docType !== 99 && !docNumber) {
     e.invoiceDocNumber = 'Ingresá el número de documento'
   }
-  if (!invoiceOptions?.vatConditions?.some((option) => option.id === Number(d.invoiceVatConditionId))) {
+  if (!vatCondition) {
     e.invoiceVatConditionId = 'Elegí la condición frente al IVA'
   }
   return e
@@ -140,7 +144,7 @@ export default function Checkout() {
 
   useEffect(() => {
     const controller = new AbortController()
-    fetch(`${API_BASE}/api/arca/invoice-options?class=C`, { signal: controller.signal })
+    fetch(`${API_BASE}/api/arca/invoice-options`, { signal: controller.signal })
       .then(async (response) => {
         const data = await response.json().catch(() => ({}))
         if (!response.ok) throw new Error(data.error || 'No pudimos obtener las opciones fiscales de ARCA.')
@@ -1161,15 +1165,28 @@ function SinglePageCheckout({
 
 function InvoiceRecipientFields({ formData, errors, setField, options, loadingError }) {
   const docType = Number(formData.invoiceDocType)
+  const vatCondition = options?.vatConditions
+    ?.find((option) => option.id === Number(formData.invoiceVatConditionId))
+  const documents = vatCondition
+    ? options.documents.filter((option) => vatCondition.allowedDocumentTypeIds.includes(option.id))
+    : options?.documents || []
   const chooseDocument = (value) => {
     const nextType = Number(value)
     setField('invoiceDocType', value)
-    setField('invoiceDocNumber', [0, 99].includes(nextType) ? '0' : '')
+    setField('invoiceDocNumber', nextType === 99 ? '0' : '')
+  }
+  const chooseVatCondition = (value) => {
+    const selected = options?.vatConditions?.find((option) => option.id === Number(value))
+    setField('invoiceVatConditionId', value)
+    if (selected && !selected.allowedDocumentTypeIds.includes(docType)) {
+      setField('invoiceDocType', '')
+      setField('invoiceDocNumber', '')
+    }
   }
 
   return (
     <section className="fnx-checkout-section">
-      <h2>Datos para Factura C</h2>
+      <h2>Datos para facturación</h2>
       <p className="fnx-section-caption">
         Estos datos se confirman ahora y no modifican el importe del pedido.
       </p>
@@ -1192,7 +1209,7 @@ function InvoiceRecipientFields({ formData, errors, setField, options, loadingEr
                 onChange={chooseDocument}
                 hasError={!!errors.invoiceDocType}
                 placeholder="Elegí un documento"
-                options={options.documents}
+                options={documents}
               />
             </Field>
             <Field label="Número" error={errors.invoiceDocNumber}>
@@ -1202,14 +1219,14 @@ function InvoiceRecipientFields({ formData, errors, setField, options, loadingEr
                 value={formData.invoiceDocNumber}
                 onChange={(value) => setField('invoiceDocNumber', value)}
                 hasError={!!errors.invoiceDocNumber}
-                readOnly={[0, 99].includes(docType)}
+                readOnly={docType === 99}
               />
             </Field>
           </div>
           <Field label="Condición frente al IVA" error={errors.invoiceVatConditionId}>
             <DarkSelect
               value={formData.invoiceVatConditionId}
-              onChange={(value) => setField('invoiceVatConditionId', value)}
+              onChange={chooseVatCondition}
               hasError={!!errors.invoiceVatConditionId}
               placeholder="Elegí una condición"
               options={options.vatConditions}

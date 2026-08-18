@@ -1,13 +1,22 @@
 import soap from 'soap';
-import { getArcaConfig } from '../config/arca.js';
+import { assertArcaEmissionAllowed, getArcaConfig } from '../config/arca.js';
 import { getAccessTicket } from './arcaAuth.js';
 import { redactArcaSecrets } from './arcaSafeLog.js';
+import { createArcaWsfeTransport } from './arcaTls.js';
+import {
+  FACTURA_A,
+  FACTURA_A_SUJETA_RETENCION,
+  FACTURA_B,
+  FACTURA_C,
+} from './invoiceFiscal.js';
 
 const SOAP_TIMEOUT_MS = 30_000;
 
 let wsfeClientRequest = null;
 let wsfeClientWsdl = null;
+let wsfeTransport = null;
 let accessTicketProvider = getAccessTicket;
+let soapClientFactory = soap.createClientAsync;
 
 export class ArcaWsfeError extends Error {
   constructor(message, { code = 'ARCA_WSFE_ERROR', cause, transportError = false } = {}) {
@@ -50,10 +59,12 @@ function positiveInteger(name, value) {
 
 async function getWsfeClient(wsfeWsdl) {
   if (!wsfeClientRequest || wsfeClientWsdl !== wsfeWsdl) {
+    wsfeTransport?.httpsAgent.destroy();
+    wsfeTransport = createArcaWsfeTransport(wsfeWsdl, { timeout: SOAP_TIMEOUT_MS });
     wsfeClientWsdl = wsfeWsdl;
-    wsfeClientRequest = soap.createClientAsync(wsfeWsdl, {
-      wsdl_options: { timeout: SOAP_TIMEOUT_MS },
-    }).catch((cause) => {
+    wsfeClientRequest = soapClientFactory(wsfeWsdl, wsfeTransport.soapOptions).catch((cause) => {
+      wsfeTransport?.httpsAgent.destroy();
+      wsfeTransport = null;
       wsfeClientRequest = null;
       wsfeClientWsdl = null;
       throw new ArcaWsfeError(`No se pudo conectar al WSDL de WSFEv1: ${redactArcaSecrets(cause.message)}`, {
@@ -86,7 +97,11 @@ async function invoke(method, args, resultProperty, { authenticated = true } = {
         code: 'ARCA_WSFE_METHOD_UNAVAILABLE',
       });
     }
-    const [soapResponse] = await fn.call(client, request, { timeout: SOAP_TIMEOUT_MS });
+    const [soapResponse] = await fn.call(
+      client,
+      request,
+      wsfeTransport?.operationOptions || { timeout: SOAP_TIMEOUT_MS },
+    );
     const result = soapResponse?.[resultProperty];
     if (!result) {
       throw new ArcaWsfeError(`${method} devolvió una respuesta vacía o inesperada.`, {
@@ -146,10 +161,15 @@ export async function getTiposMoneda() {
   return parameterResponse(result, 'Moneda');
 }
 
+export async function getTiposIva() {
+  const result = await invoke('FEParamGetTiposIva', {}, 'FEParamGetTiposIvaResult');
+  return parameterResponse(result, 'IvaTipo');
+}
+
 export async function getCondicionesIvaReceptor(claseComprobante = 'C') {
   const invoiceClass = String(claseComprobante || '').trim().toUpperCase();
-  if (!['A', 'B', 'C', 'M'].includes(invoiceClass)) {
-    throw new ArcaWsfeError('La clase de comprobante debe ser A, B, C o M.', {
+  if (!['A', 'ALEY', 'B', 'C', '49'].includes(invoiceClass)) {
+    throw new ArcaWsfeError('La clase de comprobante debe ser A, ALEY, B, C o 49.', {
       code: 'ARCA_WSFE_INVALID_ARGUMENT',
     });
   }
@@ -194,12 +214,31 @@ export async function getVoucher(ptoVta, cbteTipo, cbteNro) {
 }
 
 export async function createCAE(request) {
+  // Defensa final: aunque un caller omita las validaciones del servicio de
+  // facturación, FECAESolicitar no puede salir a producción sin opt-in.
+  const config = assertArcaEmissionAllowed(getArcaConfig());
   const header = request?.FeCabReq;
   const details = asArray(request?.FeDetReq?.FECAEDetRequest);
   if (!header || details.length === 0) {
     throw new ArcaWsfeError('createCAE requiere FeCabReq y al menos un FECAEDetRequest.', {
       code: 'ARCA_WSFE_INVALID_ARGUMENT',
     });
+  }
+
+  const voucherType = Number(header.CbteTipo);
+  const allowedVoucherTypes = config.issuer.taxCategory === 'registered'
+    ? new Set([
+      config.issuer.aAuthorizationMode === 'subject_to_withholding'
+        ? FACTURA_A_SUJETA_RETENCION
+        : FACTURA_A,
+      FACTURA_B,
+    ])
+    : new Set([FACTURA_C]);
+  if (!allowedVoucherTypes.has(voucherType)) {
+    throw new ArcaWsfeError(
+      `El tipo de comprobante ${header.CbteTipo ?? '-'} no corresponde al emisor configurado.`,
+      { code: 'ARCA_WSFE_VOUCHER_NOT_ALLOWED_FOR_ISSUER' },
+    );
   }
 
   const result = await invoke('FECAESolicitar', { FeCAEReq: request }, 'FECAESolicitarResult');
@@ -219,8 +258,16 @@ export function isVoucherNotFound(response) {
     && response?.errors?.some((error) => String(error.code) === '602');
 }
 
-export function setWsfeDependenciesForTests({ client = null, wsdl = null, ticketProvider = getAccessTicket } = {}) {
+export function setWsfeDependenciesForTests({
+  client = null,
+  wsdl = null,
+  ticketProvider = getAccessTicket,
+  clientFactory = soap.createClientAsync,
+} = {}) {
+  wsfeTransport?.httpsAgent.destroy();
+  wsfeTransport = null;
   wsfeClientRequest = client ? Promise.resolve(client) : null;
   wsfeClientWsdl = client ? wsdl : null;
   accessTicketProvider = ticketProvider;
+  soapClientFactory = clientFactory;
 }

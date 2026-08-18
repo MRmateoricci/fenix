@@ -42,7 +42,7 @@ function FiscalForm({ initial, onSaved, busy }) {
   })
 
   useEffect(() => {
-    fetch(`${API_BASE}/api/arca/invoice-options?class=C`)
+    fetch(`${API_BASE}/api/arca/invoice-options`)
       .then(async (response) => {
         const data = await response.json().catch(() => ({}))
         if (!response.ok) throw new Error(data.error || 'No pudimos consultar los parámetros de ARCA.')
@@ -52,6 +52,11 @@ function FiscalForm({ initial, onSaved, busy }) {
   }, [])
 
   const change = (key, value) => setForm((current) => ({ ...current, [key]: value }))
+  const vatCondition = options?.vatConditions
+    ?.find((option) => option.id === Number(form.vatConditionId))
+  const documents = vatCondition
+    ? options.documents.filter((option) => vatCondition.allowedDocumentTypeIds.includes(option.id))
+    : options?.documents || []
   const submit = async (event) => {
     event.preventDefault()
     setError('')
@@ -74,15 +79,25 @@ function FiscalForm({ initial, onSaved, busy }) {
         <select value={form.docType} onChange={(event) => {
           const type = Number(event.target.value)
           change('docType', event.target.value)
-          change('docNumber', [0, 99].includes(type) ? '0' : '')
+          change('docNumber', type === 99 ? '0' : '')
         }} required>
           <option value="">Seleccionar</option>
-          {(options?.documents || []).map((option) => <option key={option.id} value={option.id}>{option.description}</option>)}
+          {documents.map((option) => <option key={option.id} value={option.id}>{option.description}</option>)}
         </select>
       </label>
-      <label>Número<input inputMode="numeric" value={form.docNumber} onChange={(event) => change('docNumber', event.target.value.replace(/\D/g, '').slice(0, 20))} required /></label>
+      <label>Número<input inputMode="numeric" value={form.docNumber} onChange={(event) => change('docNumber', event.target.value.replace(/\D/g, '').slice(0, 20))} readOnly={Number(form.docType) === 99} required /></label>
       <label>Condición frente al IVA
-        <select value={form.vatConditionId} onChange={(event) => change('vatConditionId', event.target.value)} required>
+        <select value={form.vatConditionId} onChange={(event) => {
+          const value = event.target.value
+          const selected = options?.vatConditions?.find((option) => option.id === Number(value))
+          setForm((current) => ({
+            ...current,
+            vatConditionId: value,
+            ...(!selected || selected.allowedDocumentTypeIds.includes(Number(current.docType))
+              ? {}
+              : { docType: '', docNumber: '' }),
+          }))
+        }} required>
           <option value="">Seleccionar</option>
           {(options?.vatConditions || []).map((option) => <option key={option.id} value={option.id}>{option.description}</option>)}
         </select>
@@ -179,7 +194,7 @@ function InvoicePanel({ order, invoiceData, setInvoiceData }) {
   return (
     <section style={{ marginTop: 28, padding: 22, border: '1px solid var(--color-border)', borderRadius: 12 }}>
       <h2 style={{ marginTop: 0 }}>Factura electrónica</h2>
-      {!canInvoice && <p>La Factura C estará disponible cuando el pago quede acreditado.</p>}
+      {!canInvoice && <p>La factura estará disponible cuando el pago quede acreditado.</p>}
       {canInvoice && mustConfirm && (
         <>
           <p>{invoice?.status === 'rejected'
@@ -203,7 +218,7 @@ function InvoicePanel({ order, invoiceData, setInvoiceData }) {
       )}
       {invoice?.status === 'authorized' && (
         <div>
-          <p>Factura disponible · N° {String(invoice.pointOfSale).padStart(5, '0')}-{String(invoice.voucherNumber).padStart(8, '0')}</p>
+          <p>{invoice.voucherName || 'Factura'} disponible · N° {String(invoice.pointOfSale).padStart(5, '0')}-{String(invoice.voucherNumber).padStart(8, '0')}</p>
           <p>CAE: {invoice.cae} · Vencimiento: {String(invoice.caeExpirationDate).slice(0, 10)}</p>
           <button type="button" className="fnx-pay-now" onClick={downloadPdf} disabled={busy}>{busy ? 'Preparando PDF...' : 'Descargar factura'}</button>
         </div>

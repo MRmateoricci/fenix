@@ -1,4 +1,6 @@
-export const IVA_MULTIPLIER = 1.21
+import { IVA_MULTIPLIER } from '../config/tax.js'
+
+export { IVA_MULTIPLIER }
 
 function numericOrNull(value) {
   if (value == null || value === '') return null

@@ -2,7 +2,11 @@ import { Router } from 'express';
 import { pool } from '../db/pool.js';
 import { requireAuth } from '../middleware/requireAuth.js';
 import { requireAdmin } from '../middleware/requireAdmin.js';
-import { buildReceiverData, InvoiceValidationError } from '../services/invoiceFiscal.js';
+import {
+  buildReceiverData,
+  InvoiceValidationError,
+  validateReceiverForVoucher,
+} from '../services/invoiceFiscal.js';
 import { getInvoiceOptions } from '../services/arcaParameters.js';
 import {
   getInvoiceForOrder,
@@ -107,13 +111,23 @@ router.put('/:orderId/invoice-recipient', requireAuth, async (req, res) => {
     }
 
     const receiver = buildReceiverData(req.body?.invoiceRecipient || req.body, order);
-    const options = await getInvoiceOptions('C');
+    const options = await getInvoiceOptions();
     if (!options.documents.some((item) => item.id === receiver.docType)) {
       throw new InvoiceValidationError('El tipo de documento no fue informado por ARCA.');
     }
-    if (!options.vatConditions.some((item) => item.id === receiver.vatConditionId)) {
-      throw new InvoiceValidationError('La condición IVA no es válida para Factura C.');
+    const vatCondition = options.vatConditions.find((item) => item.id === receiver.vatConditionId);
+    if (!vatCondition) {
+      throw new InvoiceValidationError('La condición IVA no es válida para el emisor configurado.');
     }
+    if (!vatCondition.allowedDocumentTypeIds.includes(receiver.docType)) {
+      throw new InvoiceValidationError('El documento no corresponde a la condición IVA elegida.');
+    }
+    const validatedReceiver = validateReceiverForVoucher({
+      receiver,
+      receiverVatCondition: vatCondition.category,
+      voucherType: vatCondition.voucherType,
+      totalAmount: order.total_amount,
+    });
 
     const concept = Number(req.body?.concept || 1);
     const serviceFrom = req.body?.serviceFrom || null;
@@ -137,10 +151,10 @@ router.put('/:orderId/invoice-recipient', requireAuth, async (req, res) => {
       [
         order.id,
         req.userId,
-        receiver.name,
-        receiver.docType,
-        receiver.docNumber,
-        receiver.vatConditionId,
+        validatedReceiver.name,
+        validatedReceiver.docType,
+        validatedReceiver.docNumber,
+        validatedReceiver.vatConditionId,
         concept,
         concept === 1 ? null : serviceFrom,
         concept === 1 ? null : serviceTo,
@@ -159,11 +173,12 @@ router.put('/:orderId/invoice-recipient', requireAuth, async (req, res) => {
          WHERE id = $1`,
         [
           existingInvoice.id,
-          receiver.docType,
-          receiver.docNumber,
-          receiver.vatConditionId,
+          validatedReceiver.docType,
+          validatedReceiver.docNumber,
+          validatedReceiver.vatConditionId,
           JSON.stringify({
-            ...receiver,
+            ...validatedReceiver,
+            vatConditionDescription: vatCondition.description,
             address: rows[0].billing_address || rows[0].address || '',
           }),
         ],
@@ -185,7 +200,7 @@ router.put('/:orderId/invoice-recipient', requireAuth, async (req, res) => {
       console.error(`[invoice-recipient] No se pudo actualizar auditoría order=${order.id} code=${error.code || error.name}`);
     }
     res.json({
-      invoiceRecipient: receiver,
+      invoiceRecipient: validatedReceiver,
       confirmedAt: rows[0].invoice_data_confirmed_at,
       invoiceAttempt: publicInvoiceAttempt(invoiceAttempt),
     });

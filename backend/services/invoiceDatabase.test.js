@@ -25,8 +25,9 @@ test('constraints e idempotencia concurrente con PostgreSQL', {
     process.env.ARCA_ENV = 'homologation';
     process.env.ARCA_CUIT = '20123456786';
     process.env.ARCA_PTO_VTA = '1';
-    process.env.ARCA_DEFAULT_CBTE_TIPO = '11';
     process.env.ARCA_DEFAULT_CONCEPTO = '1';
+    process.env.ARCA_TAX_CONDITION = 'Monotributo';
+    delete process.env.ARCA_A_AUTHORIZATION_MODE;
     process.env.ARCA_LEGAL_NAME = 'Fénix Test';
     process.env.ARCA_TAX_ADDRESS = 'City Bell';
     process.env.ARCA_ACTIVITY_START_DATE = '2020-01-01';

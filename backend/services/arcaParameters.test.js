@@ -2,8 +2,26 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   ArcaParameterError,
+  documentKind,
+  resolveVatRateType,
   validateConfiguredPointOfSale,
 } from './arcaParameters.js';
+
+test('reconoce la descripción productiva de documento 99 sin aceptar otros códigos', () => {
+  assert.equal(documentKind({ id: 99, description: 'Doc. (otro)' }), 'consumer_final');
+  assert.equal(documentKind({ id: 98, description: 'Doc. (otro)' }), null);
+});
+
+test('resuelve la alícuota por descripción vigente y no hardcodea su ID', () => {
+  assert.deepEqual(resolveVatRateType(21, [
+    { id: 4, description: '10,5%' },
+    { id: 900, description: 'IVA 21 %' },
+  ]), { id: 900, description: 'IVA 21 %' });
+  assert.throws(
+    () => resolveVatRateType(21, [{ id: 4, description: '10,5%' }]),
+    (error) => error.code === 'ARCA_VAT_RATE_INVALID',
+  );
+});
 
 function noPoints602() {
   return new ArcaParameterError('602: Sin Resultados: Metodo FEParamGetPtosVenta', {

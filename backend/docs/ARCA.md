@@ -1,141 +1,170 @@
-# ARCA WSFEv1 — Factura C
+# ARCA WSFEv1 — facturación según emisor y receptor
 
-La integración emite exclusivamente Factura C mediante WSFEv1. Todos los orígenes pasan por `attemptInvoiceForOrder()`, que audita el intento y delega en la operación fiscal idempotente `createInvoiceForOrder(orderId)`.
+La integración usa WSAA + WSFEv1 y conserva idempotencia, auditoría, PDF y QR. El tipo de comprobante ya no se configura con `ARCA_DEFAULT_CBTE_TIPO`: se determina por la condición IVA del emisor, la condición del receptor y la habilitación A real del emisor.
 
-## Seguridad y ambiente
+## Estado de seguridad
 
-- `ARCA_ENV=homologation` usa únicamente WSAA y WSFEv1 de homologación.
-- Si se configura `ARCA_ENV=production`, toda conexión queda bloqueada salvo que también exista `ARCA_PRODUCTION_ENABLED=true`.
-- La emisión automática tiene un segundo control independiente: `ARCA_AUTO_INVOICE_ENABLED=true`. En producción deben estar habilitados ambos controles.
-- La clave privada, el certificado, el CMS, Token y Sign nunca se registran.
-- En homologación, el TA se reutiliza entre procesos mediante
-  `.cache/arca/wsaa-homologation-wsfe.json`. El archivo está ignorado por Git,
-  se crea con permisos restrictivos y se invalida por vencimiento, CUIT, servicio
-  o cambio de certificado.
-- `backend/config/arca/`, `*.key`, `*.crt` y `*.csr` están ignorados por Git.
-- `.cache/arca/` también está ignorado: contiene credenciales temporales y no debe
-  copiarse, publicarse ni incluirse en backups compartidos.
-- Las rutas de certificado y clave se resuelven desde la raíz de `backend`, aunque Node se inicie desde otro directorio.
+- `ARCA_ENV=production` habilita autenticación y consultas de solo lectura.
+- `ARCA_PRODUCTION_ENABLED=false` bloquea `FECAESolicitar`, incluso si un caller intenta saltear el servicio principal.
+- `ARCA_AUTO_INVOICE_ENABLED=false` impide el intento automático posterior al pago.
+- Para un emisor Responsable Inscripto, `ARCA_A_AUTHORIZATION_MODE` es obligatorio aun para cargar la configuración. No existe fallback a `standard`.
+- `ARCA_ACTIVITY_START_DATE` admite el **PERÍODO DESDE** registral como `YYYY-MM`. Si en algún momento ARCA informa oficialmente el día, también admite `YYYY-MM-DD`; nunca se infiere ni se sustituye con fechas de inscripción o actualización.
 
-## Variables de entorno
+## Estrategia fiscal
 
-Agregar a `backend/.env`:
+| Emisor | Receptor | Comprobante |
+| --- | --- | --- |
+| Responsable Inscripto | Responsable Inscripto | A: tipo 1, o tipo 51 si está sujeto a retención |
+| Responsable Inscripto | Monotributista | A: tipo 1, o tipo 51 si está sujeto a retención |
+| Responsable Inscripto | Consumidor Final | B: tipo 6 |
+| Responsable Inscripto | Exento | B: tipo 6 |
+| Monotributo o Exento | receptor admitido por ARCA | C: tipo 11 |
 
-```dotenv
-ARCA_ENV=homologation
-ARCA_PRODUCTION_ENABLED=false
-ARCA_AUTO_INVOICE_ENABLED=false
-ARCA_CUIT=
-ARCA_PTO_VTA=
-ARCA_CERT_PATH=./config/arca/arca_certificate.crt
-ARCA_KEY_PATH=./config/arca/arca_private.key
-ARCA_DEFAULT_CBTE_TIPO=11
-ARCA_DEFAULT_CONCEPTO=1
-ARCA_LEGAL_NAME=
-ARCA_TAX_ADDRESS=
-ARCA_TAX_CONDITION=Monotributo
-ARCA_IIBB=
-ARCA_ACTIVITY_START_DATE=
-```
+Las condiciones del receptor no se aceptan por un código local fijo. El backend consulta `FEParamGetCondicionIvaReceptor` para la clase A, ALEY, B o C correspondiente, clasifica su descripción y conserva el ID vigente que informó ARCA. También valida tipos de comprobante, documentos, punto de venta y alícuotas contra los catálogos WSFE.
 
-`ARCA_OPENSSL_PATH` es opcional. En Windows se busca también el OpenSSL incluido con Git; si no se encuentra, configurar la ruta absoluta al ejecutable.
+Referencias oficiales:
 
-`ARCA_ACTIVITY_START_DATE` debe escribirse como `AAAA-MM-DD`. `ARCA_PTO_VTA` debe ser un punto de venta habilitado para factura electrónica y autorizado para el servicio `wsfe` en WSASS.
+- Matriz de comprobantes: https://www.arca.gob.ar/facturacion/regimen-general/comprobantes.asp
+- Manual WSFEv1: https://www.arca.gob.ar/fe/ayuda/documentos/wsfev1-RG-4291.pdf
+- Especificación del QR: https://www.arca.gob.ar/fe/qr/documentos/QRespecificaciones.pdf
 
-Los archivos esperados permanecen en:
+## Verificar `ARCA_A_AUTHORIZATION_MODE`
+
+No inferir el modo por antigüedad, CUIT, certificado ni punto de venta. Verificarlo con la clave fiscal del contribuyente:
+
+1. Ingresar al servicio de ARCA **Regímenes de Facturación y Registración (REAR/RECE/RFI)**.
+2. Abrir **Habilitación de Comprobantes** para el contribuyente.
+3. Comparar la autorización informada con esta tabla.
+
+| Habilitación real mostrada por ARCA | Valor de configuración |
+| --- | --- |
+| Comprobantes clase A sin leyenda especial | `standard` |
+| A con leyenda “PAGO EN CBU INFORMADA” | `cbu_informed` |
+| A con leyenda “OPERACIÓN SUJETA A RETENCIÓN” | `subject_to_withholding` |
+
+Si la pantalla no permite determinarlo con certeza, dejar la variable vacía. El sistema fallará con `ARCA_A_AUTHORIZATION_MODE_REQUIRED` antes de consultar parámetros, numerar o solicitar un CAE. No completar `standard` como supuesto temporal.
+
+## IVA y precios persistidos
+
+El ecommerce ya trataba `precio_iva` como precio final y, cuando solo existía `precio_venta`, aplicaba una regla global del 21 %. No existe hoy una columna de alícuota por producto ni una arquitectura de múltiples alícuotas. Esa regla histórica quedó centralizada en `backend/config/tax.js`.
+
+Para A, ALEY y B, el importe persistido del pedido se considera precio final con IVA incluido. El backend —nunca el frontend— calcula en centavos:
 
 ```text
-backend/config/arca/arca_certificate.crt
-backend/config/arca/arca_private.key
+neto = total / 1,21
+IVA = total - neto
+total = neto + IVA
 ```
 
-## Preparación
+El redondeo de la división es Round Half Even. El payload envía `ImpNeto`, `ImpIVA`, `ImpTotal` e `Iva.AlicIva[]`; el ID de la alícuota del 21 % se resuelve en tiempo de ejecución mediante `FEParamGetTiposIva`. El snapshot y la factura guardan tasa, base e importe de IVA.
 
-Desde `backend/`:
+Antes de habilitar producción hay que confirmar comercialmente que ningún producto, envío o concepto vendido por Fenix usa 10,5 %, 27 %, exención o no gravado. La implementación actual no debe usarse para un catálogo con alícuotas mixtas.
 
-```powershell
-npm install
-npm run db:migrate
+## Receptor y documento
+
+- Factura A/ALEY: Responsable Inscripto o Monotributista, identificado con CUIT.
+- Factura B a Exento: CUIT.
+- Factura B a Consumidor Final: CUIT, DNI o el documento “Consumidor Final” informado por ARCA.
+- Para Consumidor Final sin identificar, el documento 99 usa número 0. Al alcanzar el umbral vigente configurado en el backend ($10.000.000), se exige CUIT o DNI.
+
+La interfaz filtra documentos según la condición IVA seleccionada y el backend vuelve a validar la combinación y el total persistido.
+
+## Configuración propuesta para consultas productivas
+
+```env
+ARCA_ENV=production
+ARCA_PRODUCTION_ENABLED=false
+ARCA_AUTO_INVOICE_ENABLED=false
+
+ARCA_CUIT=33718368419
+ARCA_PTO_VTA=3
+ARCA_CERT_PATH=./config/arca/production/fenix_certificate.crt
+ARCA_KEY_PATH=./config/arca/production/fenix_private.key
+
+ARCA_DEFAULT_CONCEPTO=1
+ARCA_LEGAL_NAME=
+ARCA_TAX_ADDRESS=CANTILO 745, CITY BELL, BUENOS AIRES
+ARCA_TAX_CONDITION=Responsable Inscripto
+ARCA_A_AUTHORIZATION_MODE=
+ARCA_IIBB=
+ARCA_ACTIVITY_START_DATE=2024-01
+```
+
+Completar `ARCA_A_AUTHORIZATION_MODE` solo después de la verificación anterior. `ARCA_ACTIVITY_START_DATE=2024-01` refleja exactamente el **PERÍODO DESDE 01/2024** informado por Sistema Registral. El PDF muestra `Inicio de actividades: 01/2024` y la emisión no queda bloqueada por no contar con un día que ARCA no informa.
+
+No agregar `ARCA_DEFAULT_CBTE_TIPO`.
+
+## Consultas seguras de producción
+
+Ejecutar desde `backend`. Los cuatro scripts muestran:
+
+```text
+AMBIENTE: PRODUCCIÓN
+NO SE EMITIRÁN COMPROBANTES
+```
+
+Comandos:
+
+```bash
+# Diagnóstico HTTPS aislado, sin WSAA ni SOAP
+node scripts/testArcaTls.js
+
+# WSAA + FEDummy
 node scripts/testArca.js
-node scripts/testArcaPuntosVenta.js
-```
 
-Elegir un punto sin bloqueo ni fecha de baja, cargarlo en `ARCA_PTO_VTA` y luego ejecutar:
-
-```powershell
+# Catálogos: comprobantes, documentos, conceptos, monedas, IVA y condiciones receptor
 node scripts/testArcaParametros.js
+
+# Lista y estado de puntos de venta; permite comprobar el punto 3
+node scripts/testArcaPuntosVenta.js
+
+# Último autorizado de los tipos relevantes para el modo configurado
 node scripts/testArcaLastVoucher.js
 ```
 
-En homologación, `FEParamGetPtosVenta` puede responder exclusivamente `602` sin
-resultados aunque la combinación configurada sea utilizable. En ese caso la emisión
-registra una advertencia y valida `ARCA_PTO_VTA` + `ARCA_DEFAULT_CBTE_TIPO` mediante
-`FECompUltimoAutorizado`; un último número entero mayor o igual a cero habilita la
-combinación. Cualquier otro error detiene la emisión. Esta excepción no existe en
-producción, donde `FEParamGetPtosVenta` conserva validación estricta.
+También se puede consultar un tipo explícito:
 
-Los catálogos sanitizados se guardan en `arca_parameter_cache`. Si ARCA tiene una interrupción temporal se usa la última respuesta válida, marcada como `stale` para la UI.
-
-## Primera Factura C de homologación
-
-1. Crear un pedido desde checkout con receptor fiscal confirmado.
-2. Acreditar el pago en homologación o marcarlo pagado por el flujo administrativo correspondiente.
-3. Copiar el UUID del pedido.
-4. Ejecutar conscientemente:
-
-```powershell
-node scripts/testArcaInvoice.js --order-id <uuid> --confirm-homologation
+```bash
+node scripts/testArcaLastVoucher.js --voucher-type 1   # A standard/CBU
+node scripts/testArcaLastVoucher.js --voucher-type 51  # A sujeta a retención
+node scripts/testArcaLastVoucher.js --voucher-type 6   # B
 ```
 
-El argumento `--confirm-homologation` es obligatorio y el script rechaza producción. La operación consulta el último número autorizado, persiste el candidato y recién después llama a `FECAESolicitar`.
+Ninguno de esos scripts contiene una llamada a `FECAESolicitar`. `FECompConsultar` y `FECompUltimoAutorizado` siguen siendo consultas permitidas con la emisión bloqueada.
 
-También puede emitirse desde “Mi cuenta → Pedido → Obtener factura”. Repetir la operación sobre una factura autorizada devuelve la misma factura y no solicita otro CAE. En homologación ya se validó una Factura C autorizada para punto de venta 2, tipo 11 y número 1, incluida su persistencia, PDF, QR e idempotencia.
+### Compatibilidad TLS de WSFE producción
 
-## Emisión automática posterior al pago
+El 18/08/2026 se verificó localmente con Node `v24.11.1` y OpenSSL `3.5.4` que el WSDL productivo negocia TLS 1.2, suite `DHE-RSA-AES256-GCM-SHA384` y una clave efímera DH de 1024 bits. El nivel de seguridad predeterminado de OpenSSL la rechaza con `tls_process_ske_dhe:dh key too small`; el certificado del servidor, en cambio, valida correctamente.
 
-El webhook usa el ID recibido solo como disparador, vuelve a consultar el pago con las credenciales privadas de Mercado Pago y persiste el resultado verificado. Si `payment.status=approved`, el pedido coincide y `ARCA_AUTO_INVOICE_ENABLED=true`, intenta la factura inmediatamente en el mismo flujo. La espera está limitada a 20 segundos; si vence, el webhook responde `200` y la operación ya iniciada continúa con su propia persistencia segura. Una falla ARCA nunca revierte el pago, el pedido, el stock ni el envío, y tampoco cambia el `200` del webhook.
+`backend/services/arcaTls.js` crea un `https.Agent` privado solo cuando la URL coincide con `https://servicios1.afip.gov.ar/wsfev1/`. Conserva validación de certificados, exige TLS 1.2 o superior y limita la compatibilidad a suites ECDHE/DHE con AES-GCM usando `@SECLEVEL=1`. No usa `rejectUnauthorized: false`, no modifica `NODE_OPTIONS`, `openssl.cnf` ni el nivel global de Node.
 
-No existe worker de facturación, cron, scheduler ni polling periódico. `invoice_jobs` se conserva únicamente como auditoría deduplicada del último intento, cantidad, origen (`webhook`, `customer`, `admin`, `manual_script`) y error sanitizado; no es una cola. `invoices` es la fuente de verdad fiscal. Los locks y la unicidad de `invoices` preservan un solo comprobante y un solo CAE ante webhooks o procesos simultáneos.
+`node-soap` 1.10.0 usa Axios 1.19.0. La integración inyecta el mismo agente en la instancia Axios, en `wsdl_options` y en las opciones de cada operación, de modo que cubre tanto la descarga del WSDL como los POST SOAP. El WSDL observado respondió HTTP 200 sin redirect, no contiene imports relativos/externos y publica el mismo host para el endpoint SOAP.
 
-Si faltan datos fiscales, el intento queda documentado como `needs_data`, el pedido sigue pagado y no se llama a ARCA. Después de confirmarlos, el cliente o el administrador pueden usar el botón manual. Estados `pending`, `in_process`, `rejected`, `cancelled`, `refunded` y `charged_back` de Mercado Pago no disparan la emisión automática. Con `ARCA_AUTO_INVOICE_ENABLED=false`, el webhook no se conecta a ARCA y los botones manuales continúan disponibles.
+Railway usa Railpack y toma la versión de Node desde `engines.node` del `package.json` raíz. El rango actual (`^20.19.0 || >=22.12.0`) es compatible con estas opciones de `https.Agent`; no hace falta modificar OpenSSL del contenedor ni agregar configuración manual del sistema. Para registrar el runtime efectivo en Railway se puede ejecutar `node -p "JSON.stringify({node:process.version,openssl:process.versions.openssl})"` en una shell del servicio.
 
-Las devoluciones y contracargos posteriores a una factura autorizada requieren una Nota de Crédito. Ese flujo no está implementado y no se genera automáticamente en esta etapa.
+## Primera factura real — no ejecutar hasta autorización
 
-## Recuperación e idempotencia
+Cuando se confirme la habilitación real de Fenix, antes del primer comprobante deben estar completos:
 
-- Los requests se serializan con locks consultivos de PostgreSQL por pedido y por `(CUIT, punto de venta, tipo)`.
-- Un rechazo queda en `rejected` y requiere corregir los datos manualmente.
-- Un timeout o error de transporte queda en `uncertain` y dispara `FECompConsultar`.
-- Solo el código oficial `602` se interpreta como comprobante inexistente.
-- El request que sufrió el timeout nunca reenvía. Una llamada posterior solo reutiliza el número si ARCA vuelve a confirmar `602` y el último autorizado continúa siendo el anterior.
-- Si la numeración avanzó o la consulta es ambigua, la factura permanece incierta para diagnóstico.
-- No hay reintentos temporizados ni reenvíos ciegos. Una acción posterior del cliente, del administrador o del script vuelve a entrar por `createInvoiceForOrder()`, que consulta primero los estados inciertos.
-- El panel administrativo muestra pendientes, demoradas más de 24 horas, estado fiscal, último origen/error y permite “Facturar ahora” sólo para pagos de Mercado Pago realmente aprobados y sin factura autorizada.
+- `ARCA_A_AUTHORIZATION_MODE` verificado;
+- razón social e IIBB;
+- `ARCA_ACTIVITY_START_DATE=2024-01`, tomado del PERÍODO DESDE registral;
+- punto de venta 3 validado para WSFE/RECE;
+- alícuota del catálogo confirmada como única para todos los conceptos;
+- `ARCA_AUTO_INVOICE_ENABLED=false`;
+- `ARCA_PRODUCTION_ENABLED=true` habilitado solo para la prueba controlada.
 
-La recuperación manual de comprobantes `pending`, `processing`, `uncertain` o `error` se ejecuta, desde `backend/`, con:
+El comando exacto, desde `backend`, es:
 
-```powershell
-node scripts/retryPendingInvoices.js --confirm-homologation
+```bash
+node scripts/testArcaInvoice.js --order-id UUID --confirm-production
 ```
 
-El script es una herramienta de emergencia, exige confirmación de homologación, rechaza producción y no procesa facturas `rejected`. Nunca se ejecuta automáticamente.
+El script aborta si falta `--confirm-production`, si `ARCA_PRODUCTION_ENABLED` no es `true`, si falta el modo A o si falta un período de actividad válido. `YYYY-MM` es suficiente; no se consulta ni usa Fecha de inscripción o Fecha de actualización. La emisión automática debe permanecer apagada hasta validar el resultado de esa primera factura.
 
-## PDF y QR
+## Homologación y limitaciones
 
-El PDF se genera en memoria desde snapshots persistidos y se descarga por una ruta privada con `Cache-Control: private, no-store`. No se guardan PDFs públicos ni se vuelve a llamar a `FECAESolicitar`.
-
-El QR usa `https://www.arca.gob.ar/fe/qr/?p=<JSON_BASE64>` y contiene los campos oficiales de versión, fecha, CUIT, punto de venta, tipo/número, importe, moneda/cotización, documento receptor y CAE.
-
-## Despliegue seguro a producción
-
-La activación debe hacerse en dos etapas y nunca habilitando ambos controles al mismo tiempo:
-
-1. Desplegar el código con `ARCA_ENV=production`, `ARCA_PRODUCTION_ENABLED=false` y `ARCA_AUTO_INVOICE_ENABLED=false`.
-2. Configurar certificado, clave, relación WSASS, CUIT, datos legales y punto de venta productivos.
-3. Probar WSAA, `FEDummy`, parámetros, punto de venta y último autorizado. En producción no existe el fallback 602 de puntos de venta.
-4. Cambiar solamente `ARCA_PRODUCTION_ENABLED=true` y mantener la automatización apagada.
-5. Emitir una única factura real controlada mediante el flujo manual, y verificar CAE, persistencia, PDF y QR.
-6. Revisar idempotencia, recuperación, alertas y procedimiento operativo para rechazos y estados inciertos.
-7. Recién entonces cambiar `ARCA_AUTO_INVOICE_ENABLED=true`.
-
-Para detener inmediatamente nuevas emisiones automáticas, configurar `ARCA_AUTO_INVOICE_ENABLED=false` y reiniciar el backend. Esto no altera pagos, pedidos ni facturas ya autorizadas. Los scripts de emisión y recuperación incluidos rechazan producción. Esta tarea no activa ni prueba el ambiente productivo.
+- La estrategia Monotributo → Factura C tipo 11 se conserva para las pruebas existentes de homologación.
+- La operación recupera respuestas inciertas con `FECompConsultar` y protege la secuencia por CUIT, punto de venta y tipo.
+- Las Facturas A a Monotributistas incluyen la leyenda exigida por la Ley 27.618.
+- No está implementada la Factura de Crédito Electrónica MiPyME ni la selección de múltiples alícuotas dentro de un pedido. Si la relación comercial requiere FCE o el catálogo incorpora tasas mixtas, hay que ampliar la estrategia antes de emitir.

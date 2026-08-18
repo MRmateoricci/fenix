@@ -1,4 +1,11 @@
+import { getArcaConfig } from '../config/arca.js';
+import { DEFAULT_VAT_RATE } from '../config/tax.js';
 import { pool } from '../db/pool.js';
+import {
+  classifyReceiverVatCondition,
+  determineVoucherType,
+  invoiceClassForVoucherType,
+} from './invoiceFiscal.js';
 import {
   getCondicionesIvaReceptor,
   getLastAuthorized,
@@ -6,6 +13,7 @@ import {
   getTiposComprobante,
   getTiposConcepto,
   getTiposDocumento,
+  getTiposIva,
   getTiposMoneda,
 } from './arcaWsfe.js';
 
@@ -22,6 +30,14 @@ export class ArcaParameterError extends Error {
 
 function text(value) {
   return String(value ?? '').trim();
+}
+
+function normalizedText(value) {
+  return text(value)
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ');
 }
 
 function nullableText(value) {
@@ -93,19 +109,25 @@ async function writeCache(cacheKey, payload) {
   );
 }
 
+function scopedCacheKey(cacheKey) {
+  const config = getArcaConfig();
+  return `${config.environment}:${config.cuit}:${cacheKey}`;
+}
+
 async function cachedCatalog(
   cacheKey,
   loader,
   sanitizer,
   { force = false, allowStaleOnError = true } = {},
 ) {
-  const cached = await readCache(cacheKey);
+  const scopedKey = scopedCacheKey(cacheKey);
+  const cached = await readCache(scopedKey);
   const fresh = cached && Date.now() - cached.fetchedAt.getTime() < CACHE_TTL_MS;
   if (!force && fresh) return { items: cached.payload, stale: false, fetchedAt: cached.fetchedAt };
 
   try {
     const items = normalizeLoadedResponse(await loader(), sanitizer);
-    await writeCache(cacheKey, items);
+    await writeCache(scopedKey, items);
     return { items, stale: false, fetchedAt: new Date() };
   } catch (cause) {
     if (cached && allowStaleOnError) {
@@ -150,30 +172,126 @@ export const getCachedTiposMoneda = (options) => cachedCatalog(
   options,
 );
 
-export const getCachedCondicionesIva = (invoiceClass = 'C', options) => cachedCatalog(
-  `vat-conditions:${String(invoiceClass).toUpperCase()}`,
-  () => getCondicionesIvaReceptor(invoiceClass),
+export const getCachedTiposIva = (options) => cachedCatalog(
+  'vat-types',
+  getTiposIva,
   sanitizeCatalogItem,
   options,
 );
 
-export async function getInvoiceOptions(invoiceClass = 'C') {
+export const getCachedCondicionesIva = (invoiceClass = 'C', options) => {
   const normalizedClass = String(invoiceClass).trim().toUpperCase();
-  if (normalizedClass !== 'C') {
-    throw new ArcaParameterError('Por ahora solo está habilitada la Factura C.', {
+  if (!['A', 'ALEY', 'B', 'C'].includes(normalizedClass)) {
+    throw new ArcaParameterError('La clase de comprobante no está soportada.', {
       code: 'INVOICE_CLASS_NOT_SUPPORTED',
     });
   }
-  const [documents, vatConditions] = await Promise.all([
+  return cachedCatalog(
+    `vat-conditions:${normalizedClass}`,
+    () => getCondicionesIvaReceptor(normalizedClass),
+    sanitizeCatalogItem,
+    options,
+  );
+};
+
+function issuerInvoiceClasses(config) {
+  if (config.issuer.taxCategory !== 'registered') return ['C'];
+  return [config.issuer.aAuthorizationMode === 'subject_to_withholding' ? 'ALEY' : 'A', 'B'];
+}
+
+export function documentKind(document) {
+  const description = normalizedText(document.description);
+  if (document.id === 80 && /cuit/.test(description)) return 'cuit';
+  if (document.id === 96 && /(dni|documento nacional de identidad)/.test(description)) return 'dni';
+  if (document.id === 99 && /(consumidor final|sin identificar|doc\.? \(otro\))/.test(description)) {
+    return 'consumer_final';
+  }
+  return null;
+}
+
+function allowedDocumentKinds(vatCategory) {
+  if (vatCategory === 'consumer_final') return new Set(['cuit', 'dni', 'consumer_final']);
+  return new Set(['cuit']);
+}
+
+export async function getInvoiceOptions(config = getArcaConfig()) {
+  const invoiceClasses = issuerInvoiceClasses(config);
+  const [documentsResponse, ...conditionResponses] = await Promise.all([
     getCachedTiposDocumento(),
-    getCachedCondicionesIva(normalizedClass),
+    ...invoiceClasses.map((invoiceClass) => getCachedCondicionesIva(invoiceClass)),
   ]);
+
+  const documents = documentsResponse.items
+    .map((document) => ({ ...document, kind: documentKind(document) }))
+    .filter((document) => document.kind);
+  const vatConditions = new Map();
+
+  invoiceClasses.forEach((invoiceClass, index) => {
+    for (const condition of conditionResponses[index].items) {
+      const category = classifyReceiverVatCondition(condition.description);
+      if (!category) continue;
+      const voucherType = determineVoucherType({
+        issuerVatCondition: config.issuer.taxCategory,
+        receiverVatCondition: category,
+        aAuthorizationMode: config.issuer.aAuthorizationMode,
+      });
+      if (invoiceClassForVoucherType(voucherType) !== invoiceClass) continue;
+      const allowedKinds = allowedDocumentKinds(category);
+      vatConditions.set(condition.id, {
+        ...condition,
+        category,
+        invoiceClass,
+        voucherType,
+        allowedDocumentTypeIds: documents
+          .filter((document) => allowedKinds.has(document.kind))
+          .map((document) => document.id),
+      });
+    }
+  });
+
+  if (!vatConditions.size) {
+    throw new ArcaParameterError(
+      'ARCA no informó condiciones IVA compatibles con el emisor configurado.',
+      { code: 'ARCA_VAT_CONDITION_EMPTY' },
+    );
+  }
+
   return {
-    invoiceClass: normalizedClass,
-    documents: documents.items,
-    vatConditions: vatConditions.items,
-    stale: documents.stale || vatConditions.stale,
+    issuerVatCondition: config.issuer.taxCondition,
+    invoiceClasses,
+    documents,
+    vatConditions: [...vatConditions.values()],
+    stale: documentsResponse.stale || conditionResponses.some((response) => response.stale),
   };
+}
+
+export async function resolveReceiverInvoiceProfile(vatConditionId, config = getArcaConfig()) {
+  const options = await getInvoiceOptions(config);
+  const condition = options.vatConditions.find((item) => item.id === Number(vatConditionId));
+  if (!condition) {
+    throw new ArcaParameterError(
+      `La condición IVA ${vatConditionId} no es válida para el emisor configurado.`,
+      { code: 'ARCA_VAT_CONDITION_INVALID' },
+    );
+  }
+  return { condition, options };
+}
+
+function vatRateFromDescription(description) {
+  const match = normalizedText(description).replace(',', '.').match(/(\d+(?:\.\d+)?)\s*%/);
+  return match ? Number(match[1]) : null;
+}
+
+export function resolveVatRateType(vatRate, vatTypes) {
+  const expected = Number(vatRate);
+  const found = vatTypes.find((item) => vatRateFromDescription(item.description) === expected);
+  if (!found) {
+    throw new ArcaParameterError(
+      `ARCA no informó una alícuota vigente de ${expected}%.`,
+      { code: 'ARCA_VAT_RATE_INVALID' },
+    );
+  }
+  return found;
 }
 
 function isOnlyNoResults602(error) {
@@ -270,8 +388,16 @@ export async function validateConfiguredPointOfSale(
   return { ...configuredPoint, validationSource: 'FEParamGetPtosVenta' };
 }
 
-export async function validateInvoiceParameters({ pointOfSale, voucherType, receiver, environment }) {
-  const [configuredPoint, vouchers, documents, conditions] = await Promise.all([
+export async function validateInvoiceParameters({
+  pointOfSale,
+  voucherType,
+  invoiceClass = invoiceClassForVoucherType(voucherType),
+  receiver,
+  environment,
+  vatRate = DEFAULT_VAT_RATE,
+}) {
+  const taxed = invoiceClass !== 'C';
+  const [configuredPoint, vouchers, documents, conditions, vatTypes] = await Promise.all([
     validateConfiguredPointOfSale({
       pointOfSale,
       voucherType,
@@ -279,7 +405,8 @@ export async function validateInvoiceParameters({ pointOfSale, voucherType, rece
     }),
     getCachedTiposComprobante(),
     getCachedTiposDocumento(),
-    getCachedCondicionesIva('C'),
+    getCachedCondicionesIva(invoiceClass),
+    taxed ? getCachedTiposIva() : Promise.resolve({ items: [] }),
   ]);
   if (!vouchers.items.some((item) => item.id === Number(voucherType))) {
     throw new ArcaParameterError(`ARCA no informó el tipo de comprobante ${voucherType}.`, {
@@ -293,11 +420,14 @@ export async function validateInvoiceParameters({ pointOfSale, voucherType, rece
   }
   if (!conditions.items.some((item) => item.id === Number(receiver.vatConditionId))) {
     throw new ArcaParameterError(
-      `La condición IVA ${receiver.vatConditionId} no es válida para Factura C.`,
+      `La condición IVA ${receiver.vatConditionId} no es válida para la clase ${invoiceClass}.`,
       { code: 'ARCA_VAT_CONDITION_INVALID' },
     );
   }
-  return { pointOfSale: configuredPoint };
+  return {
+    pointOfSale: configuredPoint,
+    vatType: taxed ? resolveVatRateType(vatRate, vatTypes.items) : null,
+  };
 }
 
 export { CACHE_TTL_MS };

@@ -11,6 +11,7 @@
     "db:seed": "node db/seedStorefront.js",
     "db:seed:demo": "node db/seedDemoProducts.js",
     "arca:test": "node scripts/testArca.js",
+    "arca:tls": "node scripts/testArcaTls.js",
     "arca:points": "node scripts/testArcaPuntosVenta.js",
     "arca:parameters": "node scripts/testArcaParametros.js",
     "arca:last": "node scripts/testArcaLastVoucher.js",

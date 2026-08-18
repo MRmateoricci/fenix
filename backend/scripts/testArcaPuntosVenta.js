@@ -1,10 +1,11 @@
 import { getArcaConfig } from '../config/arca.js';
 import { getPuntosVenta } from '../services/arcaWsfe.js';
 import { safeArcaErrorMessage } from '../services/arcaSafeLog.js';
+import { printSafeQueryBanner } from './arcaScriptSafety.js';
 
 async function main() {
   const config = getArcaConfig();
-  console.log(`Ambiente: ${config.environment}`);
+  printSafeQueryBanner(config);
   console.log('Consultando puntos de venta...');
   const response = await getPuntosVenta();
   if (response.errors.length) throw new Error(JSON.stringify(response.errors));

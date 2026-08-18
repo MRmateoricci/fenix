@@ -40,6 +40,8 @@ test('reutiliza el TA persistente válido y elimina uno vencido', async () => {
     ARCA_CERT_PATH: process.env.ARCA_CERT_PATH,
     ARCA_KEY_PATH: process.env.ARCA_KEY_PATH,
     ARCA_CACHE_DIR: process.env.ARCA_CACHE_DIR,
+    ARCA_TAX_CONDITION: process.env.ARCA_TAX_CONDITION,
+    ARCA_A_AUTHORIZATION_MODE: process.env.ARCA_A_AUTHORIZATION_MODE,
   };
 
   try {
@@ -50,6 +52,8 @@ test('reutiliza el TA persistente válido y elimina uno vencido', async () => {
     process.env.ARCA_CERT_PATH = certificatePath;
     process.env.ARCA_KEY_PATH = missingKeyPath;
     process.env.ARCA_CACHE_DIR = cacheDirectory;
+    process.env.ARCA_TAX_CONDITION = 'Monotributo';
+    delete process.env.ARCA_A_AUTHORIZATION_MODE;
 
     const cachePath = getPersistentAccessTicketCachePath();
     const certificateFingerprint = createHash('sha256').update(certificate).digest('hex');

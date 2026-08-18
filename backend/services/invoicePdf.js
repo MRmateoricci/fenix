@@ -1,7 +1,9 @@
 import PDFDocument from 'pdfkit';
 import QRCode from 'qrcode';
+import { invoiceClassForVoucherType, voucherPresentation } from './invoiceFiscal.js';
 
 const ARCA_QR_BASE_URL = 'https://www.arca.gob.ar/fe/qr/?p=';
+const MONOTRIBUTO_CREDIT_LEGEND = 'El crédito fiscal discriminado en el presente comprobante, solo podrá ser computado a efectos del Régimen de Sostenimiento e Inclusión Fiscal para Pequeños Contribuyentes de la Ley Nº 27.618.';
 
 function isoDate(value) {
   if (!value) return '';
@@ -13,7 +15,7 @@ function displayDate(value) {
   const normalized = isoDate(value);
   if (!normalized) return '';
   const [year, month, day] = normalized.split('-');
-  return `${day}/${month}/${year}`;
+  return day ? `${day}/${month}/${year}` : `${month}/${year}`;
 }
 
 function money(value) {
@@ -54,9 +56,14 @@ function formattedVoucherNumber(invoice) {
   return `${String(invoice.pto_vta).padStart(5, '0')}-${String(invoice.cbte_numero).padStart(8, '0')}`;
 }
 
-function invoiceTypeName(type) {
-  if (Number(type) === 11) return 'FACTURA C';
-  return `COMPROBANTE ${type}`;
+function presentationFor(invoice) {
+  return voucherPresentation(invoice.cbte_tipo, invoice.issuer_snapshot?.aAuthorizationMode);
+}
+
+function shouldShowMonotributoLegend(invoice) {
+  const receiverCategory = invoice.receiver_snapshot?.vatCategory;
+  return ['A', 'ALEY'].includes(invoiceClassForVoucherType(invoice.cbte_tipo))
+    && receiverCategory === 'monotributo';
 }
 
 export async function generateInvoicePdf(invoice) {
@@ -68,6 +75,10 @@ export async function generateInvoicePdf(invoice) {
   const receiver = invoice.receiver_snapshot || {};
   const itemsSnapshot = invoice.items_snapshot || {};
   const items = Array.isArray(itemsSnapshot.items) ? itemsSnapshot.items : [];
+  const presentation = presentationFor(invoice);
+  const vatBreakdown = Array.isArray(invoice.iva_breakdown)
+    ? invoice.iva_breakdown
+    : (Array.isArray(itemsSnapshot.vatBreakdown) ? itemsSnapshot.vatBreakdown : []);
   const qrImage = await QRCode.toBuffer(buildArcaQrUrl(invoice), {
     type: 'png',
     width: 240,
@@ -76,7 +87,7 @@ export async function generateInvoicePdf(invoice) {
   });
 
   return new Promise((resolve, reject) => {
-    const document = new PDFDocument({ size: 'A4', margin: 42, info: { Title: invoiceTypeName(invoice.cbte_tipo) } });
+    const document = new PDFDocument({ size: 'A4', margin: 42, info: { Title: presentation.name } });
     const chunks = [];
     document.on('data', (chunk) => chunks.push(chunk));
     document.on('error', reject);
@@ -91,19 +102,22 @@ export async function generateInvoicePdf(invoice) {
       .text(`Inicio de actividades: ${displayDate(issuer.activityStartDate)}`);
 
     document.rect(295, 38, 258, 115).stroke('#555555');
-    document.font('Helvetica-Bold').fontSize(28).text('C', 305, 45, { width: 45, align: 'center' });
-    document.fontSize(15).text(invoiceTypeName(invoice.cbte_tipo), 355, 48, { width: 185 });
+    document.font('Helvetica-Bold').fontSize(28).text(presentation.letter, 305, 45, { width: 45, align: 'center' });
+    document.fontSize(15).text(presentation.name, 355, 48, { width: 185 });
     document.font('Helvetica').fontSize(10)
-      .text(`N° ${formattedVoucherNumber(invoice)}`, 355, 75)
+      .text(`N.º ${formattedVoucherNumber(invoice)}`, 355, 75)
       .text(`Fecha: ${displayDate(invoice.fecha_comprobante)}`, 355, 93)
       .text(`Código comprobante: ${invoice.cbte_tipo}`, 355, 111);
+    if (presentation.legend) {
+      document.font('Helvetica-Bold').fontSize(7).text(presentation.legend, 305, 132, { width: 238, align: 'center' });
+    }
 
     document.moveTo(42, 170).lineTo(553, 170).stroke('#999999');
     document.font('Helvetica-Bold').fontSize(11).text('Receptor', 42, 180);
     document.font('Helvetica').fontSize(9)
       .text(`Nombre / Razón social: ${receiver.name || ''}`)
       .text(`Documento (${invoice.receiver_doc_type}): ${invoice.receiver_doc_number}`)
-      .text(`Condición IVA: ${receiver.vatConditionId || invoice.receiver_vat_condition_id}`)
+      .text(`Condición IVA: ${receiver.vatConditionDescription || receiver.vatConditionId || invoice.receiver_vat_condition_id}`)
       .text(`Domicilio: ${receiver.address || ''}`);
 
     let y = document.y + 16;
@@ -141,12 +155,36 @@ export async function generateInvoicePdf(invoice) {
       document.text(money(itemsSnapshot.shippingCost), 470, y, { width: 83, align: 'right' });
       y += 16;
     }
-    document.moveTo(315, y).lineTo(553, y).stroke('#555555');
-    document.font('Helvetica-Bold').fontSize(12)
-      .text('TOTAL', 320, y + 8, { width: 140 })
-      .text(money(invoice.imp_total), 470, y + 8, { width: 83, align: 'right' });
 
-    let footerY = Math.max(y + 65, 620);
+    document.moveTo(315, y).lineTo(553, y).stroke('#555555');
+    y += 8;
+    if (Number(invoice.imp_iva) > 0) {
+      document.font('Helvetica').fontSize(9)
+        .text('Neto gravado', 320, y, { width: 140 })
+        .text(money(invoice.imp_neto), 470, y, { width: 83, align: 'right' });
+      y += 14;
+      for (const vat of vatBreakdown) {
+        document.text(`IVA ${Number(vat.rate)}%`, 320, y, { width: 140 })
+          .text(money(vat.amount), 470, y, { width: 83, align: 'right' });
+        y += 14;
+      }
+      if (!vatBreakdown.length) {
+        document.text('IVA', 320, y, { width: 140 })
+          .text(money(invoice.imp_iva), 470, y, { width: 83, align: 'right' });
+        y += 14;
+      }
+    }
+    document.font('Helvetica-Bold').fontSize(12)
+      .text('TOTAL', 320, y + 2, { width: 140 })
+      .text(money(invoice.imp_total), 470, y + 2, { width: 83, align: 'right' });
+    y += 26;
+
+    if (shouldShowMonotributoLegend(invoice)) {
+      document.font('Helvetica').fontSize(7).text(MONOTRIBUTO_CREDIT_LEGEND, 42, y, { width: 511 });
+      y = document.y + 8;
+    }
+
+    let footerY = Math.max(y + 25, 620);
     if (footerY > 680) {
       document.addPage();
       footerY = 80;
@@ -162,4 +200,4 @@ export async function generateInvoicePdf(invoice) {
   });
 }
 
-export { ARCA_QR_BASE_URL };
+export { ARCA_QR_BASE_URL, MONOTRIBUTO_CREDIT_LEGEND };
