@@ -347,8 +347,8 @@ export default function ProductDetail() {
           {/* Two-column layout */}
           <div className="fnx-pd-grid">
 
-            {/* ── Left: image + description ─────────────────────────────────── */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
+            {/* ── Image ──────────────────────────────────────────────────────── */}
+            <div className="fnx-pd-image">
               <div style={{
                 borderRadius: 12,
                 overflow: 'hidden',
@@ -367,31 +367,9 @@ export default function ProductDetail() {
                   />
                 )}
               </div>
-
-              {/* Description below image */}
-              <div>
-                <p style={{
-                  fontSize: 11, letterSpacing: '.14em', textTransform: 'uppercase',
-                  fontWeight: 600, color: 'var(--color-text-muted)',
-                  fontFamily: 'var(--font-sans)', marginBottom: 12,
-                }}>
-                  Descripción
-                </p>
-                <p style={{
-                  fontSize: 15, lineHeight: 1.75,
-                  color: 'var(--color-text-muted)', margin: 0,
-                }}>
-                  {displayDescription}
-                </p>
-                {variantSpecs.length > 0 && (
-                  <dl style={{ display: 'grid', gridTemplateColumns: 'repeat(2,minmax(0,1fr))', gap: '9px 16px', margin: '18px 0 0' }}>
-                    {variantSpecs.map(([label, value]) => <div key={label}><dt style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '.08em', color: 'var(--color-text-muted)' }}>{label}</dt><dd style={{ margin: '3px 0 0', fontSize: 13, color: 'var(--color-text)' }}>{value}</dd></div>)}
-                  </dl>
-                )}
-              </div>
             </div>
 
-            {/* ── Right: product info ───────────────────────────────────────── */}
+            {/* ── Product info ──────────────────────────────────────────────── */}
             <div className="fnx-pd-info" style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
 
               {/* Badges */}
@@ -796,6 +774,28 @@ export default function ProductDetail() {
                 ))}
               </div>
 
+            </div>
+
+            {/* ── Description ────────────────────────────────────────────────── */}
+            <div className="fnx-pd-desc">
+              <p style={{
+                fontSize: 11, letterSpacing: '.14em', textTransform: 'uppercase',
+                fontWeight: 600, color: 'var(--color-text-muted)',
+                fontFamily: 'var(--font-sans)', marginBottom: 12,
+              }}>
+                Descripción
+              </p>
+              <p style={{
+                fontSize: 15, lineHeight: 1.75,
+                color: 'var(--color-text-muted)', margin: 0,
+              }}>
+                {displayDescription}
+              </p>
+              {variantSpecs.length > 0 && (
+                <dl style={{ display: 'grid', gridTemplateColumns: 'repeat(2,minmax(0,1fr))', gap: '9px 16px', margin: '18px 0 0' }}>
+                  {variantSpecs.map(([label, value]) => <div key={label}><dt style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '.08em', color: 'var(--color-text-muted)' }}>{label}</dt><dd style={{ margin: '3px 0 0', fontSize: 13, color: 'var(--color-text)' }}>{value}</dd></div>)}
+                </dl>
+              )}
             </div>
           </div>
         </div>
