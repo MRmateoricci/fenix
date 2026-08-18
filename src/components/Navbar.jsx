@@ -5,6 +5,7 @@ import { useAdmin } from '../context/AdminContext'
 import { useAuth } from '../context/AuthContext'
 import CartDrawer from './CartDrawer'
 import FenixLogo from '../assets/FenixLogo'
+import { NAVBAR_HEIGHT, ANNOUNCEMENT_BAR_HEIGHT, PAGE_CONTENT_OFFSET } from '../config/layout'
 
 const fmtPrice = (n) =>
   new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(n)
@@ -38,6 +39,7 @@ export default function Navbar() {
   const categoryRef = useRef(null)
   const categoryPanelRef = useRef(null)
   const categoryCloseTimer = useRef(null)
+  const navRef = useRef(null)
   const { pathname } = useLocation()
   const navigate = useNavigate()
   const isHome = pathname === '/'
@@ -68,6 +70,33 @@ export default function Navbar() {
   }, [categoryOpen])
 
   useEffect(() => () => clearTimeout(categoryCloseTimer.current), [])
+
+  // La announcement bar (no sticky) vive arriba del navbar en el DOM. El navbar
+  // sigue siendo `fixed` — convertirlo a `sticky` es un refactor propio, no un
+  // efecto colateral de esto (ver docs/ESTADO.md) — así que simulamos el
+  // "empuje" con un transform: arranca corrido `ANNOUNCEMENT_BAR_HEIGHT` hacia
+  // abajo y se desliza hasta pegarse a top al scrollear esa misma distancia.
+  // Se anima con transform (compositor) en vez de animar `top` (layout) en
+  // cada frame de scroll. Igual que categoryPanelRef, se actualiza por ref en
+  // vez de por estado para no re-renderizar el navbar entero en cada scroll.
+  useEffect(() => {
+    let raf = null
+    function applyScrollOffset() {
+      const shift = Math.min(window.scrollY, ANNOUNCEMENT_BAR_HEIGHT)
+      if (navRef.current) navRef.current.style.transform = `translateY(-${shift}px)`
+      if (categoryPanelRef.current) categoryPanelRef.current.style.top = `${PAGE_CONTENT_OFFSET - shift}px`
+      raf = null
+    }
+    function onScroll() {
+      if (raf == null) raf = requestAnimationFrame(applyScrollOffset)
+    }
+    applyScrollOffset()
+    window.addEventListener('scroll', onScroll, { passive: true })
+    return () => {
+      window.removeEventListener('scroll', onScroll)
+      if (raf != null) cancelAnimationFrame(raf)
+    }
+  }, [])
 
   function goToCategory(to) {
     clearTimeout(categoryCloseTimer.current)
@@ -163,9 +192,9 @@ export default function Navbar() {
   return (
     <>
       {/* ── Navbar bar ──────────────────────────────────────────────────────── */}
-      <nav style={{
-        position: 'fixed', top: 0, left: 0, right: 0, zIndex: 50,
-        height: 64,
+      <nav ref={navRef} style={{
+        position: 'fixed', top: ANNOUNCEMENT_BAR_HEIGHT, left: 0, right: 0, zIndex: 50,
+        height: NAVBAR_HEIGHT,
         transition: 'background .3s ease, border-color .3s ease',
         background: opaque ? 'rgba(247,244,239,0.96)' : 'transparent',
         backdropFilter: opaque ? 'blur(12px)' : 'none',
@@ -414,7 +443,9 @@ export default function Navbar() {
           onMouseEnter={() => clearTimeout(categoryCloseTimer.current)}
           onMouseLeave={scheduleCategoryClose}
           style={{
-            position: 'fixed', top: 64, left: 0, right: 0, zIndex: 49,
+            position: 'fixed',
+            top: PAGE_CONTENT_OFFSET - Math.min(typeof window !== 'undefined' ? window.scrollY : 0, ANNOUNCEMENT_BAR_HEIGHT),
+            left: 0, right: 0, zIndex: 49,
             background: 'rgba(247,244,239,0.98)',
             backdropFilter: 'blur(12px)',
             WebkitBackdropFilter: 'blur(12px)',

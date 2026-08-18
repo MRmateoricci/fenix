@@ -1574,3 +1574,107 @@
   .fnx-pd-info { position: static; top: auto; }
   .fnx-pd-title { font-size: clamp(26px, 8vw, 36px); }
 }
+
+/* Barra de anuncios rotativa — arriba del navbar, no sticky, no fixed */
+.fnx-announcement-bar {
+  position: relative;
+  z-index: 40;
+  height: 36px;
+  background: var(--color-text);
+  color: var(--color-bg);
+  display: flex;
+  align-items: stretch;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.fnx-announcement-bar__control {
+  flex: 0 0 auto;
+  width: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: inherit;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.fnx-announcement-bar__viewport {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 0 8px;
+}
+
+.fnx-announcement-bar__arrow {
+  flex: 0 0 auto;
+  color: inherit;
+  opacity: 0.7;
+  font-size: 16px;
+  line-height: 1;
+  padding: 4px 8px;
+}
+.fnx-announcement-bar__arrow:hover { opacity: 1; }
+
+.fnx-announcement-bar__slides {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+}
+
+.fnx-announcement-bar__slide {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 400ms ease, visibility 0s linear 400ms;
+}
+
+.fnx-announcement-bar__slide--active {
+  opacity: 1;
+  visibility: visible;
+  transition: opacity 400ms ease, visibility 0s linear 0s;
+}
+
+.fnx-announcement-bar__link {
+  color: inherit;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.fnx-announcement-bar__link:hover { text-decoration: underline; }
+
+.fnx-announcement-bar__dot { opacity: 0.6; }
+
+.fnx-announcement-bar__control:focus-visible,
+.fnx-announcement-bar__arrow:focus-visible,
+.fnx-announcement-bar__link:focus-visible {
+  outline: 2px solid var(--color-bg);
+  outline-offset: -2px;
+}
+
+.fnx-announcement-bar__text--mobile { display: none; }
+
+@media (max-width: 768px) {
+  .fnx-announcement-bar { height: 34px; font-size: 11px; }
+  .fnx-announcement-bar__arrow { display: none; }
+  .fnx-announcement-bar__text--desktop { display: none; }
+  .fnx-announcement-bar__text--mobile { display: inline; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fnx-announcement-bar__slide,
+  .fnx-announcement-bar__slide--active {
+    transition: none;
+  }
+}

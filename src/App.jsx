@@ -7,6 +7,8 @@ import { FavoritesProvider } from './context/FavoritesContext'
 import Navbar from './components/Navbar'
 import Footer from './components/Footer'
 import WhatsAppFAB from './components/WhatsAppFAB'
+import AnnouncementBar from './components/AnnouncementBar'
+import { PAGE_CONTENT_OFFSET } from './config/layout'
 import Home from './pages/Home'
 import Products from './pages/Products'
 import ProductosAPedido from './pages/ProductosAPedido'
@@ -69,8 +71,9 @@ function Layout() {
     <>
       <ScrollToTop />
       <MpReturnGuard />
+      <AnnouncementBar />
       <Navbar />
-      <main style={pathname !== '/' ? { paddingTop: 68 } : undefined}>
+      <main style={pathname !== '/' ? { paddingTop: PAGE_CONTENT_OFFSET } : undefined}>
         <Outlet />
       </main>
       {pathname !== '/login' && <Footer />}

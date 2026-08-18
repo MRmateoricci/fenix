@@ -138,16 +138,21 @@ Mercado Pago Checkout Pro (`services/mercadopago.js`, `mercadopagoPayments.js`).
 Webhook en `/api/webhooks` con validación de firma (`MP_WEBHOOK_SECRET`), recibiendo
 el body raw antes del `express.json()`.
 
-**Cuotas:** `ProductCard.jsx:30` define `const INSTALLMENTS = 6` y muestra
-"Hasta 6 cuotas sin interés de $X".
+**Cuotas — fuente de verdad (2026-08-18):** `backend/config/payments.js` define
+`CUOTAS = [{cantidad:3, minimo:0}, {cantidad:6, minimo:500000}]` y
+`getApplicableInstallments(subtotal)`, servido en `GET /api/payments/config`.
+Lo consume hoy la `AnnouncementBar` (ver más abajo).
 
 **Pendiente / a revisar:**
-1. El valor está hardcodeado en el componente, no es fuente única de verdad. Debería
-   vivir en el backend junto al resto de la configuración de tienda.
+1. `ProductCard.jsx:30` **sigue** con `const INSTALLMENTS = 6` hardcodeado y
+   dividiendo el precio por 6 sin mirar el mínimo — muestra "Hasta 6 cuotas sin
+   interés de $X" en productos de cualquier monto (ej. $974 → "de $162"). Es el
+   mismo bug que motivó crear `payments.js`, pero **la migración de las tarjetas
+   queda pendiente como tarea aparte** (no se tocó en este lote a pedido explícito).
 2. `ProductDetail.jsx` **no muestra ningún mensaje de cuotas**, siendo la página de
    mayor conversión.
-3. Verificar que las 6 cuotas sin interés estén efectivamente activadas en el panel
-   de comerciante de MP y que coincidan con lo que promete la UI.
+3. Verificar que los tramos de `payments.js` estén efectivamente activados en el
+   panel de comerciante de MP y que coincidan con lo que promete la UI.
 
 ### Facturación electrónica ARCA
 
@@ -232,6 +237,39 @@ para devoluciones/contracargos.
 `stockReservation.js` descuenta stock dentro de la transacción del pedido.
 `jobs/expireReservations.js` libera reservas vencidas.
 
+### Barra de anuncios (announcement bar)
+
+`src/components/AnnouncementBar.jsx`, montada como primer hijo del `Layout`
+público (`src/App.jsx`), arriba del navbar y **no sticky**: scrollea y
+desaparece. No aparece en `/admin`. Tres mensajes rotan cada 5 s con crossfade
+de 400 ms, pausa manual + hover + pestaña en background, flechas en desktop,
+`prefers-reduced-motion` respetado.
+
+Sin valores hardcodeados: el umbral de envío gratis sale de
+`shippingConfig.freeShippingThreshold` (`useCart()`, ya alimentado por
+`GET /api/shipping/config`) y las cuotas de `GET /api/payments/config`
+(`backend/config/payments.js`, nuevo — ver "Pagos" arriba).
+
+Links: envío → `/policies/shipping` (página real). Cuotas → `/faq#medios-de-pago`
+(anchor nuevo agregado a esa pregunta puntual del FAQ). Retiro en local →
+`/#contacto`, la sección ya existente en el home.
+
+**Deuda técnica introducida a propósito, documentada y no resuelta acá:**
+
+1. **Navbar sigue `fixed`, no `sticky`.** Para que la announcement bar (no
+   sticky) empuje visualmente al navbar sin convertirlo a `sticky` — eso
+   rompería el offset de todas las páginas, el mega-menú de categorías y el
+   arranque del hero, y es su propio refactor — el navbar quedó `fixed` con
+   `top: ANNOUNCEMENT_BAR_HEIGHT` (36px) y un `transform: translateY()`
+   animado por scroll (rAF, sin tocar `top` por frame) que lo desliza hasta
+   quedar pegado a 0. Constantes compartidas en `src/config/layout.js`
+   (`NAVBAR_HEIGHT`, `ANNOUNCEMENT_BAR_HEIGHT`, `PAGE_CONTENT_OFFSET`).
+   Migrar el navbar a `sticky` de verdad sigue pendiente como tarea propia.
+2. `FAQ.jsx` ganó un `id` (`medios-de-pago`) en la pregunta de medios de pago
+   para el link de la barra, pero el acordeón sigue cerrado por defecto: quien
+   entra desde ese link ve la pregunta cerrada, no la respuesta expandida.
+   Auto-abrir ese ítem al llegar por anchor quedó fuera de este lote.
+
 ---
 
 ## Pendientes priorizados
@@ -240,17 +278,47 @@ para devoluciones/contracargos.
    activar el feature flag y comprobar pago approved → intento inmediato → factura disponible
 2. Ejecutar las pruebas PostgreSQL descartables de facturación con `TEST_DATABASE_URL`
 3. **Cargar dimensiones y peso** en los productos reales — bloquea el cotizador real
-4. **Cuotas**: mover `INSTALLMENTS` al backend y agregar el mensaje en `ProductDetail`
+4. **Cuotas**: migrar `ProductCard.jsx` (y agregar el mensaje en `ProductDetail`) para
+   que lean los tramos de `backend/config/payments.js` / `GET /api/payments/config`
+   en vez del `INSTALLMENTS = 6` hardcodeado — el bug de dividir siempre por 6 sin
+   mirar el mínimo sigue en producción
 5. **Verificar cuotas sin interés** activas en el panel de MP
-6. **Terminar de poblar el catálogo** con productos e imágenes
-7. Credenciales de Correo Argentino y activación del adaptador real
-8. Refactor de `AdminDashboard.jsx` (8.100+ líneas en un solo archivo)
-9. Definir exclusiones de envío gratis, si las hubiera
-10. Habilitar cantidad > 1 en el selector de `ProductDetail` para items a pedido
+6. **Navbar `fixed` → `sticky`**: refactor propio (offsets de todas las páginas,
+   mega-menú, arranque del hero) postergado al agregar la `AnnouncementBar`, que
+   por ahora simula el efecto con `transform` por scroll — ver detalle arriba
+7. **Terminar de poblar el catálogo** con productos e imágenes
+8. Credenciales de Correo Argentino y activación del adaptador real
+9. Refactor de `AdminDashboard.jsx` (8.100+ líneas en un solo archivo)
+10. Definir exclusiones de envío gratis, si las hubiera
+11. Habilitar cantidad > 1 en el selector de `ProductDetail` para items a pedido
 
 ---
 
 ## Bitácora
+
+### 2026-08-18 · Barra de anuncios rotativa + fuente única de cuotas
+
+Nueva `AnnouncementBar` arriba del navbar en todo el sitio público (no admin,
+no sticky). De paso se creó `backend/config/payments.js` +
+`GET /api/payments/config` como fuente única de los tramos de cuotas sin
+interés, porque no existía ninguna (el único dato real era el
+`INSTALLMENTS = 6` hardcodeado y sin mínimo de `ProductCard.jsx`, que sigue
+sin migrar — bug de ese componente documentado arriba, no corregido en este
+lote). También se agregó un `id="medios-de-pago"` puntual en `FAQ.jsx` para
+que la barra pueda linkear ahí. El navbar quedó deliberadamente `fixed`
+(no `sticky`) con un offset simulado por `transform` — ver "Barra de
+anuncios" arriba para el detalle y la deuda técnica registrada.
+
+Archivos: `src/components/AnnouncementBar.jsx`, `src/config/layout.js`,
+`backend/config/payments.js`, `backend/routes/payments.js`, y cambios en
+`backend/index.js`, `src/App.jsx`, `src/components/Navbar.jsx`,
+`src/pages/FAQ.jsx`, `src/index.css`.
+
+Verificado en Chromium headless (1440px y 360px): bar y navbar con el offset
+correcto en reposo y tras scroll, mega-menú de categorías sin gap/overlap en
+ambos estados de scroll, y los tres mensajes mobile entran en una sola línea
+a 360px (275px el más largo, con ~300px disponibles). **Mobile real
+(dispositivo físico) queda sin verificar acá**, como corresponde.
 
 ### 2026-08-15 · Facturación inmediata sin worker
 
