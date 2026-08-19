@@ -296,6 +296,37 @@ Links: envío → `/policies/shipping` (página real). Cuotas → `/faq#medios-d
 
 ## Bitácora
 
+### 2026-08-19 · Fix: "Failed to fetch" al importar carpetas grandes de imágenes
+
+`Imágenes por carpeta` (admin → Productos) tiraba "Failed to fetch" en Railway
+al subir una carpeta con 300+ fotos. Causa: `uploadFolderImages` (multer) usaba
+`memoryStorage`, así que bufferizaba las imágenes enteras de toda la carpeta en
+RAM antes de que el handler corriera — con 300+ fotos de celular eso son
+cientos de MB a >1GB en simultáneo, suficiente para tirar el proceso a mitad
+de la subida (el navegador ve la conexión cortada, no un error HTTP prolijo).
+Además, mandar esa cantidad de datos en un único POST corre riesgo de superar
+timeouts (Node o el proxy de Railway).
+
+Fix con dos partes:
+- `uploadFolderImages` pasó a `diskStorage`: cada archivo se escribe a disco a
+  medida que llega en vez de acumularse en RAM. La ruta ahora resuelve
+  `importId`/`previewDir` en un middleware previo al multer (necesario porque
+  el `destination` de multer corre antes de que exista `req.body`), y ese
+  `importId` viaja por query string (`?importId=...`).
+- El frontend (`handleFolderImagesUpload` en `AdminDashboard.jsx`) ahora sube
+  la carpeta de a tandas de 25 fotos, reutilizando el mismo `importId` para
+  que todas terminen en la misma revisión — evita tanto el pico de RAM como
+  el request larguísimo de un solo POST. Se agregó feedback de progreso
+  ("Leyendo 75/300...") en el botón.
+
+Archivos: `backend/routes/products.js`, `backend/services/folderImageImport.js`,
+`src/context/AdminContext.jsx`, `src/pages/admin/AdminDashboard.jsx`. No se tocó
+`catalog-images` (import de catálogo con imágenes, un solo archivo por vez) ni
+ningún otro importador.
+
+No verificado en Railway todavía con una carpeta real de 300+ fotos — pendiente
+de confirmación por el usuario en producción.
+
 ### 2026-08-18 · Barra de anuncios rotativa + fuente única de cuotas
 
 Nueva `AnnouncementBar` arriba del navbar en todo el sitio público (no admin,

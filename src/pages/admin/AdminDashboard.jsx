@@ -4014,6 +4014,12 @@ function InventoryProductModal({ product, onSave, onClose }) {
   )
 }
 
+// Sube carpetas de imágenes de a tandas en vez de mandarlas en un solo POST:
+// con 300+ fotos un único request se pasaba de la RAM del server o del
+// timeout, y el navegador terminaba mostrando "Failed to fetch". Todas las
+// tandas reusan el mismo importId así las imágenes caen en la misma revisión.
+const FOLDER_IMAGES_BATCH_SIZE = 25
+
 // ── ImportUploadCard ─────────────────────────────────────────────────────────
 function ImportUploadCard({
   label, hint, disabled, onFile, onFiles, accept = '.xls,.xlsx', busyLabel = 'Importando...',
@@ -7236,6 +7242,7 @@ function UnifiedProductsTab() {
   const [catalogParsed, setCatalogParsed]     = useState(null)
   const [folderImagesSupplier, setFolderImagesSupplier] = useState('')
   const [folderImagesParsing, setFolderImagesParsing]   = useState(false)
+  const [folderImagesProgress, setFolderImagesProgress] = useState(null)
   const [folderImagesError, setFolderImagesError]       = useState(null)
   const [folderImagesParsed, setFolderImagesParsed]     = useState(null)
   const [stockDrafts, setStockDrafts]       = useState({})
@@ -7441,13 +7448,32 @@ function UnifiedProductsTab() {
     }
     setFolderImagesError(null)
     setFolderImagesParsing(true)
+    setFolderImagesProgress({ done: 0, total: files.length })
     try {
-      const data = await parseFolderImages(files, folderImagesSupplier)
-      setFolderImagesParsed(data)
+      let importId
+      let supplierProductCount = 0
+      let allRows = []
+      for (let i = 0; i < files.length; i += FOLDER_IMAGES_BATCH_SIZE) {
+        const batch = files.slice(i, i + FOLDER_IMAGES_BATCH_SIZE)
+        const data = await parseFolderImages(batch, folderImagesSupplier, importId)
+        importId = data.importId
+        supplierProductCount = data.supplierProductCount
+        allRows = allRows.concat(data.products)
+        setFolderImagesProgress({ done: Math.min(i + FOLDER_IMAGES_BATCH_SIZE, files.length), total: files.length })
+      }
+      setFolderImagesParsed({
+        importId,
+        supplier: folderImagesSupplier,
+        supplierProductCount,
+        products: allRows,
+        matchedCount: allRows.filter(row => row.match).length,
+        unmatchedCount: allRows.filter(row => !row.match).length,
+      })
     } catch (err) {
       setFolderImagesError(err.message)
     } finally {
       setFolderImagesParsing(false)
+      setFolderImagesProgress(null)
     }
   }
 
@@ -7766,7 +7792,11 @@ function UnifiedProductsTab() {
           multiple
           allowDirectory
           disabled={importLoading || folderImagesParsing || !folderImagesSupplier}
-          busyLabel={folderImagesParsing ? 'Leyendo imágenes...' : !folderImagesSupplier ? 'Elegí un proveedor' : 'Importando...'}
+          busyLabel={
+            folderImagesParsing
+              ? (folderImagesProgress ? `Leyendo ${folderImagesProgress.done}/${folderImagesProgress.total}...` : 'Leyendo imágenes...')
+              : !folderImagesSupplier ? 'Elegí un proveedor' : 'Importando...'
+          }
           onFiles={handleFolderImagesUpload}
         >
           <select

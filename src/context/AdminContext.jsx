@@ -930,11 +930,14 @@ export function AdminProvider({ children }) {
 
   // ── parseFolderImages/applyFolderImages — subir una carpeta de imágenes sueltas
   // y vincularlas a productos por el código detectado en el nombre de archivo ──
-  const parseFolderImages = useCallback(async (files, supplier) => {
+  // `importId` permite subir una carpeta grande en varias tandas y que todas
+  // las imágenes terminen en la misma revisión (ver handleFolderImagesUpload).
+  const parseFolderImages = useCallback(async (files, supplier, importId) => {
     const formData = new FormData()
     formData.append('supplier', supplier)
     for (const file of files) formData.append('files', file)
-    const res = await fetch(`${API_BASE}/api/products/import/folder-images/parse`, {
+    const qs = importId ? `?importId=${encodeURIComponent(importId)}` : ''
+    const res = await fetch(`${API_BASE}/api/products/import/folder-images/parse${qs}`, {
       method: 'POST',
       headers: { 'x-admin-token': ADMIN_PASSWORD },
       body: formData,

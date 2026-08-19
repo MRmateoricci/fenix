@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import multer from 'multer'
 import path from 'path'
+import { randomUUID } from 'crypto'
 import { unlink } from 'fs/promises'
 import { pool } from '../db/pool.js'
 import { requireAdmin } from '../middleware/requireAdmin.js'
@@ -29,6 +30,7 @@ import {
   applyFolderImages,
   buildFolderImagePreview,
   discardFolderImagePreview,
+  ensureFolderPreviewDir,
 } from '../services/folderImageImport.js'
 import {
   upsertCatalogRows,
@@ -1100,8 +1102,18 @@ const uploadCleosImage = multer({
   fileFilter: (req, file, cb) => cb(null, /^image\/(jpeg|png|webp|gif)$/.test(file.mimetype)),
 })
 
+// Carpetas grandes (300+ fotos) desbordaban la RAM con memoryStorage: multer
+// bufferizaba todas las imágenes enteras antes de que el handler corriera y
+// el proceso se caía a mitad de la subida (el navegador veía "Failed to
+// fetch"). Con diskStorage cada archivo se escribe a disco a medida que llega.
 const uploadFolderImages = multer({
-  storage: multer.memoryStorage(),
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => cb(null, req.folderPreviewDir),
+    filename: (req, file, cb) => {
+      const extension = path.extname(file.originalname).toLowerCase() || '.jpg'
+      cb(null, `folder-${randomUUID().slice(0, 8)}${extension}`)
+    },
+  }),
   limits: { fileSize: 8 * 1024 * 1024, files: 500 },
   fileFilter: (req, file, cb) => cb(null, /^image\/(jpeg|png|webp|gif)$/.test(file.mimetype)),
 })
@@ -1829,7 +1841,21 @@ router.post('/import/catalog-images/apply', async (req, res) => {
 // Carga masiva de imágenes sueltas (por ejemplo, el contenido de una carpeta).
 // Cada archivo se intenta emparejar con un producto por su código en el nombre
 // de archivo; el admin confirma o corrige la asociación antes de guardar nada.
-router.post('/import/folder-images/parse', uploadFolderImages.array('files', 500), async (req, res) => {
+// El frontend sube carpetas grandes en tandas y reutiliza el mismo importId
+// (?importId=...) para que todas las imágenes terminen en la misma carpeta de
+// revisión. Ese id viaja por query string porque todavía no existe req.body
+// cuando multer empieza a escribir el primer archivo a disco.
+router.post('/import/folder-images/parse', async (req, res, next) => {
+  try {
+    const { importId, previewDir } = await ensureFolderPreviewDir(req.query.importId)
+    req.folderImportId = importId
+    req.folderPreviewDir = previewDir
+    next()
+  } catch (err) {
+    console.error('[POST /api/products/import/folder-images/parse]', err)
+    res.status(500).json({ error: 'No se pudo preparar la carpeta de revisión' })
+  }
+}, uploadFolderImages.array('files', 500), async (req, res) => {
   const supplier = normalizePriceSupplier(req.body.supplier)
   if (!req.files?.length) return res.status(400).json({ error: 'Elegí una carpeta o imágenes para subir' })
   if (!supplier) return res.status(400).json({ error: 'Elegí el proveedor de estas imágenes' })
@@ -1842,7 +1868,10 @@ router.post('/import/folder-images/parse', uploadFolderImages.array('files', 500
     if (!products.length) {
       return res.status(404).json({ error: `No hay productos cargados para el proveedor ${supplier}` })
     }
-    const parsed = await buildFolderImagePreview(req.files, products)
+    const parsed = await buildFolderImagePreview(req.files, products, {
+      importId: req.folderImportId,
+      previewDir: req.folderPreviewDir,
+    })
     res.json({ ...parsed, supplier, supplierProductCount: products.length })
   } catch (err) {
     console.error('[POST /api/products/import/folder-images/parse]', err)
