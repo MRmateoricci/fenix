@@ -4014,13 +4014,18 @@ function InventoryProductModal({ product, onSave, onClose }) {
   )
 }
 
-// Sube carpetas de imágenes de a tandas en vez de mandarlas en un solo POST:
-// con 300+ fotos un único request se pasaba de la RAM del server o del
-// timeout, y el navegador terminaba mostrando "Failed to fetch". Todas las
-// tandas reusan el mismo importId así las imágenes caen en la misma revisión.
-// Tandas chicas porque incluso con reintentos, algo en el medio (Railway u
-// otro proxy) corta conexiones reusadas después de cierto tiempo/volumen.
+// Sube carpetas de imágenes de a tandas en vez de mandarlas en un solo POST
+// (con 300+ fotos un único request se pasaba de la RAM del server con
+// memoryStorage). Todas las tandas reusan el mismo importId así las imágenes
+// caen en la misma revisión.
 const FOLDER_IMAGES_BATCH_SIZE = 10
+
+// Debe ser <= al límite del servidor (IMAGE_UPLOAD_MAX_BYTES en
+// backend/routes/products.js). Cuando multer detecta una foto que supera su
+// límite corta el parseo a mitad de la subida — el navegador lo ve como
+// conexión cortada ("Failed to fetch"), no como un error prolijo. Filtramos
+// acá antes de mandar nada para que una foto pesada nunca llegue a cortarla.
+const FOLDER_IMAGES_MAX_FILE_BYTES = 20 * 1024 * 1024
 
 // ── ImportUploadCard ─────────────────────────────────────────────────────────
 function ImportUploadCard({
@@ -7518,12 +7523,21 @@ function UnifiedProductsTab() {
     }
   }
 
-  async function handleFolderImagesUpload(files) {
+  async function handleFolderImagesUpload(rawFiles) {
     if (!folderImagesSupplier) {
       setFolderImagesError('Elegí el proveedor antes de subir las imágenes.')
       return
     }
-    setFolderImagesError(null)
+    const oversized = rawFiles.filter(file => file.size > FOLDER_IMAGES_MAX_FILE_BYTES)
+    const files = rawFiles.filter(file => file.size <= FOLDER_IMAGES_MAX_FILE_BYTES)
+    const maxMb = Math.round(FOLDER_IMAGES_MAX_FILE_BYTES / (1024 * 1024))
+    if (!files.length) {
+      setFolderImagesError(`Todas las fotos pesan más de ${maxMb}MB, achicalas antes de subirlas.`)
+      return
+    }
+    setFolderImagesError(oversized.length
+      ? `Se omitieron ${oversized.length} foto${oversized.length > 1 ? 's' : ''} por pesar más de ${maxMb}MB: ${oversized.slice(0, 5).map(f => f.name).join(', ')}${oversized.length > 5 ? '…' : ''}. Achicalas y subilas aparte.`
+      : null)
     setFolderImagesParsing(true)
     setFolderImagesProgress({ done: 0, total: files.length })
     try {

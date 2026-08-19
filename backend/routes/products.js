@@ -1096,9 +1096,17 @@ router.post('/stock/batch', async (req, res) => {
   }
 })
 
+// Fotos de celular actuales suelen pesar más de 8MB. Cuando multer detecta un
+// archivo que supera `fileSize` corta el parseo A MITAD DE LA SUBIDA (mientras
+// el navegador todavía está mandando datos) — eso el navegador lo ve como una
+// conexión cortada ("Failed to fetch"), no como un error prolijo. 20MB da
+// margen para fotos de celular normales; el frontend además filtra por tamaño
+// antes de subir para no depender solo de este tope del lado servidor.
+const IMAGE_UPLOAD_MAX_BYTES = 20 * 1024 * 1024
+
 const uploadCleosImage = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 8 * 1024 * 1024 },
+  limits: { fileSize: IMAGE_UPLOAD_MAX_BYTES },
   fileFilter: (req, file, cb) => cb(null, /^image\/(jpeg|png|webp|gif)$/.test(file.mimetype)),
 })
 
@@ -1114,7 +1122,7 @@ const uploadFolderImages = multer({
       cb(null, `folder-${randomUUID().slice(0, 8)}${extension}`)
     },
   }),
-  limits: { fileSize: 8 * 1024 * 1024, files: 500 },
+  limits: { fileSize: IMAGE_UPLOAD_MAX_BYTES, files: 500 },
   fileFilter: (req, file, cb) => cb(null, /^image\/(jpeg|png|webp|gif)$/.test(file.mimetype)),
 })
 
