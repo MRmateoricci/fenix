@@ -324,8 +324,29 @@ Archivos: `backend/routes/products.js`, `backend/services/folderImageImport.js`,
 `catalog-images` (import de catálogo con imágenes, un solo archivo por vez) ni
 ningún otro importador.
 
-No verificado en Railway todavía con una carpeta real de 300+ fotos — pendiente
-de confirmación por el usuario en producción.
+**Update mismo día:** probado en producción con carpetas reales, el error
+seguía apareciendo (primero cerca de la foto 70, después de la 80 con lotes
+más chicos + reintentos). El diagnóstico de RAM/timeout de arriba era
+parcialmente cierto pero no era la causa de este caso puntual — los logs de
+Railway mostraron el motivo real: `MulterError: File too large`
+(`LIMIT_FILE_SIZE`, límite configurado en 8MB). Fotos de celular actuales
+pesan más de 8MB; cuando multer detecta una foto que supera el límite corta
+el parseo **a mitad de la subida** (con el navegador todavía mandando datos),
+lo que el navegador reporta como "Failed to fetch" en vez de un error
+prolijo — por eso achicar el tamaño de lote no cambiaba nada, el corte pasa
+apenas llega la foto pesada.
+
+Fix real: `IMAGE_UPLOAD_MAX_BYTES` subió de 8MB a 20MB en
+`backend/routes/products.js` (aplica a `uploadCleosImage` y
+`uploadFolderImages`), y el frontend ahora filtra fotos por tamaño *antes* de
+subir nada (`FOLDER_IMAGES_MAX_FILE_BYTES` en `AdminDashboard.jsx`) — las que
+superan el límite se omiten con un aviso en vez de cortar la conexión. El
+batching de a 10 + reintentos automáticos del intento anterior se mantienen
+como resiliencia extra ante cortes de red genuinos, pero no eran el fix.
+
+Confirmado por el usuario que el diagnóstico (logs de Railway) apuntaba
+exactamente a esto — pendiente de que reintente la carga completa para
+confirmar que ya no corta.
 
 ### 2026-08-18 · Barra de anuncios rotativa + fuente única de cuotas
 
