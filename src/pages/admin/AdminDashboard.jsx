@@ -4018,7 +4018,9 @@ function InventoryProductModal({ product, onSave, onClose }) {
 // con 300+ fotos un único request se pasaba de la RAM del server o del
 // timeout, y el navegador terminaba mostrando "Failed to fetch". Todas las
 // tandas reusan el mismo importId así las imágenes caen en la misma revisión.
-const FOLDER_IMAGES_BATCH_SIZE = 25
+// Tandas chicas porque incluso con reintentos, algo en el medio (Railway u
+// otro proxy) corta conexiones reusadas después de cierto tiempo/volumen.
+const FOLDER_IMAGES_BATCH_SIZE = 10
 
 // ── ImportUploadCard ─────────────────────────────────────────────────────────
 function ImportUploadCard({
@@ -7502,6 +7504,20 @@ function UnifiedProductsTab() {
     fetchInventory({ ...inventoryFilters, page: 1 })
   }
 
+  // Un lote puede fallar por un corte de conexión puntual (proxy, wifi) y no
+  // porque el archivo esté mal — reintentamos antes de abortar todo el import.
+  async function parseFolderImagesBatchWithRetry(batch, supplier, importId, attempts = 4) {
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+      try {
+        return await parseFolderImages(batch, supplier, importId)
+      } catch (err) {
+        const isNetworkError = err instanceof TypeError || /fetch|network/i.test(err.message || '')
+        if (!isNetworkError || attempt === attempts) throw err
+        await new Promise(resolve => setTimeout(resolve, attempt * 1200))
+      }
+    }
+  }
+
   async function handleFolderImagesUpload(files) {
     if (!folderImagesSupplier) {
       setFolderImagesError('Elegí el proveedor antes de subir las imágenes.')
@@ -7516,7 +7532,7 @@ function UnifiedProductsTab() {
       let allRows = []
       for (let i = 0; i < files.length; i += FOLDER_IMAGES_BATCH_SIZE) {
         const batch = files.slice(i, i + FOLDER_IMAGES_BATCH_SIZE)
-        const data = await parseFolderImages(batch, folderImagesSupplier, importId)
+        const data = await parseFolderImagesBatchWithRetry(batch, folderImagesSupplier, importId)
         importId = data.importId
         supplierProductCount = data.supplierProductCount
         allRows = allRows.concat(data.products)
