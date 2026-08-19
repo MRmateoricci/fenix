@@ -7117,6 +7117,10 @@ function FolderImagesReviewModal({ parsed, onConfirm, onClose }) {
   const [query, setQuery] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
+  const [duplicates, setDuplicates] = useState([])
+  const [highlightKey, setHighlightKey] = useState(null)
+  const [scrollTarget, setScrollTarget] = useState(null)
+  const rowRefs = useRef({})
 
   const updateRow = (key, next) => setRows(current => current.map(row => row.key === key ? next : row))
   const acceptedRows = rows.filter(row => row.accepted && row.match && row.selectedImageKey)
@@ -7127,15 +7131,43 @@ function FolderImagesReviewModal({ parsed, onConfirm, onClose }) {
     return `${row.originalName} ${row.detectedCode || ''} ${row.match?.codigo || ''} ${row.match?.name || ''}`.toLowerCase().includes(needle)
   })
 
+  const goToRow = key => {
+    setQuery('')
+    setScrollTarget(key)
+  }
+
+  useEffect(() => {
+    if (!scrollTarget) return
+    const el = rowRefs.current[scrollTarget]
+    if (!el) return
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    setHighlightKey(scrollTarget)
+    setScrollTarget(null)
+    const timeout = setTimeout(() => setHighlightKey(current => current === scrollTarget ? null : current), 2500)
+    return () => clearTimeout(timeout)
+  }, [scrollTarget, visibleRows])
+
   const handleConfirm = async () => {
     setError('')
+    setDuplicates([])
     if (!acceptedRows.length) {
       setError('Seleccioná al menos una imagen para aplicar.')
       return
     }
     const productIds = acceptedRows.map(row => row.match.id)
-    if (productIds.some((id, index) => productIds.indexOf(id) !== index)) {
-      setError('Hay más de una imagen apuntando al mismo producto. Dejá una sola por producto.')
+    const seenIds = new Set()
+    const duplicateIds = new Set()
+    productIds.forEach(id => {
+      if (seenIds.has(id)) duplicateIds.add(id)
+      seenIds.add(id)
+    })
+    if (duplicateIds.size) {
+      const dupInfo = Array.from(duplicateIds).map(productId => {
+        const dupRows = acceptedRows.filter(row => row.match.id === productId)
+        return { productId, codigo: dupRows[0]?.match?.codigo || productId, rowKeys: dupRows.map(row => row.key) }
+      })
+      setDuplicates(dupInfo)
+      setError(`Hay ${dupInfo.length} producto${dupInfo.length > 1 ? 's' : ''} con más de una imagen asociada: ${dupInfo.map(d => d.codigo).join(', ')}. Dejá seleccionada sólo la imagen correcta en cada uno.`)
       return
     }
     setSubmitting(true)
@@ -7171,12 +7203,41 @@ function FolderImagesReviewModal({ parsed, onConfirm, onClose }) {
 
         <div style={{ flex: 1, overflowY: 'auto', padding: '16px 26px', display: 'grid', gap: 10 }}>
           {visibleRows.map(row => (
-            <FolderImageReviewRow key={row.key} row={row} supplier={parsed.supplier} onChange={next => updateRow(row.key, next)} />
+            <div
+              key={row.key}
+              ref={el => { rowRefs.current[row.key] = el }}
+              style={highlightKey === row.key ? { borderRadius: 10, boxShadow: `0 0 0 3px ${C.red}`, transition: 'box-shadow 0.2s' } : undefined}
+            >
+              <FolderImageReviewRow row={row} supplier={parsed.supplier} onChange={next => updateRow(row.key, next)} />
+            </div>
           ))}
           {!visibleRows.length && <p style={{ fontSize: 11.5, color: C.muted }}>No hay filas que coincidan con la búsqueda.</p>}
         </div>
 
-        {error && <p style={{ fontSize: 12, color: C.red, margin: '14px 26px 0' }}>{error}</p>}
+        {error && (
+          <div style={{ margin: '14px 26px 0' }}>
+            <p style={{ fontSize: 12, color: C.red, margin: 0 }}>{error}</p>
+            {!!duplicates.length && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 7 }}>
+                {duplicates.map(dup => (
+                  <div key={dup.productId} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <span style={pill('#FEE2E2', C.red)}>{dup.codigo}</span>
+                    {dup.rowKeys.map((key, index) => (
+                      <button
+                        key={key}
+                        type="button"
+                        onClick={() => goToRow(key)}
+                        style={{ ...outlineBtn, padding: '3px 8px', fontSize: 10.5 }}
+                      >
+                        Ir a imagen {index + 1}
+                      </button>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', padding: '16px 26px', borderTop: `1px solid ${C.border}` }}>
           <button type="button" onClick={onClose} disabled={submitting} style={outlineBtn}>Cancelar</button>
