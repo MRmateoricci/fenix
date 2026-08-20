@@ -4014,6 +4014,19 @@ function InventoryProductModal({ product, onSave, onClose }) {
   )
 }
 
+// Sube carpetas de imágenes de a tandas en vez de mandarlas en un solo POST
+// (con 300+ fotos un único request se pasaba de la RAM del server con
+// memoryStorage). Todas las tandas reusan el mismo importId así las imágenes
+// caen en la misma revisión.
+const FOLDER_IMAGES_BATCH_SIZE = 10
+
+// Debe ser <= al límite del servidor (IMAGE_UPLOAD_MAX_BYTES en
+// backend/routes/products.js). Cuando multer detecta una foto que supera su
+// límite corta el parseo a mitad de la subida — el navegador lo ve como
+// conexión cortada ("Failed to fetch"), no como un error prolijo. Filtramos
+// acá antes de mandar nada para que una foto pesada nunca llegue a cortarla.
+const FOLDER_IMAGES_MAX_FILE_BYTES = 20 * 1024 * 1024
+
 // ── ImportUploadCard ─────────────────────────────────────────────────────────
 function ImportUploadCard({
   label, hint, disabled, onFile, onFiles, accept = '.xls,.xlsx', busyLabel = 'Importando...',
@@ -7111,6 +7124,10 @@ function FolderImagesReviewModal({ parsed, onConfirm, onClose }) {
   const [query, setQuery] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
+  const [duplicates, setDuplicates] = useState([])
+  const [highlightKey, setHighlightKey] = useState(null)
+  const [scrollTarget, setScrollTarget] = useState(null)
+  const rowRefs = useRef({})
 
   const updateRow = (key, next) => setRows(current => current.map(row => row.key === key ? next : row))
   const acceptedRows = rows.filter(row => row.accepted && row.match && row.selectedImageKey)
@@ -7121,15 +7138,43 @@ function FolderImagesReviewModal({ parsed, onConfirm, onClose }) {
     return `${row.originalName} ${row.detectedCode || ''} ${row.match?.codigo || ''} ${row.match?.name || ''}`.toLowerCase().includes(needle)
   })
 
+  const goToRow = key => {
+    setQuery('')
+    setScrollTarget(key)
+  }
+
+  useEffect(() => {
+    if (!scrollTarget) return
+    const el = rowRefs.current[scrollTarget]
+    if (!el) return
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    setHighlightKey(scrollTarget)
+    setScrollTarget(null)
+    const timeout = setTimeout(() => setHighlightKey(current => current === scrollTarget ? null : current), 2500)
+    return () => clearTimeout(timeout)
+  }, [scrollTarget, visibleRows])
+
   const handleConfirm = async () => {
     setError('')
+    setDuplicates([])
     if (!acceptedRows.length) {
       setError('Seleccioná al menos una imagen para aplicar.')
       return
     }
     const productIds = acceptedRows.map(row => row.match.id)
-    if (productIds.some((id, index) => productIds.indexOf(id) !== index)) {
-      setError('Hay más de una imagen apuntando al mismo producto. Dejá una sola por producto.')
+    const seenIds = new Set()
+    const duplicateIds = new Set()
+    productIds.forEach(id => {
+      if (seenIds.has(id)) duplicateIds.add(id)
+      seenIds.add(id)
+    })
+    if (duplicateIds.size) {
+      const dupInfo = Array.from(duplicateIds).map(productId => {
+        const dupRows = acceptedRows.filter(row => row.match.id === productId)
+        return { productId, codigo: dupRows[0]?.match?.codigo || productId, rowKeys: dupRows.map(row => row.key) }
+      })
+      setDuplicates(dupInfo)
+      setError(`Hay ${dupInfo.length} producto${dupInfo.length > 1 ? 's' : ''} con más de una imagen asociada: ${dupInfo.map(d => d.codigo).join(', ')}. Dejá seleccionada sólo la imagen correcta en cada uno.`)
       return
     }
     setSubmitting(true)
@@ -7165,12 +7210,41 @@ function FolderImagesReviewModal({ parsed, onConfirm, onClose }) {
 
         <div style={{ flex: 1, overflowY: 'auto', padding: '16px 26px', display: 'grid', gap: 10 }}>
           {visibleRows.map(row => (
-            <FolderImageReviewRow key={row.key} row={row} supplier={parsed.supplier} onChange={next => updateRow(row.key, next)} />
+            <div
+              key={row.key}
+              ref={el => { rowRefs.current[row.key] = el }}
+              style={highlightKey === row.key ? { borderRadius: 10, boxShadow: `0 0 0 3px ${C.red}`, transition: 'box-shadow 0.2s' } : undefined}
+            >
+              <FolderImageReviewRow row={row} supplier={parsed.supplier} onChange={next => updateRow(row.key, next)} />
+            </div>
           ))}
           {!visibleRows.length && <p style={{ fontSize: 11.5, color: C.muted }}>No hay filas que coincidan con la búsqueda.</p>}
         </div>
 
-        {error && <p style={{ fontSize: 12, color: C.red, margin: '14px 26px 0' }}>{error}</p>}
+        {error && (
+          <div style={{ margin: '14px 26px 0' }}>
+            <p style={{ fontSize: 12, color: C.red, margin: 0 }}>{error}</p>
+            {!!duplicates.length && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 7 }}>
+                {duplicates.map(dup => (
+                  <div key={dup.productId} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <span style={pill('#FEE2E2', C.red)}>{dup.codigo}</span>
+                    {dup.rowKeys.map((key, index) => (
+                      <button
+                        key={key}
+                        type="button"
+                        onClick={() => goToRow(key)}
+                        style={{ ...outlineBtn, padding: '3px 8px', fontSize: 10.5 }}
+                      >
+                        Ir a imagen {index + 1}
+                      </button>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', padding: '16px 26px', borderTop: `1px solid ${C.border}` }}>
           <button type="button" onClick={onClose} disabled={submitting} style={outlineBtn}>Cancelar</button>
@@ -7236,6 +7310,7 @@ function UnifiedProductsTab() {
   const [catalogParsed, setCatalogParsed]     = useState(null)
   const [folderImagesSupplier, setFolderImagesSupplier] = useState('')
   const [folderImagesParsing, setFolderImagesParsing]   = useState(false)
+  const [folderImagesProgress, setFolderImagesProgress] = useState(null)
   const [folderImagesError, setFolderImagesError]       = useState(null)
   const [folderImagesParsed, setFolderImagesParsed]     = useState(null)
   const [stockDrafts, setStockDrafts]       = useState({})
@@ -7434,20 +7509,62 @@ function UnifiedProductsTab() {
     fetchInventory({ ...inventoryFilters, page: 1 })
   }
 
-  async function handleFolderImagesUpload(files) {
+  // Un lote puede fallar por un corte de conexión puntual (proxy, wifi) y no
+  // porque el archivo esté mal — reintentamos antes de abortar todo el import.
+  async function parseFolderImagesBatchWithRetry(batch, supplier, importId, attempts = 4) {
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+      try {
+        return await parseFolderImages(batch, supplier, importId)
+      } catch (err) {
+        const isNetworkError = err instanceof TypeError || /fetch|network/i.test(err.message || '')
+        if (!isNetworkError || attempt === attempts) throw err
+        await new Promise(resolve => setTimeout(resolve, attempt * 1200))
+      }
+    }
+  }
+
+  async function handleFolderImagesUpload(rawFiles) {
     if (!folderImagesSupplier) {
       setFolderImagesError('Elegí el proveedor antes de subir las imágenes.')
       return
     }
-    setFolderImagesError(null)
+    const oversized = rawFiles.filter(file => file.size > FOLDER_IMAGES_MAX_FILE_BYTES)
+    const files = rawFiles.filter(file => file.size <= FOLDER_IMAGES_MAX_FILE_BYTES)
+    const maxMb = Math.round(FOLDER_IMAGES_MAX_FILE_BYTES / (1024 * 1024))
+    if (!files.length) {
+      setFolderImagesError(`Todas las fotos pesan más de ${maxMb}MB, achicalas antes de subirlas.`)
+      return
+    }
+    setFolderImagesError(oversized.length
+      ? `Se omitieron ${oversized.length} foto${oversized.length > 1 ? 's' : ''} por pesar más de ${maxMb}MB: ${oversized.slice(0, 5).map(f => f.name).join(', ')}${oversized.length > 5 ? '…' : ''}. Achicalas y subilas aparte.`
+      : null)
     setFolderImagesParsing(true)
+    setFolderImagesProgress({ done: 0, total: files.length })
     try {
-      const data = await parseFolderImages(files, folderImagesSupplier)
-      setFolderImagesParsed(data)
+      let importId
+      let supplierProductCount = 0
+      let allRows = []
+      for (let i = 0; i < files.length; i += FOLDER_IMAGES_BATCH_SIZE) {
+        const batch = files.slice(i, i + FOLDER_IMAGES_BATCH_SIZE)
+        const data = await parseFolderImagesBatchWithRetry(batch, folderImagesSupplier, importId)
+        importId = data.importId
+        supplierProductCount = data.supplierProductCount
+        allRows = allRows.concat(data.products)
+        setFolderImagesProgress({ done: Math.min(i + FOLDER_IMAGES_BATCH_SIZE, files.length), total: files.length })
+      }
+      setFolderImagesParsed({
+        importId,
+        supplier: folderImagesSupplier,
+        supplierProductCount,
+        products: allRows,
+        matchedCount: allRows.filter(row => row.match).length,
+        unmatchedCount: allRows.filter(row => !row.match).length,
+      })
     } catch (err) {
       setFolderImagesError(err.message)
     } finally {
       setFolderImagesParsing(false)
+      setFolderImagesProgress(null)
     }
   }
 
@@ -7766,7 +7883,11 @@ function UnifiedProductsTab() {
           multiple
           allowDirectory
           disabled={importLoading || folderImagesParsing || !folderImagesSupplier}
-          busyLabel={folderImagesParsing ? 'Leyendo imágenes...' : !folderImagesSupplier ? 'Elegí un proveedor' : 'Importando...'}
+          busyLabel={
+            folderImagesParsing
+              ? (folderImagesProgress ? `Leyendo ${folderImagesProgress.done}/${folderImagesProgress.total}...` : 'Leyendo imágenes...')
+              : !folderImagesSupplier ? 'Elegí un proveedor' : 'Importando...'
+          }
           onFiles={handleFolderImagesUpload}
         >
           <select

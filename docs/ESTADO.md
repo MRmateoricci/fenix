@@ -7,7 +7,7 @@
 > Si el cambio merece un commit con mensaje propio, merece una entrada acá.
 > Un ajuste de padding, no.
 
-**Última actualización:** 18 de agosto de 2026
+**Última actualización:** 19 de agosto de 2026
 **Commit de referencia:** `2cf994d` + cambios locales sin commit
 
 ---
@@ -307,6 +307,58 @@ Links: envío → `/policies/shipping` (página real). Cuotas → `/faq#medios-d
 
 ## Bitácora
 
+### 2026-08-19 · Fix: "Failed to fetch" al importar carpetas grandes de imágenes
+
+`Imágenes por carpeta` (admin → Productos) tiraba "Failed to fetch" en Railway
+al subir una carpeta con 300+ fotos. Causa: `uploadFolderImages` (multer) usaba
+`memoryStorage`, así que bufferizaba las imágenes enteras de toda la carpeta en
+RAM antes de que el handler corriera — con 300+ fotos de celular eso son
+cientos de MB a >1GB en simultáneo, suficiente para tirar el proceso a mitad
+de la subida (el navegador ve la conexión cortada, no un error HTTP prolijo).
+Además, mandar esa cantidad de datos en un único POST corre riesgo de superar
+timeouts (Node o el proxy de Railway).
+
+Fix con dos partes:
+- `uploadFolderImages` pasó a `diskStorage`: cada archivo se escribe a disco a
+  medida que llega en vez de acumularse en RAM. La ruta ahora resuelve
+  `importId`/`previewDir` en un middleware previo al multer (necesario porque
+  el `destination` de multer corre antes de que exista `req.body`), y ese
+  `importId` viaja por query string (`?importId=...`).
+- El frontend (`handleFolderImagesUpload` en `AdminDashboard.jsx`) ahora sube
+  la carpeta de a tandas de 25 fotos, reutilizando el mismo `importId` para
+  que todas terminen en la misma revisión — evita tanto el pico de RAM como
+  el request larguísimo de un solo POST. Se agregó feedback de progreso
+  ("Leyendo 75/300...") en el botón.
+
+Archivos: `backend/routes/products.js`, `backend/services/folderImageImport.js`,
+`src/context/AdminContext.jsx`, `src/pages/admin/AdminDashboard.jsx`. No se tocó
+`catalog-images` (import de catálogo con imágenes, un solo archivo por vez) ni
+ningún otro importador.
+
+**Update mismo día:** probado en producción con carpetas reales, el error
+seguía apareciendo (primero cerca de la foto 70, después de la 80 con lotes
+más chicos + reintentos). El diagnóstico de RAM/timeout de arriba era
+parcialmente cierto pero no era la causa de este caso puntual — los logs de
+Railway mostraron el motivo real: `MulterError: File too large`
+(`LIMIT_FILE_SIZE`, límite configurado en 8MB). Fotos de celular actuales
+pesan más de 8MB; cuando multer detecta una foto que supera el límite corta
+el parseo **a mitad de la subida** (con el navegador todavía mandando datos),
+lo que el navegador reporta como "Failed to fetch" en vez de un error
+prolijo — por eso achicar el tamaño de lote no cambiaba nada, el corte pasa
+apenas llega la foto pesada.
+
+Fix real: `IMAGE_UPLOAD_MAX_BYTES` subió de 8MB a 20MB en
+`backend/routes/products.js` (aplica a `uploadCleosImage` y
+`uploadFolderImages`), y el frontend ahora filtra fotos por tamaño *antes* de
+subir nada (`FOLDER_IMAGES_MAX_FILE_BYTES` en `AdminDashboard.jsx`) — las que
+superan el límite se omiten con un aviso en vez de cortar la conexión. El
+batching de a 10 + reintentos automáticos del intento anterior se mantienen
+como resiliencia extra ante cortes de red genuinos, pero no eran el fix.
+
+Confirmado por el usuario que el diagnóstico (logs de Railway) apuntaba
+exactamente a esto — pendiente de que reintente la carga completa para
+confirmar que ya no corta.
+
 ### 2026-08-18 · ARCA para Responsable Inscripto, con producción bloqueada
 
 Se eliminó el default de Factura C y se incorporó la selección A/ALEY/B para un
@@ -323,6 +375,7 @@ defecto y conecta con un agente `SECLEVEL=1` limitado a WSFE, certificado valida
 Se ejecutaron únicamente el diagnóstico TLS, WSAA/FEDummy, parámetros, puntos de
 venta y último autorizado. No se invocó `FECAESolicitar` ni se emitió un comprobante
 productivo. Quedan pendientes datos fiscales del emisor y confirmar el catálogo.
+
 ### 2026-08-18 · Barra de anuncios rotativa + fuente única de cuotas
 
 Nueva `AnnouncementBar` arriba del navbar en todo el sitio público (no admin,

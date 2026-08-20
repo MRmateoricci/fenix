@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto'
 import path from 'path'
-import { access, copyFile, mkdir, readdir, rm, stat, unlink, writeFile } from 'fs/promises'
+import { access, copyFile, mkdir, readdir, rm, stat, unlink } from 'fs/promises'
 import { constants as fsConstants } from 'fs'
 import { uploadsDir } from '../config/uploads.js'
 
@@ -61,14 +61,23 @@ function candidateCodesFromFilename(filename) {
   return [...candidates]
 }
 
-export async function buildFolderImagePreview(files, products) {
-  if (!Array.isArray(files) || !files.length) throw new Error('No se recibieron imágenes')
-  if (files.length > MAX_FILES) throw new Error(`Se permite subir hasta ${MAX_FILES} imágenes por vez`)
-
-  await cleanupOldPreviews()
-  const importId = randomUUID()
+// El caller (la ruta) ya generó importId/previewDir y multer ya escribió los
+// archivos ahí en disco directamente (diskStorage) — acá solo emparejamos por
+// código y armamos las filas de revisión, sin volver a tocar los buffers.
+// Esto permite subir carpetas grandes en varias tandas sin acumular todas las
+// imágenes en RAM de una sola vez (lo que tumbaba el proceso con 300+ fotos).
+export async function ensureFolderPreviewDir(existingImportId) {
+  const importId = /^[0-9a-f-]{36}$/i.test(String(existingImportId || '')) ? existingImportId : randomUUID()
+  if (!existingImportId) await cleanupOldPreviews()
   const previewDir = getFolderPreviewDir(importId)
   await mkdir(previewDir, { recursive: true })
+  return { importId, previewDir }
+}
+
+export async function buildFolderImagePreview(files, products, { importId, previewDir }) {
+  if (!Array.isArray(files) || !files.length) throw new Error('No se recibieron imágenes')
+  if (files.length > MAX_FILES) throw new Error(`Se permite subir hasta ${MAX_FILES} imágenes por vez`)
+  if (!importId || !previewDir) throw new Error('Falta la carpeta de revisión')
 
   const productsByKey = new Map()
   for (const product of products) {
@@ -76,33 +85,21 @@ export async function buildFolderImagePreview(files, products) {
     if (key.length >= 2 && !productsByKey.has(key)) productsByKey.set(key, product)
   }
 
-  const rows = []
-  try {
-    let index = 0
-    for (const file of files) {
-      index++
-      const extension = path.extname(file.originalname).toLowerCase() || '.jpg'
-      const key = `folder-${index}-${randomUUID().slice(0, 8)}${extension}`
-      await writeFile(path.join(previewDir, key), file.buffer)
+  const rows = files.map(file => {
+    const candidates = candidateCodesFromFilename(file.originalname)
+    const product = candidates
+      .map(codeKey)
+      .map(candidateKey => productsByKey.get(candidateKey))
+      .find(Boolean) || null
 
-      const candidates = candidateCodesFromFilename(file.originalname)
-      const product = candidates
-        .map(codeKey)
-        .map(candidateKey => productsByKey.get(candidateKey))
-        .find(Boolean) || null
-
-      rows.push({
-        originalName: file.originalname,
-        detectedCode: product ? product.codigo : (candidates[0] || ''),
-        imageOptions: [{ key, url: `/uploads/import-previews/${importId}/${key}` }],
-        selectedImageKey: key,
-        match: product ? publicProduct(product) : null,
-      })
+    return {
+      originalName: file.originalname,
+      detectedCode: product ? product.codigo : (candidates[0] || ''),
+      imageOptions: [{ key: file.filename, url: `/uploads/import-previews/${importId}/${file.filename}` }],
+      selectedImageKey: file.filename,
+      match: product ? publicProduct(product) : null,
     }
-  } catch (error) {
-    await rm(previewDir, { recursive: true, force: true })
-    throw error
-  }
+  })
 
   const matchedCount = rows.filter(row => row.match).length
   return {
@@ -115,7 +112,7 @@ export async function buildFolderImagePreview(files, products) {
 
 function sanitizeImageKey(value) {
   const key = path.basename(String(value || ''))
-  return /^folder-\d+-[0-9a-f]{8}\.(?:jpe?g|png|webp|gif)$/i.test(key) ? key : null
+  return /^folder-[0-9a-f]{8}\.(?:jpe?g|png|webp|gif)$/i.test(key) ? key : null
 }
 
 export async function applyFolderImages(client, importId, supplier, rawActions = [], publicUploadsBase = '/uploads') {
