@@ -17,6 +17,7 @@ import categoryCustomizationsRouter from './routes/categoryCustomizations.js'
 import catalogRouter  from './routes/catalog.js'
 import googleReviewsRouter from './routes/googleReviews.js'
 import shippingRouter from './routes/shipping.js'
+import paymentsRouter from './routes/payments.js'
 import newsletterRouter from './routes/newsletter.js'
 import couponsRouter from './routes/coupons.js'
 import arcaRouter from './routes/arca.js'
@@ -72,6 +73,7 @@ app.use('/api/category-customizations', categoryCustomizationsRouter)
 app.use('/api/catalog',  catalogRouter)
 app.use('/api/google-reviews', googleReviewsRouter)
 app.use('/api/shipping', shippingRouter)
+app.use('/api/payments', paymentsRouter)
 app.use('/api/newsletter', newsletterRouter)
 app.use('/api/coupons', couponsRouter)
 

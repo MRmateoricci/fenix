@@ -154,7 +154,6 @@ export default function Home() {
         <CategoriasSection />
         <DestacadosSection />
         <MostSearchedSection />
-        <ProductosAPedidoSection />
         <HistoriaSection />
         <ResenasSection />
         <ContactoSection />
@@ -635,40 +634,6 @@ function DestacadosSection() {
             </Link>
           </div>
           <InfiniteProductCarousel products={featured} label="Promociones" />
-        </div>
-      </Reveal>
-    </section>
-  )
-}
-
-// ─── Productos a pedido ─────────────────────────────────────────────────────
-// Productos marcados a mano desde el admin (product.aPedido) que además están
-// sin stock inmediato — con stock disponible se compran como cualquier otro,
-// sin pasar por acá. Enlaza a /productos-a-pedido.
-function ProductosAPedidoSection() {
-  const { products } = useAdmin()
-  const aPedido = products.filter(p => !p.inStock && p.aPedido)
-
-  if (aPedido.length === 0) return null
-
-  return (
-    <section
-      id="productos-a-pedido"
-      className="fnx-home-product-section"
-      style={{
-        margin: '18px 0 0',
-        padding: '14px 24px',
-        scrollMarginTop: 90,
-      }}
-    >
-      <Reveal>
-        <div className="fnx-tonal-product-section">
-          <div className="fnx-tonal-product-section__header">
-            <Link to="/productos-a-pedido" style={{ textDecoration: 'none' }}>
-              <h2 className="fnx-tonal-product-section__title">Productos a pedido</h2>
-            </Link>
-          </div>
-          <InfiniteProductCarousel products={aPedido} label="Productos a pedido" />
         </div>
       </Reveal>
     </section>

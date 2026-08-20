@@ -52,6 +52,7 @@ const FAQS = [
         a: 'Sí, retiro en local es siempre gratuito. Nuestro local está en C. Cantilo 745, City Bell, La Plata. Abrimos de lunes a viernes de 8 a 18 hs corrido, y los sábados de 9 a 14 hs.',
       },
       {
+        id: 'medios-de-pago',
         q: '¿Cuáles son los medios de pago?',
         a: 'Aceptamos transferencia bancaria, efectivo y MercadoPago (tarjeta de crédito con cuotas y tarjeta de débito). Transferencia y efectivo sin recargo. Para pedidos por WhatsApp coordinamos el pago directamente.',
       },
@@ -132,7 +133,11 @@ export default function FAQ() {
                   return (
                     <div
                       key={key}
-                      style={{ borderBottom: i < section.items.length - 1 ? `1px solid ${T.hairline}` : 'none' }}
+                      id={item.id}
+                      style={{
+                        borderBottom: i < section.items.length - 1 ? `1px solid ${T.hairline}` : 'none',
+                        scrollMarginTop: item.id ? 100 : undefined,
+                      }}
                     >
                       <button
                         onClick={() => toggle(key)}
