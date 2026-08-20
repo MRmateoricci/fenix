@@ -660,7 +660,7 @@ router.get('/:id', async (req, res) => {
       `SELECT p.*,
               COALESCE((
                 SELECT jsonb_agg(jsonb_build_object(
-                  'id', vr.id, 'color', vr.color_name, 'colorHex', vr.color_hex, 'size', vr.size_label, 'tone', vr.tone_name,
+                  'id', vr.id, 'color', vr.color_name, 'colorHex', vr.color_hex, 'size', vr.size_label, 'tone', vr.tone_name, 'toneHex', vr.tone_hex,
                   'image', vr.image_url, 'productData', vr.product_data,
                   'precio_costo', vr.precio_costo, 'precio_venta', vr.precio_venta, 'precio_iva', vr.precio_iva,
                   'precio_costo_usd', vr.precio_costo_usd, 'precio_venta_usd', vr.precio_venta_usd,
@@ -694,6 +694,7 @@ router.patch('/:id/variant-rules', async (req, res) => {
     color_hex: /^#[0-9a-f]{6}$/i.test(String(rule.colorHex || '').trim()) ? String(rule.colorHex).trim().toUpperCase() : null,
     size_label: String(rule.size || '').trim() || null,
     tone_name: String(rule.tone || '').trim() || null,
+    tone_hex: /^#[0-9a-f]{6}$/i.test(String(rule.toneHex || '').trim()) ? String(rule.toneHex).trim().toUpperCase() : null,
     image_url: String(rule.image || '').trim() || null,
     product_data: rule.productData && typeof rule.productData === 'object' && !Array.isArray(rule.productData)
       ? normalizeVariantProductData(rule.productData)
@@ -764,14 +765,14 @@ router.patch('/:id/variant-rules', async (req, res) => {
       let savedRuleId = rule.id
       if (rule.id) {
         await client.query(
-          `UPDATE product_variant_rules SET color_name=$1,color_hex=$2,size_label=$3,tone_name=$4,image_url=$5,
-             product_data=COALESCE($6::jsonb,product_data),precio_costo=$7,precio_venta=$8,precio_iva=$9,
-             precio_costo_usd=CASE WHEN price_currency='USD' THEN $10 ELSE precio_costo_usd END,
-             precio_venta_usd=CASE WHEN price_currency='USD' THEN $11 ELSE precio_venta_usd END,
-             precio_iva_usd=CASE WHEN price_currency='USD' THEN $12 ELSE precio_iva_usd END,
-             stock=$13,price_exchange_rate=$14,updated_at=NOW()
-           WHERE id=$15 AND product_id=$16`,
-          [rule.color_name, rule.color_hex, rule.size_label, rule.tone_name, rule.image_url,
+          `UPDATE product_variant_rules SET color_name=$1,color_hex=$2,size_label=$3,tone_name=$4,tone_hex=$5,image_url=$6,
+             product_data=COALESCE($7::jsonb,product_data),precio_costo=$8,precio_venta=$9,precio_iva=$10,
+             precio_costo_usd=CASE WHEN price_currency='USD' THEN $11 ELSE precio_costo_usd END,
+             precio_venta_usd=CASE WHEN price_currency='USD' THEN $12 ELSE precio_venta_usd END,
+             precio_iva_usd=CASE WHEN price_currency='USD' THEN $13 ELSE precio_iva_usd END,
+             stock=$14,price_exchange_rate=$15,updated_at=NOW()
+           WHERE id=$16 AND product_id=$17`,
+          [rule.color_name, rule.color_hex, rule.size_label, rule.tone_name, rule.tone_hex, rule.image_url,
             rule.product_data ? JSON.stringify(rule.product_data) : null, rule.precio_costo,
             rule.precio_venta, rule.precio_iva, usd(rule.precio_costo), usd(rule.precio_venta),
             usd(rule.precio_iva), rule.stock, rate, rule.id, req.params.id]
@@ -779,10 +780,10 @@ router.patch('/:id/variant-rules', async (req, res) => {
       } else {
         const inserted = await client.query(
           `INSERT INTO product_variant_rules
-             (product_id,color_name,color_hex,size_label,tone_name,image_url,product_data,precio_costo,precio_venta,precio_iva,
+             (product_id,color_name,color_hex,size_label,tone_name,tone_hex,image_url,product_data,precio_costo,precio_venta,precio_iva,
                precio_costo_usd,precio_venta_usd,precio_iva_usd,price_currency,price_exchange_rate,stock)
-            VALUES ($1,$2,$3,$4,$5,$6,COALESCE($7::jsonb,'{}'::jsonb),$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING id`,
-          [req.params.id, rule.color_name, rule.color_hex, rule.size_label, rule.tone_name, rule.image_url,
+            VALUES ($1,$2,$3,$4,$5,$6,$7,COALESCE($8::jsonb,'{}'::jsonb),$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING id`,
+          [req.params.id, rule.color_name, rule.color_hex, rule.size_label, rule.tone_name, rule.tone_hex, rule.image_url,
             rule.product_data ? JSON.stringify(rule.product_data) : null, rule.precio_costo, rule.precio_venta, rule.precio_iva,
             usd(rule.precio_costo), usd(rule.precio_venta), usd(rule.precio_iva),
             product.price_currency || 'ARS', rate, rule.stock]
@@ -815,6 +816,10 @@ router.patch('/:id/variant-rules', async (req, res) => {
       }))
     const sizes = rebuild(product.size_options, 'label', normalized.map(rule => rule.size_label))
     const tones = rebuild(product.tone_options, 'name', normalized.map(rule => rule.tone_name), { hex: '#CCCCCC' })
+      .map(tone => ({
+        ...tone,
+        hex: normalized.find(rule => rule.tone_name && String(rule.tone_name).localeCompare(tone.name, 'es-AR', { sensitivity: 'base' }) === 0)?.tone_hex || tone.hex || '#CCCCCC',
+      }))
     await client.query(
       'UPDATE products SET color_options=$1::jsonb,size_options=$2::jsonb,tone_options=$3::jsonb WHERE id=$4',
       [JSON.stringify(colors), JSON.stringify(sizes), JSON.stringify(tones), req.params.id]
@@ -924,7 +929,7 @@ router.post('/batch', async (req, res) => {
       return res.status(400).json({ error: 'Acción masiva no válida' })
     }
 
-    const allowedFields = ['precio_venta', 'precio_costo', 'published']
+    const allowedFields = ['precio_venta', 'precio_costo', 'published', 'a_pedido']
     const changes = req.body.changes && typeof req.body.changes === 'object' ? req.body.changes : {}
     const fields = allowedFields.filter(field => field in changes)
     if (fields.length !== 1) {

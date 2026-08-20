@@ -6,15 +6,16 @@ import { useAuth } from '../context/AuthContext'
 import CartDrawer from './CartDrawer'
 import FenixLogo from '../assets/FenixLogo'
 import { NAVBAR_HEIGHT, ANNOUNCEMENT_BAR_HEIGHT, PAGE_CONTENT_OFFSET } from '../config/layout'
+import { getCategoryValue } from '../data/categoryTree'
 
 const fmtPrice = (n) =>
   new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(n)
 
 const NAV_ITEMS = [
-  { label: 'Electricidad',   to: '/products?category=Electricidad' },
-  { label: 'Iluminación',    to: '/products?category=Iluminación' },
-  { label: 'Herramientas',   to: '/products?category=Herramientas' },
-  { label: 'Automatización', to: '/products?category=Automatización Industrial' },
+  { label: 'Electricidad',   to: '/products?category=Electricidad',            category: 'Electricidad' },
+  { label: 'Iluminación',    to: '/products?category=Iluminación',             category: 'Iluminación' },
+  { label: 'Herramientas',   to: '/products?category=Herramientas',            category: 'Herramientas' },
+  { label: 'Automatización', to: '/products?category=Automatización Industrial', category: 'Automatización Industrial' },
   { label: 'Contacto',      hash: 'contacto' },
 ]
 
@@ -241,7 +242,9 @@ export default function Navbar() {
               </button>
 
               {NAV_ITEMS.map((item) => {
-                const category = item.to ? categoryTree.find((cat) => cat.to === item.to) : null
+                const category = item.category
+                  ? categoryTree.find((cat) => getCategoryValue(cat) === item.category)
+                  : null
                 const isActiveCategory = category && categoryOpen && activeCategoryLabel === category.label
 
                 return (

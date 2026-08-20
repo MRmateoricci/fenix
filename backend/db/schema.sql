@@ -323,6 +323,10 @@ CREATE TABLE IF NOT EXISTS product_variant_rules (
 ALTER TABLE product_variant_rules ADD COLUMN IF NOT EXISTS image_url TEXT;
 ALTER TABLE product_variant_rules ADD COLUMN IF NOT EXISTS color_hex VARCHAR(7);
 ALTER TABLE product_variant_rules ADD COLUMN IF NOT EXISTS product_data JSONB NOT NULL DEFAULT '{}';
+-- Color representativo del tono de esta variante (ej: tostado para "Cálido").
+-- Sin esta columna no había forma de que el admin eligiera el color al unir
+-- productos o editar variantes ya agrupadas, y el tono quedaba siempre gris.
+ALTER TABLE product_variant_rules ADD COLUMN IF NOT EXISTS tone_hex VARCHAR(7);
 
 CREATE INDEX IF NOT EXISTS idx_product_variant_rules_product
   ON product_variant_rules(product_id);

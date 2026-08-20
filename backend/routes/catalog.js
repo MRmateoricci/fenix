@@ -22,7 +22,7 @@ const SELECT_FIELDS = `
   COALESCE(dias_entrega_pedido, (SELECT dias_entrega_pedido_default FROM store_settings WHERE id = 1), 7) AS dias_entrega_pedido_effective,
   COALESCE((
     SELECT jsonb_agg(jsonb_build_object(
-      'id', vr.id, 'color', vr.color_name, 'colorHex', vr.color_hex, 'size', vr.size_label, 'tone', vr.tone_name,
+      'id', vr.id, 'color', vr.color_name, 'colorHex', vr.color_hex, 'size', vr.size_label, 'tone', vr.tone_name, 'toneHex', vr.tone_hex,
       'image', vr.image_url, 'productData', vr.product_data,
       'price', vr.precio_venta, 'priceUsd', vr.precio_venta_usd,
       'priceWithTax', vr.precio_iva, 'priceWithTaxUsd', vr.precio_iva_usd,
@@ -52,6 +52,7 @@ export function mapRow(r) {
     colorHex: rule.colorHex || null,
     size: rule.size || null,
     tone: rule.tone || null,
+    toneHex: rule.toneHex || null,
     image: rule.image || null,
     productData: rule.productData && typeof rule.productData === 'object' ? rule.productData : {},
     price: resolvePublicPrice({

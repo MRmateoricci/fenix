@@ -186,19 +186,6 @@ export default function ProductCard({ product }) {
                 }} />
             }
 
-            {!product.inStock && (
-              <span className="fnx-product-card__stock" style={{
-                position: 'absolute', top: 12, right: 13, zIndex: 1,
-                fontFamily: "'Inter', system-ui, sans-serif",
-                fontSize: 10, letterSpacing: '.06em', textTransform: 'uppercase',
-                color: T.muted2,
-                background: 'rgba(247,244,239,0.92)',
-                padding: '4px 9px', borderRadius: 2,
-              }}>
-                Sin stock
-              </span>
-            )}
-
             {/* Favorite button */}
             <button
               type="button"
@@ -206,7 +193,7 @@ export default function ProductCard({ product }) {
               onClick={handleToggleFavorite}
               aria-label={favorite ? 'Quitar de favoritos' : 'Agregar a favoritos'}
               style={{
-                position: 'absolute', top: product.inStock ? 12 : 44, right: 13, zIndex: 1,
+                position: 'absolute', top: 12, right: 13, zIndex: 1,
                 width: 26, height: 26, display: 'flex', alignItems: 'center', justifyContent: 'center',
                 background: 'rgba(247,244,239,0.92)', border: 'none', borderRadius: '50%',
                 cursor: 'pointer', padding: 0,
@@ -364,7 +351,6 @@ export default function ProductCard({ product }) {
             fontFamily: "'Inter', system-ui, sans-serif",
             fontSize: 19, fontWeight: 600, color: T.ink,
           }}>
-            {product.priceFrom && <span style={{ fontSize: '0.72em', fontWeight: 500, marginRight: 5 }}>Desde</span>}
             {fmt(displayPrice)}
           </span>
           <span className="fnx-product-card__installments" style={{ fontFamily: "'Inter', system-ui, sans-serif", fontSize: 12, color: T.text3 }}>

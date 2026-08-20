@@ -240,7 +240,7 @@ export async function loadMergePreview(client, rawIds) {
        (SELECT COUNT(*)::integer FROM product_variant_rules vr WHERE vr.product_id=p.id) AS variant_rule_count,
        COALESCE((
          SELECT jsonb_agg(jsonb_build_object(
-           'id', vr.id, 'color', vr.color_name, 'colorHex', vr.color_hex, 'size', vr.size_label, 'tone', vr.tone_name,
+           'id', vr.id, 'color', vr.color_name, 'colorHex', vr.color_hex, 'size', vr.size_label, 'tone', vr.tone_name, 'toneHex', vr.tone_hex,
            'image', vr.image_url, 'productData', vr.product_data, 'precio_venta', vr.precio_venta, 'precio_iva', vr.precio_iva,
            'stock', vr.stock,
            'supplierCodes', COALESCE((
@@ -325,6 +325,7 @@ export async function mergeProducts(client, payload) {
       color_hex: cleanHex(assignment.colorHex),
       size_label: cleanLabel(assignment.size),
       tone_name: cleanLabel(assignment.tone),
+      tone_hex: cleanHex(assignment.toneHex),
       product_data: normalizeVariantProductData(assignment.productData, rule.product_data || base),
       values: mergeRuleValues({ ...rule, codigo: code }, assignment),
       product: { codigo: code },
@@ -340,6 +341,7 @@ export async function mergeProducts(client, payload) {
       color_hex: cleanHex(assignment.colorHex),
       size_label: cleanLabel(assignment.size),
       tone_name: cleanLabel(assignment.tone),
+      tone_hex: cleanHex(assignment.toneHex),
       product_data: normalizeVariantProductData(assignment.productData, product),
       values: mergeRuleValues(product, assignment),
     }
@@ -354,11 +356,11 @@ export async function mergeProducts(client, payload) {
   for (const rule of revisedRetainedRules) {
     if (!rule.values) continue
     await client.query(
-      `UPDATE product_variant_rules SET color_name=$1,color_hex=$2,size_label=$3,tone_name=$4,product_data=$5::jsonb,
-         precio_venta=$6,precio_iva=$7,
-         precio_venta_usd=$8,precio_iva_usd=$9,stock=$10,updated_at=NOW()
-       WHERE id=$11 AND product_id=$12`,
-      [rule.color_name, rule.color_hex, rule.size_label, rule.tone_name, JSON.stringify(rule.product_data), rule.values.saleArs, rule.values.taxArs,
+      `UPDATE product_variant_rules SET color_name=$1,color_hex=$2,size_label=$3,tone_name=$4,tone_hex=$5,product_data=$6::jsonb,
+         precio_venta=$7,precio_iva=$8,
+         precio_venta_usd=$9,precio_iva_usd=$10,stock=$11,updated_at=NOW()
+       WHERE id=$12 AND product_id=$13`,
+      [rule.color_name, rule.color_hex, rule.size_label, rule.tone_name, rule.tone_hex, JSON.stringify(rule.product_data), rule.values.saleArs, rule.values.taxArs,
         rule.values.saleUsd, rule.values.taxUsd, rule.values.stock, rule.id, baseId]
     )
     await client.query(
@@ -379,19 +381,19 @@ export async function mergeProducts(client, payload) {
     })
     sizes = appendOption(sizes, 'label', rule.size_label, previousOption(base.size_options, 'label', rule.size_label))
     tones = appendOption(tones, 'name', rule.tone_name, {
-      ...previousOption(base.tone_options, 'name', rule.tone_name), hex: previousOption(base.tone_options, 'name', rule.tone_name).hex || '#CCCCCC',
+      ...previousOption(base.tone_options, 'name', rule.tone_name), hex: rule.tone_hex || previousOption(base.tone_options, 'name', rule.tone_name).hex || '#CCCCCC',
     })
   }
   for (const rule of candidateRules) {
     colors = appendOption(colors, 'name', rule.color_name, { hex: rule.color_hex || '#CCCCCC', image: rule.product.image_url || '' })
     sizes = appendOption(sizes, 'label', rule.size_label)
-    tones = appendOption(tones, 'name', rule.tone_name, { hex: '#CCCCCC' })
+    tones = appendOption(tones, 'name', rule.tone_name, { hex: rule.tone_hex || '#CCCCCC' })
     const { rows } = await client.query(
       `INSERT INTO product_variant_rules
-         (product_id,color_name,color_hex,size_label,tone_name,image_url,product_data,precio_costo,precio_venta,precio_iva,
+         (product_id,color_name,color_hex,size_label,tone_name,tone_hex,image_url,product_data,precio_costo,precio_venta,precio_iva,
           precio_costo_usd,precio_venta_usd,precio_iva_usd,price_currency,price_exchange_rate,stock)
-       VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING id`,
-      [baseId, rule.color_name, rule.color_hex, rule.size_label, rule.tone_name, rule.product.image_url || null,
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING id`,
+      [baseId, rule.color_name, rule.color_hex, rule.size_label, rule.tone_name, rule.tone_hex, rule.product.image_url || null,
         JSON.stringify(rule.product_data), rule.product.precio_costo, rule.values.saleArs, rule.values.taxArs,
         rule.product.precio_costo_usd, rule.values.saleUsd, rule.values.taxUsd,
         rule.product.price_currency || 'ARS', rule.product.price_exchange_rate, rule.values.stock]
@@ -439,7 +441,7 @@ export async function mergeProducts(client, payload) {
 async function rebuildGroupedAxes(client, productId) {
   const [{ rows: products }, { rows: rules }] = await Promise.all([
     client.query('SELECT color_options,size_options,tone_options FROM products WHERE id=$1', [productId]),
-    client.query('SELECT color_name,color_hex,size_label,tone_name FROM product_variant_rules WHERE product_id=$1', [productId]),
+    client.query('SELECT color_name,color_hex,size_label,tone_name,tone_hex FROM product_variant_rules WHERE product_id=$1', [productId]),
   ])
   const product = products[0]
   if (!product) return
@@ -456,7 +458,11 @@ async function rebuildGroupedAxes(client, productId) {
         return { ...(previous || {}), name: value, hex: rule?.color_hex || previous?.hex || '#CCCCCC' }
       })),
       JSON.stringify(rebuild(product.size_options, 'label', rules.map(rule => rule.size_label))),
-      JSON.stringify(rebuild(product.tone_options, 'name', rules.map(rule => rule.tone_name), { hex: '#CCCCCC' })),
+      JSON.stringify([...new Set(rules.map(rule => rule.tone_name).filter(Boolean))].map(value => {
+        const rule = rules.find(item => same(item.tone_name, value))
+        const previous = (Array.isArray(product.tone_options) ? product.tone_options : []).find(option => same(option?.name, value))
+        return { ...(previous || {}), name: value, hex: rule?.tone_hex || previous?.hex || '#CCCCCC' }
+      })),
       productId,
     ]
   )
