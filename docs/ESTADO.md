@@ -7,8 +7,8 @@
 > Si el cambio merece un commit con mensaje propio, merece una entrada acá.
 > Un ajuste de padding, no.
 
-**Última actualización:** 19 de agosto de 2026
-**Commit de referencia:** `2cf994d` + cambios locales sin commit
+**Última actualización:** 20 de agosto de 2026
+**Commit de referencia:** `5a4874f`
 
 ---
 
@@ -52,6 +52,20 @@ Campos físicos ya en el esquema y listos para el cotizador: `length_cm`,
 
 **Falta:** poblar dimensiones y peso en los productos reales. Sin esto no hay
 cotizador de envío confiable.
+
+**Galería de fotos (2026-08-20):** `products.gallery_images` (JSONB, default
+`[]`) guarda fotos adicionales del producto, en orden. Es una galería única por
+producto — no varía por color/tono/medida, a diferencia de `image_url` (portada)
+y de la imagen individual por variante (`product_variant_rules.image_url`).
+Se carga en el admin con selector de archivos múltiple, reordenar y quitar
+(`MultiImageField` en `AdminDashboard.jsx`) y se muestra como tira de miniaturas
+debajo de la foto principal en `ProductDetail.jsx` (clic en una miniatura cambia
+la imagen grande; cambiar de variante vuelve a la miniatura 0).
+
+**Acción masiva "Cambiar categoría" (2026-08-20):** en Productos, permite
+reasignar categoría/subcategoría a los productos seleccionados en una sola
+transacción (`POST /api/products/batch`, acción `category`), sumada a las
+acciones de precio/publicación/"a pedido" que ya existían.
 
 ### Productos a pedido
 
