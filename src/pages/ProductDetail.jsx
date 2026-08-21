@@ -87,6 +87,7 @@ export default function ProductDetail() {
   const [selectedSize, setSelectedSize] = useState(product?.sizes?.[0] ?? null)
   const [selectedTone, setSelectedTone] = useState(product?.tones?.[0] ?? null)
   const [imgError, setImgError] = useState(false)
+  const [activeImageIndex, setActiveImageIndex] = useState(0)
   const hasDefaultColorOption = hasPublicAxisFallback(product?.variantRules, 'color')
   const ruleSelection = { color: selectedColor?.name, size: selectedSize?.label, tone: selectedTone?.name }
   const selectedPriceRule = resolvePublicVariantRule(product?.variantRules, ruleSelection, 'price')
@@ -209,8 +210,12 @@ export default function ProductDetail() {
     setQty((q) => Math.max(1, Math.min(q, availableStock || 1)))
   }, [availableStock])
 
+  // Cambiar de color/tono/medida muestra la foto de esa combinación primero;
+  // si el usuario había elegido una miniatura de la galería, se vuelve a la
+  // foto principal para no dejar una miniatura "vieja" seleccionada.
   useEffect(() => {
     setImgError(false)
+    setActiveImageIndex(0)
   }, [selectedImage])
 
   useEffect(() => {
@@ -274,13 +279,18 @@ export default function ProductDetail() {
 
   const displayImage = selectedImage
   const bigImage = displayImage?.replace('w=400&h=400', 'w=900&h=900') || null
+  // Galería única por producto (no varía por color/tono): la foto de la
+  // combinación elegida siempre encabeza la tira de miniaturas.
+  const galleryImages = Array.isArray(product?.galleryImages) ? product.galleryImages.filter(Boolean) : []
+  const galleryThumbs = [bigImage, ...galleryImages.filter(url => url !== bigImage)].filter(Boolean)
+  const activeImage = galleryThumbs[activeImageIndex] ?? bigImage ?? null
 
   const productSchema = {
     '@context': 'https://schema.org',
     '@type': 'Product',
     name: displayName,
     description: displayDescription,
-    image: bigImage,
+    image: galleryThumbs.length > 0 ? galleryThumbs : bigImage,
     brand: { '@type': 'Brand', name: seoCfg.business.name },
     offers: {
       '@type': 'Offer',
@@ -354,19 +364,48 @@ export default function ProductDetail() {
                 overflow: 'hidden',
                 backgroundColor: 'var(--color-surface-2)',
               }}>
-                {(!bigImage || imgError) ? (
+                {(!activeImage || imgError) ? (
                   <div className="fnx-pd-image-fallback">
                     <FenixLogo height={64} />
                   </div>
                 ) : (
                   <img
-                    src={bigImage}
+                    src={activeImage}
                     alt={displayName}
                     style={{ width: '100%', display: 'block', objectFit: 'cover' }}
                     onError={() => setImgError(true)}
                   />
                 )}
               </div>
+
+              {galleryThumbs.length > 1 && (
+                <div style={{ display: 'flex', gap: 10, marginTop: 12, flexWrap: 'wrap' }}>
+                  {galleryThumbs.map((url, idx) => {
+                    const isActive = idx === activeImageIndex
+                    return (
+                      <button
+                        key={`${url}-${idx}`}
+                        type="button"
+                        onClick={() => { setActiveImageIndex(idx); setImgError(false) }}
+                        aria-label={`Ver foto ${idx + 1} de ${displayName}`}
+                        aria-pressed={isActive}
+                        style={{
+                          width: 64, height: 64, padding: 0, flexShrink: 0,
+                          borderRadius: 8, overflow: 'hidden', cursor: 'pointer',
+                          backgroundColor: 'var(--color-surface-2)',
+                          border: isActive ? '2px solid var(--color-text)' : '1.5px solid var(--color-border)',
+                          opacity: isActive ? 1 : 0.7,
+                          transition: 'opacity .15s, border-color .15s',
+                        }}
+                        onMouseEnter={(e) => { e.currentTarget.style.opacity = '1' }}
+                        onMouseLeave={(e) => { e.currentTarget.style.opacity = isActive ? '1' : '0.7' }}
+                      >
+                        <img src={url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
             </div>
 
             {/* ── Product info ──────────────────────────────────────────────── */}

@@ -220,6 +220,9 @@ ALTER TABLE products ADD COLUMN IF NOT EXISTS description_larga TEXT;
 ALTER TABLE products ADD COLUMN IF NOT EXISTS original_price    NUMERIC(14,2);
 ALTER TABLE products ADD COLUMN IF NOT EXISTS image_url         TEXT;
 ALTER TABLE products ADD COLUMN IF NOT EXISTS hover_image_url   TEXT;
+-- Fotos adicionales para la galería del detalle de producto, en el orden en
+-- que se muestran (no reemplaza a image_url, que sigue siendo la portada).
+ALTER TABLE products ADD COLUMN IF NOT EXISTS gallery_images    JSONB NOT NULL DEFAULT '[]';
 ALTER TABLE products ADD COLUMN IF NOT EXISTS color_options     JSONB NOT NULL DEFAULT '[]';
 ALTER TABLE products ADD COLUMN IF NOT EXISTS size_options      JSONB NOT NULL DEFAULT '[]';
 -- Tono de luz (ej: cálido/neutro/frío), típico de focos y reflectores.

@@ -875,6 +875,7 @@ const FIELD_TRANSFORMS = {
   original_price:    (v) => toNumber(v),
   image_url:         (v) => v,
   hover_image_url:   (v) => v,
+  gallery_images:    (v) => JSON.stringify(Array.isArray(v) ? v.filter(Boolean).map(String) : []),
   color_options:     (v) => JSON.stringify(v ?? []),
   size_options:      (v) => JSON.stringify(v ?? []),
   tone_options:      (v) => JSON.stringify(v ?? []),
@@ -929,30 +930,49 @@ router.post('/batch', async (req, res) => {
       return res.status(400).json({ error: 'Acción masiva no válida' })
     }
 
-    const allowedFields = ['precio_venta', 'precio_costo', 'published', 'a_pedido']
+    const singleFields = ['precio_venta', 'precio_costo', 'published', 'a_pedido']
+    const groupFields = ['category', 'subcategory']
     const changes = req.body.changes && typeof req.body.changes === 'object' ? req.body.changes : {}
-    const fields = allowedFields.filter(field => field in changes)
-    if (fields.length !== 1) {
-      await client.query('ROLLBACK')
-      return res.status(400).json({ error: 'Elegí un único cambio para aplicar' })
+    const singlePresent = singleFields.filter(field => field in changes)
+    const groupPresent = groupFields.filter(field => field in changes)
+
+    const setClauses = []
+    const params = []
+
+    if (groupPresent.length) {
+      if (singlePresent.length || groupPresent.length !== groupFields.length || !changes.category) {
+        await client.query('ROLLBACK')
+        return res.status(400).json({ error: 'Elegí una categoría válida' })
+      }
+      for (const field of groupFields) {
+        params.push(FIELD_TRANSFORMS[field](changes[field]))
+        setClauses.push(`${field} = $${params.length}`)
+      }
+    } else {
+      if (singlePresent.length !== 1) {
+        await client.query('ROLLBACK')
+        return res.status(400).json({ error: 'Elegí un único cambio para aplicar' })
+      }
+      const field = singlePresent[0]
+      const value = FIELD_TRANSFORMS[field](changes[field])
+      if ((field === 'precio_venta' || field === 'precio_costo') && (!Number.isFinite(value) || value < 0)) {
+        await client.query('ROLLBACK')
+        return res.status(400).json({ error: 'El precio debe ser un número mayor o igual a cero' })
+      }
+      params.push(value)
+      setClauses.push(`${field} = $${params.length}`)
+      const usdField = field === 'precio_venta' ? 'precio_venta_usd' : field === 'precio_costo' ? 'precio_costo_usd' : null
+      if (usdField) {
+        setClauses.push(`${usdField} = CASE WHEN price_currency = 'USD'
+                              THEN $${params.length} / COALESCE((SELECT usd_ars_rate FROM store_settings WHERE id = 1), 1510)
+                              ELSE ${usdField} END`)
+      }
     }
 
-    const field = fields[0]
-    const value = FIELD_TRANSFORMS[field](changes[field])
-    if ((field === 'precio_venta' || field === 'precio_costo') && (!Number.isFinite(value) || value < 0)) {
-      await client.query('ROLLBACK')
-      return res.status(400).json({ error: 'El precio debe ser un número mayor o igual a cero' })
-    }
-
-    const usdField = field === 'precio_venta' ? 'precio_venta_usd' : field === 'precio_costo' ? 'precio_costo_usd' : null
-    const usdSync = usdField
-      ? `, ${usdField} = CASE WHEN price_currency = 'USD'
-                              THEN $1 / COALESCE((SELECT usd_ars_rate FROM store_settings WHERE id = 1), 1510)
-                              ELSE ${usdField} END`
-      : ''
+    params.push(ids)
     const { rows } = await client.query(
-      `UPDATE products SET ${field} = $1${usdSync} WHERE id = ANY($2::uuid[]) RETURNING *`,
-      [value, ids]
+      `UPDATE products SET ${setClauses.join(', ')} WHERE id = ANY($${params.length}::uuid[]) RETURNING *`,
+      params
     )
     await client.query('COMMIT')
     res.json({ products: rows, updated: rows.length })

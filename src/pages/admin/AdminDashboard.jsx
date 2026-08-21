@@ -343,6 +343,97 @@ function ImageFileField({ label, value, onChange, productId, compact = false }) 
   )
 }
 
+// ── MultiImageField — galería de fotos del producto (además de la portada).
+// Permite seleccionar varios archivos a la vez, reordenarlos y quitarlos.
+function MultiImageField({ label, hint, value, onChange, productId }) {
+  const inputRef = useRef(null)
+  const { uploadProductImage } = useAdmin()
+  const [error, setError] = useState('')
+  const [uploading, setUploading] = useState(false)
+  const images = value || []
+
+  const handleFiles = async (files) => {
+    setError('')
+    for (const file of files) {
+      if (!file.type.startsWith('image/')) { setError('Todos los archivos deben ser imágenes'); return }
+      if (file.size > MAX_IMAGE_BYTES) { setError('Cada imagen no puede pesar más de 8 MB'); return }
+    }
+    setUploading(true)
+    try {
+      const uploaded = []
+      for (const file of files) {
+        const { url } = await uploadProductImage(productId, file)
+        uploaded.push(url)
+      }
+      onChange([...images, ...uploaded])
+    } catch (err) {
+      setError(err.message || 'No se pudo subir alguna imagen')
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  const removeAt = idx => onChange(images.filter((_, i) => i !== idx))
+  const moveAt = (idx, dir) => {
+    const next = idx + dir
+    if (next < 0 || next >= images.length) return
+    const copy = [...images]
+    ;[copy[idx], copy[next]] = [copy[next], copy[idx]]
+    onChange(copy)
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {label && <label style={lbl}>{label}</label>}
+      {hint && <p style={{ fontSize: 11.5, color: C.muted, margin: 0 }}>{hint}</p>}
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/*"
+        multiple
+        style={{ display: 'none' }}
+        onChange={e => {
+          const files = Array.from(e.target.files || [])
+          if (files.length) handleFiles(files)
+          e.target.value = ''
+        }}
+      />
+      {images.length > 0 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+          {images.map((url, idx) => (
+            <div key={url + idx} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
+              <div style={{ position: 'relative' }}>
+                <img src={url} alt="" style={{ width: 56, height: 56, objectFit: 'cover', borderRadius: 6, border: `1px solid ${C.border}`, display: 'block' }} />
+                <button
+                  type="button"
+                  onClick={() => removeAt(idx)}
+                  aria-label="Quitar foto"
+                  title="Quitar"
+                  style={{
+                    position: 'absolute', top: -7, right: -7, width: 18, height: 18, borderRadius: '50%',
+                    border: `1px solid ${C.border}`, background: C.white, color: C.red, cursor: 'pointer',
+                    fontSize: 10, lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0,
+                  }}
+                >
+                  ✕
+                </button>
+              </div>
+              <div style={{ display: 'flex', gap: 2 }}>
+                <button type="button" disabled={idx === 0} onClick={() => moveAt(idx, -1)} title="Mover antes" style={{ ...outlineBtn, padding: '1px 6px', fontSize: 9.5, opacity: idx === 0 ? 0.35 : 1, cursor: idx === 0 ? 'default' : 'pointer' }}>◀</button>
+                <button type="button" disabled={idx === images.length - 1} onClick={() => moveAt(idx, 1)} title="Mover después" style={{ ...outlineBtn, padding: '1px 6px', fontSize: 9.5, opacity: idx === images.length - 1 ? 0.35 : 1, cursor: idx === images.length - 1 ? 'default' : 'pointer' }}>▶</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      <button type="button" disabled={uploading} onClick={() => inputRef.current?.click()} style={{ ...outlineBtn, fontSize: 11.5, padding: '7px 12px', width: 'fit-content', opacity: uploading ? 0.6 : 1 }}>
+        {uploading ? 'Subiendo...' : images.length ? '+ Agregar más fotos' : 'Subir fotos'}
+      </button>
+      {error && <p style={{ fontSize: 11, color: C.red, margin: 0 }}>{error}</p>}
+    </div>
+  )
+}
+
 // ── ProductModal ──────────────────────────────────────────────────────────────
 // Best-effort: adivina la categoría a partir de grupo/subgrupo del Inventario
 // (marca/distribuidor del proveedor, no coincide 1 a 1 con las categorías de
@@ -651,7 +742,7 @@ const EMPTY = {
   priceCost: '', priceWithTax: '',
   name: '', category: '', subcategory: '', productType: '',
   price: '', originalPrice: '',
-  description: '', image: '', hoverImage: '',
+  description: '', image: '', hoverImage: '', galleryImages: [],
   watts: '', amperes: '',
   lengthCm: '', widthCm: '', heightCm: '', weightKg: '',
   inStock: true, stock: '', colors: [], sizes: [], tones: [], variantStock: {}, variantRules: [],
@@ -681,6 +772,7 @@ function draftFromInventoryRow(inv) {
     inStock:     inv.stock > 0,
     image:       inv.image_url || '',
     hoverImage:  inv.hover_image_url || '',
+    galleryImages: Array.isArray(inv.gallery_images) ? inv.gallery_images : [],
     colorTemp:   inv.color_temp,
     ipRating:    inv.ip_rating,
     watts:       inv.watts,
@@ -727,6 +819,7 @@ function toUnifiedProductPayload(data) {
     original_price: data.originalPrice ?? null,
     image_url: data.image || null,
     hover_image_url: data.hoverImage || null,
+    gallery_images: Array.isArray(data.galleryImages) ? data.galleryImages.filter(Boolean) : [],
     color_options: data.colors || [],
     size_options: data.sizes || [],
     tone_options: data.tones || [],
@@ -1134,6 +1227,16 @@ function ProductModal({ product, onSave, onClose, onVariantsChanged, publishOnSa
               onChange={e => set('description', e.target.value)}
               rows={3}
               style={{ ...inp, resize: 'vertical' }}
+            />
+          </div>
+
+          <div style={{ gridColumn: 'span 2' }}>
+            <MultiImageField
+              label="Galería de fotos (opcional)"
+              hint="Se muestran como miniaturas debajo de la foto principal en la página del producto."
+              value={form.galleryImages}
+              onChange={value => set('galleryImages', value)}
+              productId={product?.id}
             />
           </div>
 
@@ -7301,6 +7404,7 @@ function UnifiedProductsTab() {
     parseInvoicePdf, applyInvoiceLines,
     parseCatalogImagesPdf, uploadCatalogPreviewImage, applyCatalogImages,
     parseFolderImages, applyFolderImages,
+    categoryTree,
   } = useAdmin()
 
   const [search, setSearch]           = useState('')
@@ -7345,6 +7449,8 @@ function UnifiedProductsTab() {
   const [selectedIds, setSelectedIds]       = useState(() => new Set())
   const [bulkAction, setBulkAction]         = useState('precio_venta')
   const [bulkPrice, setBulkPrice]           = useState('')
+  const [bulkCategory, setBulkCategory]     = useState('')
+  const [bulkSubcategory, setBulkSubcategory] = useState('')
   const [bulkSaving, setBulkSaving]         = useState(false)
   const [bulkError, setBulkError]           = useState('')
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false)
@@ -7391,6 +7497,8 @@ function UnifiedProductsTab() {
   const selectedCount = selectedIds.size
   const pageIds = inventory.map(product => product.id)
   const allResultsSelected = inventoryTotal > 0 && selectedCount === inventoryTotal
+  const bulkCategoryOptions = categoryTree.map(node => ({ value: getCategoryValue(node), label: node.label }))
+  const bulkSubcategoryOptions = getSubcategoryOptions(bulkCategory, categoryTree).map(node => node.label)
 
   useEffect(() => {
     if (selectPageRef.current) {
@@ -7747,10 +7855,17 @@ function UnifiedProductsTab() {
           ? { a_pedido: true }
           : bulkAction === 'a_pedido_off'
             ? { a_pedido: false }
-            : { [bulkAction]: Number(bulkPrice) }
+            : bulkAction === 'category'
+              ? { category: bulkCategory, subcategory: bulkSubcategory || null }
+              : { [bulkAction]: Number(bulkPrice) }
 
     if ((bulkAction === 'precio_venta' || bulkAction === 'precio_costo') && (bulkPrice === '' || !Number.isFinite(Number(bulkPrice)) || Number(bulkPrice) < 0)) {
       setBulkError('Ingresá un precio válido mayor o igual a cero.')
+      return
+    }
+
+    if (bulkAction === 'category' && !bulkCategory) {
+      setBulkError('Elegí una categoría.')
       return
     }
 
@@ -7759,6 +7874,8 @@ function UnifiedProductsTab() {
     try {
       await applyInventoryBatch([...selectedIds], 'update', changes)
       setBulkPrice('')
+      setBulkCategory('')
+      setBulkSubcategory('')
       await refreshAfterBulkAction()
     } catch (err) {
       setBulkError(err.message || 'No se pudo aplicar el cambio')
@@ -8159,6 +8276,7 @@ function UnifiedProductsTab() {
             <option value="unpublished">Quitar de tienda</option>
             <option value="a_pedido_on">Marcar "a pedido"</option>
             <option value="a_pedido_off">Quitar "a pedido"</option>
+            <option value="category">Cambiar categoría</option>
           </select>
           {(bulkAction === 'precio_venta' || bulkAction === 'precio_costo') && (
             <input
@@ -8166,6 +8284,28 @@ function UnifiedProductsTab() {
               value={bulkPrice} onChange={event => setBulkPrice(event.target.value)} disabled={bulkSaving}
               style={{ ...headerFilterControl, width: 140 }}
             />
+          )}
+          {bulkAction === 'category' && (
+            <>
+              <select
+                value={bulkCategory}
+                onChange={event => { setBulkCategory(event.target.value); setBulkSubcategory('') }}
+                disabled={bulkSaving}
+                style={{ ...headerFilterControl, width: 170 }}
+              >
+                <option value="">Elegí categoría</option>
+                {bulkCategoryOptions.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+              </select>
+              <select
+                value={bulkSubcategory}
+                onChange={event => setBulkSubcategory(event.target.value)}
+                disabled={bulkSaving || !bulkCategory}
+                style={{ ...headerFilterControl, width: 170 }}
+              >
+                <option value="">Sin subcategoría</option>
+                {bulkSubcategoryOptions.map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </>
           )}
           <button type="button" onClick={handleApplyBulkAction} disabled={bulkSaving} style={{ ...solidBtn, background: C.green, color: '#fff', opacity: bulkSaving ? 0.65 : 1 }}>
             {bulkSaving ? 'Aplicando...' : 'Aplicar'}

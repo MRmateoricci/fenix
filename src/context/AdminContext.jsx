@@ -25,6 +25,7 @@ function toBackendPayload(p) {
   if ('originalPrice' in p) out.original_price    = p.originalPrice ?? null
   if ('image' in p)         out.image_url         = p.image
   if ('hoverImage' in p)    out.hover_image_url    = p.hoverImage
+  if ('galleryImages' in p) out.gallery_images     = p.galleryImages
   if ('colors' in p)        out.color_options      = p.colors
   if ('sizes' in p)         out.size_options       = p.sizes
   if ('tones' in p)         out.tone_options       = p.tones
