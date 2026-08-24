@@ -1,4 +1,10 @@
 import path from 'node:path';
+import os from 'node:os';
+import {
+  chmodSync,
+  mkdirSync,
+  writeFileSync,
+} from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
 
@@ -122,6 +128,110 @@ export function resolveBackendPath(filePath) {
     : path.resolve(backendRoot, configuredPath);
 }
 
+function decodeBase64Credential(name, value) {
+  const normalized = String(value ?? '').replace(/\s/g, '');
+  const validAlphabet = /^[A-Za-z0-9+/]+={0,2}$/.test(normalized);
+  if (!normalized || !validAlphabet || normalized.length % 4 === 1) {
+    throw new ArcaConfigError(
+      `${name} no contiene Base64 v\u00e1lido.`,
+      `${name}_INVALID`,
+    );
+  }
+
+  const decoded = Buffer.from(normalized, 'base64');
+  const canonicalInput = normalized.replace(/=+$/, '');
+  const canonicalDecoded = decoded.toString('base64').replace(/=+$/, '');
+  if (!decoded.length || canonicalInput !== canonicalDecoded) {
+    throw new ArcaConfigError(
+      `${name} no contiene Base64 v\u00e1lido.`,
+      `${name}_INVALID`,
+    );
+  }
+  return decoded;
+}
+
+function assertPemCertificate(certificate) {
+  const pem = certificate.toString('utf8');
+  if (!pem.includes('-----BEGIN CERTIFICATE-----')
+    || !pem.includes('-----END CERTIFICATE-----')) {
+    throw new ArcaConfigError(
+      'ARCA_CERT_BASE64 no contiene un certificado PEM.',
+      'ARCA_CERT_BASE64_INVALID',
+    );
+  }
+}
+
+function assertPemPrivateKey(privateKey) {
+  const pem = privateKey.toString('utf8');
+  const opening = pem.match(/-----BEGIN ((?:RSA |EC )?PRIVATE KEY)-----/);
+  if (!opening || !pem.includes(`-----END ${opening[1]}-----`)) {
+    throw new ArcaConfigError(
+      'ARCA_KEY_BASE64 no contiene una private key PEM sin contrase\u00f1a.',
+      'ARCA_KEY_BASE64_INVALID',
+    );
+  }
+}
+
+/**
+ * Railway entrega secretos como variables de entorno. Cuando existen ambas
+ * credenciales Base64, se materializan fuera del repositorio con permisos
+ * restringidos para que OpenSSL pueda consumirlas como archivos. En desarrollo
+ * se conservan las rutas locales tradicionales.
+ */
+export function resolveArcaCredentialPaths(
+  environmentVariables = process.env,
+  temporaryRoot = os.tmpdir(),
+) {
+  const encodedCertificate = String(environmentVariables.ARCA_CERT_BASE64 || '').trim();
+  const encodedPrivateKey = String(environmentVariables.ARCA_KEY_BASE64 || '').trim();
+  const hasCertificate = Boolean(encodedCertificate);
+  const hasPrivateKey = Boolean(encodedPrivateKey);
+
+  if (!hasCertificate && !hasPrivateKey) {
+    return Object.freeze({
+      certificatePath: resolveBackendPath(
+        environmentVariables.ARCA_CERT_PATH || './config/arca/arca_certificate.crt',
+      ),
+      privateKeyPath: resolveBackendPath(
+        environmentVariables.ARCA_KEY_PATH || './config/arca/arca_private.key',
+      ),
+      source: 'files',
+    });
+  }
+
+  if (!hasCertificate || !hasPrivateKey) {
+    throw new ArcaConfigError(
+      'ARCA_CERT_BASE64 y ARCA_KEY_BASE64 deben configurarse juntas.',
+      'ARCA_BASE64_CREDENTIALS_INCOMPLETE',
+    );
+  }
+
+  const certificate = decodeBase64Credential('ARCA_CERT_BASE64', encodedCertificate);
+  const privateKey = decodeBase64Credential('ARCA_KEY_BASE64', encodedPrivateKey);
+  assertPemCertificate(certificate);
+  assertPemPrivateKey(privateKey);
+
+  const credentialsDirectory = path.join(temporaryRoot, 'fenix-arca');
+  const certificatePath = path.join(credentialsDirectory, 'certificate.crt');
+  const privateKeyPath = path.join(credentialsDirectory, 'private.key');
+
+  try {
+    mkdirSync(credentialsDirectory, { recursive: true, mode: 0o700 });
+    chmodSync(credentialsDirectory, 0o700);
+    writeFileSync(certificatePath, certificate, { mode: 0o600 });
+    writeFileSync(privateKeyPath, privateKey, { mode: 0o600 });
+    chmodSync(certificatePath, 0o600);
+    chmodSync(privateKeyPath, 0o600);
+  } catch {
+    throw new ArcaConfigError(
+      'No se pudieron preparar las credenciales temporales de ARCA.',
+      'ARCA_BASE64_CREDENTIALS_WRITE_ERROR',
+    );
+  }
+
+  return Object.freeze({ certificatePath, privateKeyPath, source: 'base64' });
+}
+
 export function normalizeCuit(value) {
   const cuit = String(value ?? '').replace(/\D/g, '');
   if (!/^\d{11}$/.test(cuit)) {
@@ -176,6 +286,7 @@ export function getArcaAutomationConfig(environmentVariables = process.env) {
 export function getArcaConfig({ requirePointOfSale = false, requireIssuerData = false } = {}) {
   const environment = readEnvironment();
   const endpoints = ENVIRONMENTS[environment];
+  const credentials = resolveArcaCredentialPaths();
   const pointOfSale = integer('PTO_VTA', process.env.ARCA_PTO_VTA, {
     requiredValue: requirePointOfSale,
   });
@@ -212,12 +323,8 @@ export function getArcaConfig({ requirePointOfSale = false, requireIssuerData = 
     defaultConcept: integer('DEFAULT_CONCEPTO', process.env.ARCA_DEFAULT_CONCEPTO, {
       defaultValue: 1,
     }),
-    certificatePath: resolveBackendPath(
-      process.env.ARCA_CERT_PATH || './config/arca/arca_certificate.crt',
-    ),
-    privateKeyPath: resolveBackendPath(
-      process.env.ARCA_KEY_PATH || './config/arca/arca_private.key',
-    ),
+    certificatePath: credentials.certificatePath,
+    privateKeyPath: credentials.privateKeyPath,
     openSslPath: String(process.env.ARCA_OPENSSL_PATH || 'openssl').trim(),
     issuer: Object.freeze(issuer),
   });

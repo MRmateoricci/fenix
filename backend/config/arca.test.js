@@ -1,5 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+} from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import {
   ArcaConfigError,
@@ -8,17 +15,22 @@ import {
   backendRoot,
   getArcaAutomationConfig,
   getArcaConfig,
+  resolveArcaCredentialPaths,
 } from './arca.js';
 
 const KEYS = [
   'ARCA_ENV', 'ARCA_PRODUCTION_ENABLED', 'ARCA_CUIT', 'ARCA_PTO_VTA',
-  'ARCA_CERT_PATH', 'ARCA_KEY_PATH', 'ARCA_DEFAULT_CONCEPTO',
+  'ARCA_CERT_PATH', 'ARCA_KEY_PATH', 'ARCA_CERT_BASE64', 'ARCA_KEY_BASE64',
+  'ARCA_DEFAULT_CONCEPTO',
   'ARCA_AUTO_INVOICE_ENABLED', 'ARCA_TAX_CONDITION', 'ARCA_A_AUTHORIZATION_MODE',
   'ARCA_ACTIVITY_START_DATE', 'ARCA_LEGAL_NAME', 'ARCA_TAX_ADDRESS',
 ];
 
 function withEnvironment(values, callback) {
   const previous = Object.fromEntries(KEYS.map((key) => [key, process.env[key]]));
+  // Las pruebas de configuración local no deben consumir secretos reales que
+  // puedan estar presentes en el entorno del proceso que ejecuta la suite.
+  for (const key of ['ARCA_CERT_BASE64', 'ARCA_KEY_BASE64']) delete process.env[key];
   for (const [key, value] of Object.entries(values)) {
     if (value === undefined || value === null) delete process.env[key];
     else process.env[key] = value;
@@ -43,6 +55,64 @@ test('ARCA usa homologación y resuelve archivos desde backend', () => withEnvir
   assert.equal(config.pointOfSale, 3);
   assert.equal(config.certificatePath, path.join(backendRoot, 'config', 'arca', 'cert.crt'));
 }));
+
+test('materializa credenciales Base64 fuera del repositorio con permisos restringidos', () => {
+  const temporaryRoot = mkdtempSync(path.join(os.tmpdir(), 'fenix-arca-test-'));
+  const certificate = '-----BEGIN CERTIFICATE-----\ndGVzdA==\n-----END CERTIFICATE-----\n';
+  const privateKey = '-----BEGIN PRIVATE KEY-----\ndGVzdA==\n-----END PRIVATE KEY-----\n';
+
+  try {
+    const credentials = resolveArcaCredentialPaths({
+      ARCA_CERT_BASE64: Buffer.from(certificate).toString('base64'),
+      ARCA_KEY_BASE64: Buffer.from(privateKey).toString('base64'),
+      ARCA_CERT_PATH: './debe-ignorarse.crt',
+      ARCA_KEY_PATH: './debe-ignorarse.key',
+    }, temporaryRoot);
+
+    assert.equal(credentials.source, 'base64');
+    assert.equal(readFileSync(credentials.certificatePath, 'utf8'), certificate);
+    assert.equal(readFileSync(credentials.privateKeyPath, 'utf8'), privateKey);
+    assert.equal(credentials.certificatePath.startsWith(temporaryRoot), true);
+    assert.equal(credentials.privateKeyPath.startsWith(temporaryRoot), true);
+    if (process.platform !== 'win32') {
+      assert.equal(statSync(credentials.privateKeyPath).mode & 0o777, 0o600);
+    }
+  } finally {
+    rmSync(temporaryRoot, { recursive: true, force: true });
+  }
+});
+
+test('rechaza credenciales Base64 incompletas sin exponer su contenido', () => {
+  const encodedCertificate = Buffer.from('certificado-sensible').toString('base64');
+  assert.throws(
+    () => resolveArcaCredentialPaths({ ARCA_CERT_BASE64: encodedCertificate }),
+    (error) => error instanceof ArcaConfigError
+      && error.code === 'ARCA_BASE64_CREDENTIALS_INCOMPLETE'
+      && !error.message.includes(encodedCertificate),
+  );
+});
+
+test('rechaza Base64 inválido y contenido que no sea PEM', () => {
+  const privateKey = Buffer.from(
+    '-----BEGIN PRIVATE KEY-----\ndGVzdA==\n-----END PRIVATE KEY-----\n',
+  ).toString('base64');
+
+  assert.throws(
+    () => resolveArcaCredentialPaths({
+      ARCA_CERT_BASE64: 'contenido-no-base64!',
+      ARCA_KEY_BASE64: privateKey,
+    }),
+    (error) => error.code === 'ARCA_CERT_BASE64_INVALID',
+  );
+
+  assert.throws(
+    () => resolveArcaCredentialPaths({
+      ARCA_CERT_BASE64: Buffer.from('no es un certificado PEM').toString('base64'),
+      ARCA_KEY_BASE64: privateKey,
+    }),
+    (error) => error.code === 'ARCA_CERT_BASE64_INVALID',
+  );
+});
 
 test('producción permite configuración para consultas pero bloquea emisión por defecto', () => withEnvironment({
   ARCA_ENV: 'production', ARCA_PRODUCTION_ENABLED: 'false', ARCA_CUIT: '20123456786',

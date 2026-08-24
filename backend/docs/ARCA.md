@@ -78,6 +78,10 @@ ARCA_AUTO_INVOICE_ENABLED=false
 
 ARCA_CUIT=33718368419
 ARCA_PTO_VTA=3
+# Railway: secretos sealed con el contenido completo codificado en Base64.
+ARCA_CERT_BASE64=
+ARCA_KEY_BASE64=
+# Desarrollo local: fallback a archivos ignorados por Git.
 ARCA_CERT_PATH=./config/arca/production/fenix_certificate.crt
 ARCA_KEY_PATH=./config/arca/production/fenix_private.key
 
@@ -93,6 +97,13 @@ ARCA_ACTIVITY_START_DATE=2024-01
 Completar `ARCA_A_AUTHORIZATION_MODE` solo después de la verificación anterior. `ARCA_ACTIVITY_START_DATE=2024-01` refleja exactamente el **PERÍODO DESDE 01/2024** informado por Sistema Registral. El PDF muestra `Inicio de actividades: 01/2024` y la emisión no queda bloqueada por no contar con un día que ARCA no informa.
 
 No agregar `ARCA_DEFAULT_CBTE_TIPO`.
+
+En Railway se deben configurar `ARCA_CERT_BASE64` y `ARCA_KEY_BASE64` juntas y
+marcarlas como **sealed**. El backend las decodifica en el directorio temporal de
+la instancia con permisos `0600`; sus contenidos no se guardan en Git ni en el
+filesystem persistente. Cuando existen, tienen prioridad sobre `ARCA_CERT_PATH` y
+`ARCA_KEY_PATH`, que quedan como fallback para desarrollo local. Base64 es solo
+una codificación: la confidencialidad depende del almacenamiento sealed.
 
 ## Consultas seguras de producción
 
