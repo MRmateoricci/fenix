@@ -23,7 +23,7 @@ import { getInvoiceOptions } from '../services/arcaParameters.js'
 import {
   ArcaTaxpayerRegistryError,
   lookupTaxpayer,
-  profileForInvoiceA,
+  profileForInvoiceRecipient,
 } from '../services/arcaTaxpayerRegistry.js'
 import { safeArcaErrorMessage } from '../services/arcaSafeLog.js'
 import { DEFAULT_VAT_RATE } from '../config/tax.js'
@@ -46,15 +46,16 @@ export async function verifyInvoiceARecipient(
   receiver,
   invoiceOptions,
   taxpayerLookup = lookupTaxpayer,
+  { lookupRequested = false } = {},
 ) {
   const selectedCondition = invoiceOptions?.vatConditions
     ?.find(option => option.id === receiver.vatConditionId)
-  if (!['A', 'ALEY'].includes(selectedCondition?.invoiceClass)) {
+  if (!lookupRequested && !['A', 'ALEY'].includes(selectedCondition?.invoiceClass)) {
     return { receiver, condition: selectedCondition, verified: false }
   }
 
   try {
-    const profile = profileForInvoiceA(
+    const profile = profileForInvoiceRecipient(
       await taxpayerLookup(receiver.docNumber),
       invoiceOptions,
     )
@@ -277,9 +278,17 @@ router.post('/', attachUserIfPresent, async (req, res) => {
     if (!receiverVatCondition.allowedDocumentTypeIds.includes(invoiceReceiver.docType)) {
       return res.status(400).json({ error: 'El documento no corresponde a la condición IVA elegida' })
     }
-    const registryVerification = await verifyInvoiceARecipient(invoiceReceiver, invoiceOptions)
+    const registryVerification = await verifyInvoiceARecipient(
+      invoiceReceiver,
+      invoiceOptions,
+      lookupTaxpayer,
+      { lookupRequested: customer?.needsInvoiceA === true },
+    )
     invoiceReceiver = registryVerification.receiver
     receiverVatCondition = registryVerification.condition
+    if (!receiverVatCondition?.allowedDocumentTypeIds.includes(invoiceReceiver.docType)) {
+      return res.status(400).json({ error: 'El documento no corresponde a la condición fiscal informada por ARCA' })
+    }
     if (registryVerification.lookupError) {
       console.warn(
         '[POST /api/orders] padrón ARCA no disponible; se conserva validación fiscal manual',

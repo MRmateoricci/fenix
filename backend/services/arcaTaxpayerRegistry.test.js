@@ -5,6 +5,7 @@ import {
   lookupTaxpayer,
   normalizeTaxpayerProfile,
   profileForInvoiceA,
+  profileForInvoiceRecipient,
 } from './arcaTaxpayerRegistry.js';
 
 test('rechaza el dígito verificador inválido antes de consultar servicios externos', async () => {
@@ -48,6 +49,26 @@ test('normaliza persona humana monotributista con apellido y nombre', () => {
 
   assert.equal(profile.name, 'PÉREZ ANA');
   assert.equal(profile.category, 'monotributo');
+});
+
+test('una constancia activa sin IVA ni Monotributo se resuelve como Exento y Factura B', () => {
+  const profile = normalizeTaxpayerProfile({
+    datosGenerales: {
+      idPersona: '20462724919',
+      estadoClave: 'ACTIVO',
+      razonSocial: 'RICCI MATEO',
+    },
+    datosRegimenGeneral: { impuesto: [] },
+  });
+  const result = profileForInvoiceRecipient(profile, {
+    vatConditions: [
+      { id: 4, category: 'exempt', invoiceClass: 'B', description: 'IVA Sujeto Exento' },
+    ],
+  });
+
+  assert.equal(result.category, 'exempt');
+  assert.equal(result.vatConditionId, 4);
+  assert.equal(result.invoiceClass, 'B');
 });
 
 test('rechaza CUIT sin constancia o sin condición válida para Factura A', () => {

@@ -76,7 +76,7 @@ function registryErrors(personaReturn) {
 export function normalizeTaxpayerProfile(personaReturn, expectedCuit = null) {
   const errors = registryErrors(personaReturn);
   if (errors.length) {
-    throw new ArcaTaxpayerRegistryError('ARCA no encontró una constancia vigente para ese CUIT.', {
+    throw new ArcaTaxpayerRegistryError('ARCA no encontró una constancia vigente para este CUIT.', {
       code: 'ARCA_TAXPAYER_NOT_FOUND',
       recoverable: false,
     });
@@ -114,20 +114,20 @@ export function normalizeTaxpayerProfile(personaReturn, expectedCuit = null) {
   return Object.freeze({
     cuit,
     name,
-    category: registered ? 'registered' : (monotributo ? 'monotributo' : null),
+    // Una constancia activa que no registra IVA ni Monotributo corresponde a
+    // un receptor exento para las clases que admite este comercio. La clase
+    // final se resuelve contra las condiciones vigentes informadas por WSFE.
+    category: registered ? 'registered' : (monotributo ? 'monotributo' : 'exempt'),
   });
 }
 
-export function profileForInvoiceA(profile, invoiceOptions) {
-  if (!['registered', 'monotributo'].includes(profile?.category)) {
-    throw new ArcaTaxpayerRegistryError(
-      'El CUIT no figura en una condición habilitada para Factura A.',
-      { code: 'ARCA_TAXPAYER_NOT_ELIGIBLE_FOR_A', recoverable: false },
-    );
-  }
+export function profileForInvoiceRecipient(profile, invoiceOptions) {
+  const expectedClasses = ['registered', 'monotributo'].includes(profile?.category)
+    ? ['A', 'ALEY']
+    : profile?.category === 'exempt' ? ['B'] : [];
   const condition = invoiceOptions?.vatConditions?.find((option) => (
-    option.category === profile.category
-    && ['A', 'ALEY'].includes(option.invoiceClass)
+    option.category === profile?.category
+    && expectedClasses.includes(option.invoiceClass)
   ));
   if (!condition) {
     throw new ArcaTaxpayerRegistryError(
@@ -139,7 +139,18 @@ export function profileForInvoiceA(profile, invoiceOptions) {
     ...profile,
     vatConditionId: condition.id,
     vatConditionDescription: condition.description,
+    invoiceClass: condition.invoiceClass,
   });
+}
+
+export function profileForInvoiceA(profile, invoiceOptions) {
+  if (!['registered', 'monotributo'].includes(profile?.category)) {
+    throw new ArcaTaxpayerRegistryError(
+      'El CUIT no figura en una condición habilitada para Factura A.',
+      { code: 'ARCA_TAXPAYER_NOT_ELIGIBLE_FOR_A', recoverable: false },
+    );
+  }
+  return profileForInvoiceRecipient(profile, invoiceOptions);
 }
 
 async function getRegistryClient(wsdl) {

@@ -6,6 +6,7 @@ const options = {
   documents: [
     { id: 80, kind: 'cuit' },
     { id: 96, kind: 'dni' },
+    { id: 99, kind: 'consumer_final' },
   ],
   vatConditions: [
     { id: 1, category: 'registered', invoiceClass: 'A' },
@@ -19,6 +20,7 @@ test('consumidor final resuelve DNI y condición IVA sin mostrar decisiones fisc
   assert.equal(result.invoiceDocType, '96')
   assert.equal(result.invoiceVatConditionId, '5')
   assert.equal(result.invoiceName, 'Mateo Ricci')
+  assert.equal(result.consumerFinalWithoutCuit, false)
 })
 
 test('Factura A exige elegir la condición cuando ARCA ofrece más de una', () => {
@@ -31,4 +33,19 @@ test('Factura A exige elegir la condición cuando ARCA ofrece más de una', () =
 test('DNI o CUIT se infiere por la cantidad de dígitos', () => {
   assert.equal(documentKindForNumber('42.172.999'), 'dni')
   assert.equal(documentKindForNumber('30-12345678-9'), 'cuit')
+})
+
+test('consumidor final elegido tras un rechazo no conserva el CUIT en el borrador', () => {
+  const result = applyInvoiceMode({
+    nombre: 'Mateo',
+    apellido: 'Ricci',
+    invoiceDocNumber: '20464348809',
+    invoiceVatConditionId: '5',
+    consumerFinalWithoutCuit: true,
+  }, options, false)
+
+  assert.equal(result.invoiceDocType, '99')
+  assert.equal(result.invoiceDocNumber, '')
+  assert.equal(result.invoiceVatConditionId, '5')
+  assert.equal(result.consumerFinalWithoutCuit, true)
 })

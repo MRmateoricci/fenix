@@ -3,7 +3,7 @@ import { getInvoiceOptions } from '../services/arcaParameters.js';
 import {
   ArcaTaxpayerRegistryError,
   lookupTaxpayer,
-  profileForInvoiceA,
+  profileForInvoiceRecipient,
 } from '../services/arcaTaxpayerRegistry.js';
 
 const router = Router();
@@ -59,11 +59,12 @@ router.post('/cuit-profile', allowTaxpayerLookup, async (req, res) => {
       lookupTaxpayer(req.body?.cuit),
       getInvoiceOptions(),
     ]);
-    res.json(profileForInvoiceA(profile, options));
+    res.json(profileForInvoiceRecipient(profile, options));
   } catch (error) {
     const expected = error instanceof ArcaTaxpayerRegistryError;
     const invalid = error.code === 'ARCA_TAXPAYER_CUIT_INVALID';
     const businessRejection = expected && error.recoverable === false;
+    const consumerFinalAllowed = error.code === 'ARCA_TAXPAYER_NOT_FOUND';
     const status = invalid ? 400 : (businessRejection ? 422 : 503);
     console.error('[POST /api/arca/cuit-profile]', error.code || error.name);
     res.status(status).json({
@@ -72,6 +73,7 @@ router.post('/cuit-profile', allowTaxpayerLookup, async (req, res) => {
         : error.message,
       code: error.code || 'ARCA_TAXPAYER_REGISTRY_ERROR',
       manualFallbackAllowed: status === 503,
+      consumerFinalAllowed,
     });
   }
 });

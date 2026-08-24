@@ -578,31 +578,44 @@
 .fnx-invoice-unavailable { margin: 7px 0 0; }
 .fnx-taxpayer-status {
   margin: 0;
-  padding: 10px 12px;
-  border: 1px solid var(--color-border);
-  border-radius: 7px;
-  background: #f7f5f1;
+  padding: 0;
+  border: 0;
+  background: transparent;
   color: var(--color-text-muted);
   font-size: 11px;
   line-height: 1.45;
 }
-.fnx-taxpayer-status.is-loading { border-color: #b8cbe7; background: #f1f6fd; color: #244b7a; }
-.fnx-taxpayer-status.is-warning { border-color: #e6c780; background: #fff9e9; color: #72510b; }
-.fnx-taxpayer-status.is-error { border-color: #efaaaa; background: #fff4f4; color: #a30909; }
+.fnx-taxpayer-status.is-loading { color: var(--color-text-muted); }
+.fnx-taxpayer-status.is-warning { color: #72510b; }
+.fnx-taxpayer-status.is-error { color: #7d2c2c; }
 .fnx-taxpayer-confirmed,
 .fnx-taxpayer-manual {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 .fnx-taxpayer-confirmed {
-  padding: 12px;
-  border: 1px solid #acd7b8;
-  border-radius: 7px;
-  background: #f2fbf4;
+  padding: 1px 0 0;
 }
-.fnx-taxpayer-confirmed__title { color: #166534; font-size: 11px; font-weight: 700; }
-.fnx-single-checkout .fnx-taxpayer-confirmed .dark-input { background: #e8f4eb !important; }
+.fnx-taxpayer-confirmed__title { color: var(--color-text-muted); font-size: 10.5px; font-weight: 650; }
+.fnx-taxpayer-summary { display: grid; gap: 5px; margin: 0; }
+.fnx-taxpayer-summary > div { display: flex; align-items: baseline; gap: 7px; min-width: 0; }
+.fnx-taxpayer-summary dt { color: var(--color-text-muted); font-size: 10px; text-transform: uppercase; letter-spacing: .045em; }
+.fnx-taxpayer-summary dd { margin: 0; color: var(--color-text); font-size: 11px; overflow-wrap: anywhere; }
+.fnx-taxpayer-invoice-note,
+.fnx-taxpayer-consumer-note { margin: 0; color: var(--color-text-muted); font-size: 11px; line-height: 1.45; }
+.fnx-taxpayer-resolution { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.fnx-taxpayer-consumer-button {
+  padding: 0;
+  border: 0;
+  border-bottom: 1px solid currentColor;
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 650;
+  cursor: pointer;
+}
 .fnx-taxpayer-manual > p { margin: 0; color: var(--color-text-muted); font-size: 11px; line-height: 1.45; }
 .fnx-billing-address { margin: -19px 0 30px; }
 .fnx-billing-same-checkbox { margin: 0; }

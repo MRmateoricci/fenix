@@ -17,19 +17,24 @@ export function applyInvoiceMode(current, options, needsInvoiceA) {
       : compatibleConditions.length === 1 ? compatibleConditions[0] : null)
   const cuitDocument = documents.find((document) => document.kind === 'cuit')
   const dniDocument = documents.find((document) => document.kind === 'dni')
+  const anonymousDocument = documents.find((document) => document.kind === 'consumer_final')
   const digits = String(current.invoiceDocNumber || '').replace(/\D/g, '')
-  const document = needsInvoiceA || documentKindForNumber(digits) === 'cuit'
-    ? cuitDocument
-    : dniDocument
+  const consumerFinalWithoutCuit = !needsInvoiceA && current.consumerFinalWithoutCuit === true
+  const document = consumerFinalWithoutCuit
+    ? anonymousDocument
+    : needsInvoiceA || documentKindForNumber(digits) === 'cuit'
+      ? cuitDocument
+      : dniDocument
 
   return {
     ...current,
     needsInvoiceA,
+    consumerFinalWithoutCuit,
     invoiceName: needsInvoiceA
       ? (currentCondition ? current.invoiceName : '')
       : `${current.nombre || ''} ${current.apellido || ''}`.trim(),
     invoiceDocType: document ? String(document.id) : '',
-    invoiceDocNumber: needsInvoiceA && digits.length !== 11 ? '' : digits,
+    invoiceDocNumber: consumerFinalWithoutCuit || (needsInvoiceA && digits.length !== 11) ? '' : digits,
     invoiceVatConditionId: preferredCondition ? String(preferredCondition.id) : '',
   }
 }

@@ -57,9 +57,8 @@ function validateInvoiceRecipient(d, invoiceOptions) {
   const docNumber = String(d.invoiceDocNumber || '').replace(/\D/g, '')
   const vatCondition = invoiceOptions?.vatConditions
     ?.find((option) => option.id === Number(d.invoiceVatConditionId))
-  const invoiceName = d.needsInvoiceA
-    ? d.invoiceName.trim()
-    : `${d.nombre || ''} ${d.apellido || ''}`.trim()
+  const invoiceName = String(d.invoiceName || '').trim()
+    || `${d.nombre || ''} ${d.apellido || ''}`.trim()
   if (!invoiceName) e.invoiceName = 'Ingresá el nombre o razón social'
   if (!invoiceOptions?.documents?.some((option) => option.id === docType)) {
     e.invoiceDocType = 'Elegí un tipo de documento válido'
@@ -74,8 +73,10 @@ function validateInvoiceRecipient(d, invoiceOptions) {
   }
   if (!vatCondition) {
     e.invoiceVatConditionId = 'Elegí la condición frente al IVA'
-  } else if (d.needsInvoiceA && !['A', 'ALEY'].includes(vatCondition.invoiceClass)) {
-    e.invoiceVatConditionId = 'Elegí una condición habilitada para Factura A'
+  } else if (d.needsInvoiceA
+    && !['A', 'ALEY'].includes(vatCondition.invoiceClass)
+    && vatCondition.category !== 'exempt') {
+    e.invoiceVatConditionId = 'La condición fiscal no corresponde a Factura A o B'
   } else if (!d.needsInvoiceA && vatCondition.category !== 'consumer_final') {
     e.invoiceVatConditionId = 'Los comprobantes sin Factura A se emiten a consumidor final'
   }
@@ -154,6 +155,7 @@ export default function Checkout() {
     invoiceDocNumber: '',
     invoiceVatConditionId: '',
     needsInvoiceA: null,
+    consumerFinalWithoutCuit: false,
     deliveryType: 'delivery',
     paymentMethod: 'mercadopago',
     shippingService: 'clasico',
@@ -244,6 +246,10 @@ export default function Checkout() {
       (condition) => condition.id === Number(formData.invoiceVatConditionId)
     )
     if (!selected) return
+    // El usuario puede haber pedido Factura A y ARCA resolver que el receptor
+    // es Exento: en ese caso corresponde B, pero conservamos el modo de
+    // consulta y el CUIT verificado hasta crear el pedido.
+    if (formData.needsInvoiceA && selected.category === 'exempt') return
     const inferredNeedsInvoiceA = ['A', 'ALEY'].includes(selected.invoiceClass)
     if (inferredNeedsInvoiceA !== formData.needsInvoiceA) {
       setFormData((current) => applyInvoiceMode(current, invoiceOptions, inferredNeedsInvoiceA))
@@ -587,9 +593,7 @@ export default function Checkout() {
           customer: {
             ...formData,
             invoiceRecipient: {
-              name: formData.needsInvoiceA
-                ? formData.invoiceName
-                : `${formData.nombre} ${formData.apellido}`.trim(),
+              name: formData.invoiceName || `${formData.nombre} ${formData.apellido}`.trim(),
               docType: Number(formData.invoiceDocType),
               docNumber: formData.invoiceDocNumber,
               vatConditionId: Number(formData.invoiceVatConditionId),
@@ -1374,7 +1378,9 @@ function InvoiceRecipientFields({
           const data = await response.json().catch(() => ({}))
           if (!response.ok) {
             const error = new Error(data.error || 'No pudimos consultar el CUIT en ARCA.')
+            error.code = data.code
             error.manualFallbackAllowed = data.manualFallbackAllowed === true
+            error.consumerFinalAllowed = data.consumerFinalAllowed === true
             throw error
           }
           return data
@@ -1383,6 +1389,7 @@ function InvoiceRecipientFields({
           const cuitDocument = options.documents?.find((document) => document.kind === 'cuit')
           setField('invoiceName', profile.name)
           setField('invoiceVatConditionId', String(profile.vatConditionId))
+          setField('consumerFinalWithoutCuit', false)
           if (cuitDocument) setField('invoiceDocType', String(cuitDocument.id))
           setTaxpayerLookup({ status: 'success', profile })
         })
@@ -1393,7 +1400,9 @@ function InvoiceRecipientFields({
           setTaxpayerLookup({
             status: 'error',
             message: error.message,
+            code: error.code,
             manualFallbackAllowed: error.manualFallbackAllowed === true,
+            consumerFinalAllowed: error.consumerFinalAllowed === true,
           })
         })
     }, 450)
@@ -1407,6 +1416,7 @@ function InvoiceRecipientFields({
   const changeDocumentNumber = (value) => {
     const digits = value.replace(/\D/g, '').slice(0, 11)
     setField('invoiceDocNumber', digits)
+    setField('consumerFinalWithoutCuit', false)
     if (formData.needsInvoiceA) {
       setField('invoiceName', '')
       setField('invoiceVatConditionId', '')
@@ -1417,6 +1427,20 @@ function InvoiceRecipientFields({
       const document = options?.documents?.find((option) => option.kind === documentKind)
       if (document) setField('invoiceDocType', String(document.id))
     }
+  }
+
+  const continueAsConsumerFinal = () => {
+    const consumerCondition = options?.vatConditions
+      ?.find((condition) => condition.category === 'consumer_final')
+    const anonymousDocument = options?.documents
+      ?.find((document) => document.kind === 'consumer_final')
+    onInvoiceModeChange(false)
+    setField('invoiceName', `${formData.nombre || ''} ${formData.apellido || ''}`.trim())
+    setField('invoiceDocNumber', '')
+    if (anonymousDocument) setField('invoiceDocType', String(anonymousDocument.id))
+    if (consumerCondition) setField('invoiceVatConditionId', String(consumerCondition.id))
+    setField('consumerFinalWithoutCuit', true)
+    setTaxpayerLookup({ status: 'idle' })
   }
 
   return (
@@ -1432,7 +1456,10 @@ function InvoiceRecipientFields({
               type="checkbox"
               checked={Boolean(formData.needsInvoiceA)}
               disabled={!supportsInvoiceA}
-              onChange={(event) => onInvoiceModeChange(event.target.checked)}
+              onChange={(event) => {
+                setTaxpayerLookup({ status: 'idle' })
+                onInvoiceModeChange(event.target.checked)
+              }}
             />
             Necesito factura A
           </label>
@@ -1462,23 +1489,35 @@ function InvoiceRecipientFields({
                 <p className="fnx-taxpayer-status is-loading" role="status">Consultando CUIT en ARCA...</p>
               )}
               {taxpayerLookup.status === 'error' && (
-                <p className={`fnx-taxpayer-status ${taxpayerLookup.manualFallbackAllowed ? 'is-warning' : 'is-error'}`} role="alert">
-                  {taxpayerLookup.message}
-                </p>
+                <div className="fnx-taxpayer-resolution" role="alert">
+                  <p className={`fnx-taxpayer-status ${taxpayerLookup.manualFallbackAllowed ? 'is-warning' : 'is-error'}`}>
+                    {taxpayerLookup.message}
+                  </p>
+                  {taxpayerLookup.consumerFinalAllowed && (
+                    <button type="button" className="fnx-taxpayer-consumer-button" onClick={continueAsConsumerFinal}>
+                      Continuar como consumidor final
+                    </button>
+                  )}
+                </div>
               )}
               {taxpayerLookup.status === 'success' && (
                 <div className="fnx-taxpayer-confirmed">
-                  <span className="fnx-taxpayer-confirmed__title">CUIT verificado en ARCA</span>
-                  <Field label="Razón social">
-                    <DarkInput value={taxpayerLookup.profile.name} onChange={() => {}} readOnly />
-                  </Field>
-                  <Field label="Condición frente al IVA">
-                    <DarkInput
-                      value={taxpayerLookup.profile.vatConditionDescription}
-                      onChange={() => {}}
-                      readOnly
-                    />
-                  </Field>
+                  <span className="fnx-taxpayer-confirmed__title">Datos informados por ARCA</span>
+                  <dl className="fnx-taxpayer-summary">
+                    <div>
+                      <dt>Razón social</dt>
+                      <dd>{taxpayerLookup.profile.name}</dd>
+                    </div>
+                    <div>
+                      <dt>Condición frente al IVA</dt>
+                      <dd>{taxpayerLookup.profile.vatConditionDescription}</dd>
+                    </div>
+                  </dl>
+                  {taxpayerLookup.profile.invoiceClass === 'B' && (
+                    <p className="fnx-taxpayer-invoice-note">
+                      Por su condición fiscal corresponde Factura B. Podés continuar con la compra.
+                    </p>
+                  )}
                 </div>
               )}
               {taxpayerLookup.status === 'error' && taxpayerLookup.manualFallbackAllowed && (
@@ -1505,15 +1544,21 @@ function InvoiceRecipientFields({
               )}
             </div>
           ) : (
-            <Field label="DNI o CUIT" error={errors.invoiceDocNumber || errors.invoiceDocType}>
-              <DarkInput
-                inputMode="numeric"
-                placeholder="DNI o CUIT"
-                value={formData.invoiceDocNumber}
-                onChange={changeDocumentNumber}
-                hasError={!!(errors.invoiceDocNumber || errors.invoiceDocType)}
-              />
-            </Field>
+            formData.consumerFinalWithoutCuit ? (
+              <p className="fnx-taxpayer-consumer-note">
+                Continuarás como consumidor final. Se emitirá Factura B sin usar el CUIT consultado.
+              </p>
+            ) : (
+              <Field label="DNI o CUIT" error={errors.invoiceDocNumber || errors.invoiceDocType}>
+                <DarkInput
+                  inputMode="numeric"
+                  placeholder="DNI o CUIT"
+                  value={formData.invoiceDocNumber}
+                  onChange={changeDocumentNumber}
+                  hasError={!!(errors.invoiceDocNumber || errors.invoiceDocType)}
+                />
+              </Field>
+            )
           )}
 
           {formData.deliveryType === 'pickup' && (

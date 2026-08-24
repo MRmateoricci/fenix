@@ -81,6 +81,30 @@ test('si el padrón no responde conserva los datos manuales de Factura A', async
   assert.equal(result.lookupError, failure)
 })
 
+test('el backend cambia automáticamente a Factura B cuando ARCA informa Exento', async () => {
+  const options = {
+    vatConditions: [
+      { id: 1, category: 'registered', invoiceClass: 'A' },
+      { id: 4, category: 'exempt', invoiceClass: 'B', allowedDocumentTypeIds: [80] },
+    ],
+  }
+  const result = await verifyInvoiceARecipient(
+    { name: 'Dato del navegador', docType: 80, docNumber: '20462724919', vatConditionId: 1 },
+    options,
+    async () => ({ cuit: '20462724919', name: 'RICCI MATEO', category: 'exempt' }),
+    { lookupRequested: true },
+  )
+
+  assert.equal(result.verified, true)
+  assert.equal(result.condition.invoiceClass, 'B')
+  assert.deepEqual(result.receiver, {
+    name: 'RICCI MATEO',
+    docType: 80,
+    docNumber: '20462724919',
+    vatConditionId: 4,
+  })
+})
+
 test('el pedido calcula el 21 % cuando falta IVA', () => {
   const result = resolveProductVariantPrice({
     precio_venta: 100,
