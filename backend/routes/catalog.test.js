@@ -49,3 +49,9 @@ test('el catálogo convierte proveedores USD a ARS, incluidas sus variantes', ()
   assert.equal(mapped.colors[0].price, 18271)
   assert.equal(mapped.sizes[0].price, 21925.2)
 })
+
+test('el catalogo usa la descripcion o el codigo cuando name esta vacio', () => {
+  assert.equal(mapRow(product({ name: '  ', descripcion: 'Nombre importado', codigo: 'ABC-1' })).name, 'Nombre importado')
+  assert.equal(mapRow(product({ name: null, descripcion: '', codigo: 'ABC-1' })).name, 'ABC-1')
+  assert.equal(mapRow(product({ name: null, descripcion: null, codigo: null })).name, 'Producto sin nombre')
+})

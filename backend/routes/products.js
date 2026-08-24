@@ -69,6 +69,7 @@ const uploadPdf = multer({
 })
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+const MAX_BATCH_PRODUCT_IDS = 50_000
 
 function normalizePriceSupplier(value) {
   const supplier = String(value || '').trim().toUpperCase()
@@ -903,7 +904,7 @@ const EDITABLE_FIELDS = Object.keys(FIELD_TRANSFORMS)
 // acciones disponibles en la tabla del administrador.
 router.post('/batch', async (req, res) => {
   const ids = [...new Set(Array.isArray(req.body.ids) ? req.body.ids.map(String) : [])]
-  if (!ids.length || ids.length > 5000 || ids.some(id => !UUID_PATTERN.test(id))) {
+  if (!ids.length || ids.length > MAX_BATCH_PRODUCT_IDS || ids.some(id => !UUID_PATTERN.test(id))) {
     return res.status(400).json({ error: 'La selección de productos no es válida' })
   }
 
@@ -970,12 +971,15 @@ router.post('/batch', async (req, res) => {
     }
 
     params.push(ids)
-    const { rows } = await client.query(
-      `UPDATE products SET ${setClauses.join(', ')} WHERE id = ANY($${params.length}::uuid[]) RETURNING *`,
+    const result = await client.query(
+      `UPDATE products SET ${setClauses.join(', ')} WHERE id = ANY($${params.length}::uuid[])`,
       params
     )
     await client.query('COMMIT')
-    res.json({ products: rows, updated: rows.length })
+    // El admin refresca el inventario y el catalogo al terminar. No devolvemos
+    // decenas de miles de filas completas porque solo duplicaria la carga de
+    // red y memoria de una accion masiva.
+    res.json({ updated: result.rowCount })
   } catch (err) {
     await client.query('ROLLBACK')
     console.error('[POST /api/products/batch]', err)

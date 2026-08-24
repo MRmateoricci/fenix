@@ -56,7 +56,11 @@ app.use('/api/webhooks', express.raw({ type: 'application/json' }), (req, _res, 
 })
 
 // ── Body parser JSON + cookies para el resto de rutas ─────────────────────────
-app.use(express.json())
+// Una seleccion masiva del inventario puede contener decenas de miles de UUID.
+// El limite por defecto de Express (100 KB) cortaba esas operaciones antes de
+// que llegaran a POST /api/products/batch. 2 MB alcanza para el maximo de
+// 50.000 IDs aceptado por esa ruta sin dejar el parser global sin limite.
+app.use(express.json({ limit: '2mb' }))
 app.use(cookieParser())
 
 // ── Fotos de producto subidas por el admin (ver routes/products.js POST /:id/image) ─
@@ -125,6 +129,9 @@ if (process.env.NODE_ENV === 'production') {
 // ── Error global ──────────────────────────────────────────────────────────────
 app.use((err, _req, res, _next) => {
   console.error('[Express error]', err)
+  if (err?.type === 'entity.too.large') {
+    return res.status(413).json({ error: 'La operación contiene demasiados datos para procesarla' })
+  }
   res.status(err.status || 500).json({ error: err.message || 'Error interno del servidor' })
 })
 

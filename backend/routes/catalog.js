@@ -12,7 +12,7 @@ import { resolvePublicOptionPrice, resolvePublicPrice } from '../services/public
 const router = Router()
 
 const SELECT_FIELDS = `
-  id, name, category, subcategory, precio_venta, precio_venta_usd, precio_iva, precio_iva_usd,
+  id, name, codigo, descripcion, category, subcategory, precio_venta, precio_venta_usd, precio_iva, precio_iva_usd,
   original_price, original_price_usd, price_currency,
   COALESCE((SELECT usd_ars_rate FROM store_settings WHERE id = 1), 1510) AS usd_ars_rate,
   description_larga,
@@ -67,7 +67,14 @@ export function mapRow(r) {
   }))
   return {
     id: r.id,
-    name: r.name,
+    // Los productos importados historicamente pueden tener el titulo en
+    // `descripcion` y `name` nulo/vacio. El inventario ya usa este mismo
+    // fallback; el catalogo publico debe hacerlo tambien para no renderizar
+    // tarjetas sin titulo. El codigo garantiza un nombre incluso para datos
+    // legados incompletos.
+    name: [r.name, r.descripcion, r.codigo]
+      .map(value => String(value || '').trim())
+      .find(Boolean) || 'Producto sin nombre',
     category: r.category,
     subcategory: r.subcategory,
     price: publicPrice,
