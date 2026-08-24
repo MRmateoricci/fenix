@@ -3,8 +3,10 @@ import os from 'node:os';
 import {
   chmodSync,
   mkdirSync,
+  readFileSync,
   writeFileSync,
 } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
 
@@ -28,6 +30,8 @@ const A_AUTHORIZATION_MODES = Object.freeze([
   'cbu_informed',
   'subject_to_withholding',
 ]);
+
+let materializedBase64Credentials = null;
 
 export class ArcaConfigError extends Error {
   constructor(message, code = 'ARCA_CONFIG_ERROR') {
@@ -172,6 +176,28 @@ function assertPemPrivateKey(privateKey) {
   }
 }
 
+function credentialsFingerprint(encodedCertificate, encodedPrivateKey) {
+  return createHash('sha256')
+    .update(encodedCertificate)
+    .update('\0')
+    .update(encodedPrivateKey)
+    .digest('hex');
+}
+
+function reusableMaterialization(cache, fingerprint, credentialsDirectory, certificate, privateKey) {
+  if (!cache
+    || cache.fingerprint !== fingerprint
+    || cache.credentialsDirectory !== credentialsDirectory) return null;
+
+  try {
+    if (!readFileSync(cache.paths.certificatePath).equals(certificate)
+      || !readFileSync(cache.paths.privateKeyPath).equals(privateKey)) return null;
+    return cache.paths;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Railway entrega secretos como variables de entorno. Cuando existen ambas
  * credenciales Base64, se materializan fuera del repositorio con permisos
@@ -214,6 +240,15 @@ export function resolveArcaCredentialPaths(
   const credentialsDirectory = path.join(temporaryRoot, 'fenix-arca');
   const certificatePath = path.join(credentialsDirectory, 'certificate.crt');
   const privateKeyPath = path.join(credentialsDirectory, 'private.key');
+  const fingerprint = credentialsFingerprint(encodedCertificate, encodedPrivateKey);
+  const reusable = reusableMaterialization(
+    materializedBase64Credentials,
+    fingerprint,
+    credentialsDirectory,
+    certificate,
+    privateKey,
+  );
+  if (reusable) return reusable;
 
   try {
     mkdirSync(credentialsDirectory, { recursive: true, mode: 0o700 });
@@ -229,7 +264,24 @@ export function resolveArcaCredentialPaths(
     );
   }
 
-  return Object.freeze({ certificatePath, privateKeyPath, source: 'base64' });
+  const paths = Object.freeze({ certificatePath, privateKeyPath, source: 'base64' });
+  materializedBase64Credentials = Object.freeze({
+    fingerprint,
+    credentialsDirectory,
+    paths,
+  });
+  return paths;
+}
+
+/**
+ * Inicialización invocada por el proceso principal antes de escuchar conexiones.
+ * Sólo valida/materializa secretos Base64; sin ellos conserva el fallback local.
+ */
+export function initializeArcaCredentials(
+  environmentVariables = process.env,
+  temporaryRoot = os.tmpdir(),
+) {
+  return resolveArcaCredentialPaths(environmentVariables, temporaryRoot);
 }
 
 export function normalizeCuit(value) {
@@ -286,7 +338,7 @@ export function getArcaAutomationConfig(environmentVariables = process.env) {
 export function getArcaConfig({ requirePointOfSale = false, requireIssuerData = false } = {}) {
   const environment = readEnvironment();
   const endpoints = ENVIRONMENTS[environment];
-  const credentials = resolveArcaCredentialPaths();
+  const credentials = initializeArcaCredentials();
   const pointOfSale = integer('PTO_VTA', process.env.ARCA_PTO_VTA, {
     requiredValue: requirePointOfSale,
   });

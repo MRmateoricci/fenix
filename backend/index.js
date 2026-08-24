@@ -22,6 +22,7 @@ import newsletterRouter from './routes/newsletter.js'
 import couponsRouter from './routes/coupons.js'
 import arcaRouter from './routes/arca.js'
 import invoicesRouter from './routes/invoices.js'
+import { initializeArcaCredentials } from './config/arca.js'
 import { uploadsDir } from './config/uploads.js'
 import { createCorsOptionsDelegate } from './config/cors.js'
 import { startExpireReservationsJob } from './jobs/expireReservations.js'
@@ -30,6 +31,11 @@ const app  = express()
 const PORT = process.env.PORT || 3001
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const frontendDist = path.resolve(__dirname, '..', 'dist')
+const arcaCredentials = initializeArcaCredentials()
+
+if (arcaCredentials.source === 'base64') {
+  console.log('[arca] credenciales Base64 validadas y preparadas para OpenSSL')
+}
 
 // Detrás del proxy de Railway/Render, sin esto `req.protocol` siempre da
 // 'http' — rompe las URLs absolutas que arma POST /api/products/:id/image.

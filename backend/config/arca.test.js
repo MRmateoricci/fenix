@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { spawn, spawnSync } from 'node:child_process';
+import { once } from 'node:events';
 import {
   mkdtempSync,
   readFileSync,
@@ -15,6 +17,7 @@ import {
   backendRoot,
   getArcaAutomationConfig,
   getArcaConfig,
+  initializeArcaCredentials,
   resolveArcaCredentialPaths,
 } from './arca.js';
 
@@ -75,6 +78,7 @@ test('materializa credenciales Base64 fuera del repositorio con permisos restrin
     assert.equal(credentials.certificatePath.startsWith(temporaryRoot), true);
     assert.equal(credentials.privateKeyPath.startsWith(temporaryRoot), true);
     if (process.platform !== 'win32') {
+      assert.equal(statSync(credentials.certificatePath).mode & 0o777, 0o600);
       assert.equal(statSync(credentials.privateKeyPath).mode & 0o777, 0o600);
     }
   } finally {
@@ -82,10 +86,119 @@ test('materializa credenciales Base64 fuera del repositorio con permisos restrin
   }
 });
 
+test('la inicialización usada por startup materializa una vez y reutiliza las credenciales', () => {
+  const temporaryRoot = mkdtempSync(path.join(os.tmpdir(), 'fenix-arca-startup-test-'));
+  const certificate = '-----BEGIN CERTIFICATE-----\nc3RhcnR1cA==\n-----END CERTIFICATE-----\n';
+  const privateKey = '-----BEGIN RSA PRIVATE KEY-----\nc3RhcnR1cA==\n-----END RSA PRIVATE KEY-----\n';
+  const environment = {
+    ARCA_CERT_BASE64: Buffer.from(certificate).toString('base64'),
+    ARCA_KEY_BASE64: Buffer.from(privateKey).toString('base64'),
+  };
+
+  try {
+    const initialized = initializeArcaCredentials(environment, temporaryRoot);
+    const reused = initializeArcaCredentials(environment, temporaryRoot);
+
+    assert.strictEqual(reused, initialized);
+    assert.equal(initialized.source, 'base64');
+    assert.equal(readFileSync(initialized.certificatePath, 'utf8'), certificate);
+    assert.equal(readFileSync(initialized.privateKeyPath, 'utf8'), privateKey);
+    if (process.platform !== 'win32') {
+      assert.equal(statSync(initialized.certificatePath).mode & 0o777, 0o600);
+      assert.equal(statSync(initialized.privateKeyPath).mode & 0o777, 0o600);
+    }
+  } finally {
+    rmSync(temporaryRoot, { recursive: true, force: true });
+  }
+});
+
+test('el startup normal del backend materializa las credenciales antes de escuchar', {
+  timeout: 10_000,
+}, async () => {
+  const temporaryRoot = mkdtempSync(path.join(os.tmpdir(), 'fenix-backend-startup-test-'));
+  const certificate = '-----BEGIN CERTIFICATE-----\ncHJvY2Vzby1zdGFydHVw\n-----END CERTIFICATE-----\n';
+  const privateKey = '-----BEGIN PRIVATE KEY-----\ncHJvY2Vzby1zdGFydHVw\n-----END PRIVATE KEY-----\n';
+  const child = spawn(process.execPath, ['index.js'], {
+    cwd: backendRoot,
+    env: {
+      ...process.env,
+      NODE_ENV: 'test',
+      PORT: '0',
+      DATABASE_URL: '',
+      ARCA_CERT_BASE64: Buffer.from(certificate).toString('base64'),
+      ARCA_KEY_BASE64: Buffer.from(privateKey).toString('base64'),
+      ARCA_PRODUCTION_ENABLED: 'false',
+      ARCA_AUTO_INVOICE_ENABLED: 'false',
+      TMPDIR: temporaryRoot,
+      TMP: temporaryRoot,
+      TEMP: temporaryRoot,
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let output = '';
+
+  const started = new Promise((resolve, reject) => {
+    const inspect = (chunk) => {
+      output += chunk.toString();
+      if (output.includes('backend corriendo')) resolve();
+    };
+    child.stdout.on('data', inspect);
+    child.stderr.on('data', inspect);
+    child.once('exit', (code) => reject(new Error(
+      `El backend terminó antes de iniciar (code=${code}). ${output}`,
+    )));
+  });
+
+  try {
+    await started;
+    const credentialsDirectory = path.join(temporaryRoot, 'fenix-arca');
+    const certificatePath = path.join(credentialsDirectory, 'certificate.crt');
+    const privateKeyPath = path.join(credentialsDirectory, 'private.key');
+
+    assert.equal(readFileSync(certificatePath, 'utf8'), certificate);
+    assert.equal(readFileSync(privateKeyPath, 'utf8'), privateKey);
+    if (process.platform !== 'win32') {
+      assert.equal(statSync(certificatePath).mode & 0o777, 0o600);
+      assert.equal(statSync(privateKeyPath).mode & 0o777, 0o600);
+    }
+  } finally {
+    if (child.exitCode === null) {
+      const exited = once(child, 'exit');
+      child.kill();
+      await exited;
+    }
+    rmSync(temporaryRoot, { recursive: true, force: true });
+  }
+});
+
+test('el startup falla sin escuchar si falta una credencial Base64', () => {
+  const encodedCertificate = Buffer.from('certificado-ficticio-de-startup').toString('base64');
+  const result = spawnSync(process.execPath, ['index.js'], {
+    cwd: backendRoot,
+    env: {
+      ...process.env,
+      NODE_ENV: 'test',
+      PORT: '0',
+      ARCA_CERT_BASE64: encodedCertificate,
+      ARCA_KEY_BASE64: '',
+      ARCA_PRODUCTION_ENABLED: 'false',
+      ARCA_AUTO_INVOICE_ENABLED: 'false',
+    },
+    encoding: 'utf8',
+    timeout: 5_000,
+  });
+  const output = `${result.stdout || ''}${result.stderr || ''}`;
+
+  assert.notEqual(result.status, 0);
+  assert.match(output, /ARCA_CERT_BASE64 y ARCA_KEY_BASE64 deben configurarse juntas/);
+  assert.doesNotMatch(output, /backend corriendo/);
+  assert.equal(output.includes(encodedCertificate), false);
+});
+
 test('rechaza credenciales Base64 incompletas sin exponer su contenido', () => {
   const encodedCertificate = Buffer.from('certificado-sensible').toString('base64');
   assert.throws(
-    () => resolveArcaCredentialPaths({ ARCA_CERT_BASE64: encodedCertificate }),
+    () => initializeArcaCredentials({ ARCA_CERT_BASE64: encodedCertificate }),
     (error) => error instanceof ArcaConfigError
       && error.code === 'ARCA_BASE64_CREDENTIALS_INCOMPLETE'
       && !error.message.includes(encodedCertificate),

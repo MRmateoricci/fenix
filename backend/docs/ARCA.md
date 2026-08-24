@@ -104,6 +104,9 @@ la instancia con permisos `0600`; sus contenidos no se guardan en Git ni en el
 filesystem persistente. Cuando existen, tienen prioridad sobre `ARCA_CERT_PATH` y
 `ARCA_KEY_PATH`, que quedan como fallback para desarrollo local. Base64 es solo
 una codificación: la confidencialidad depende del almacenamiento sealed.
+El proceso principal realiza esta validación antes de `app.listen()`: una pareja
+Base64 incompleta o inválida impide el startup, y las lecturas posteriores de la
+configuración reutilizan la materialización existente sin reescribirla.
 
 ## Consultas seguras de producción
 
