@@ -49,3 +49,17 @@ test('consumidor final elegido tras un rechazo no conserva el CUIT en el borrado
   assert.equal(result.invoiceVatConditionId, '5')
   assert.equal(result.consumerFinalWithoutCuit, true)
 })
+
+test('consumidor final puede agregar un DNI sin recuperar el CUIT rechazado', () => {
+  const result = applyInvoiceMode({
+    nombre: 'Mateo',
+    apellido: 'Ricci',
+    invoiceDocNumber: '42172999',
+    invoiceVatConditionId: '5',
+    consumerFinalWithoutCuit: true,
+  }, options, false)
+
+  assert.equal(result.invoiceDocType, '96')
+  assert.equal(result.invoiceDocNumber, '42172999')
+  assert.equal(result.consumerFinalWithoutCuit, true)
+})

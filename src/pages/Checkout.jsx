@@ -1414,8 +1414,15 @@ function InvoiceRecipientFields({
   }, [cuit, formData.needsInvoiceA, options])
 
   const changeDocumentNumber = (value) => {
-    const digits = value.replace(/\D/g, '').slice(0, 11)
+    const digits = value.replace(/\D/g, '').slice(0, formData.consumerFinalWithoutCuit ? 8 : 11)
     setField('invoiceDocNumber', digits)
+    if (formData.consumerFinalWithoutCuit) {
+      const document = options?.documents?.find((option) => (
+        option.kind === (digits ? 'dni' : 'consumer_final')
+      ))
+      if (document) setField('invoiceDocType', String(document.id))
+      return
+    }
     setField('consumerFinalWithoutCuit', false)
     if (formData.needsInvoiceA) {
       setField('invoiceName', '')
@@ -1544,21 +1551,25 @@ function InvoiceRecipientFields({
               )}
             </div>
           ) : (
-            formData.consumerFinalWithoutCuit ? (
-              <p className="fnx-taxpayer-consumer-note">
-                Continuarás como consumidor final. Se emitirá Factura B sin usar el CUIT consultado.
-              </p>
-            ) : (
-              <Field label="DNI o CUIT" error={errors.invoiceDocNumber || errors.invoiceDocType}>
+            <>
+              {formData.consumerFinalWithoutCuit && (
+                <p className="fnx-taxpayer-consumer-note">
+                  Continuarás como consumidor final. Se emitirá Factura B sin usar el CUIT consultado.
+                </p>
+              )}
+              <Field
+                label={formData.consumerFinalWithoutCuit ? 'DNI (opcional)' : 'DNI o CUIT'}
+                error={errors.invoiceDocNumber || errors.invoiceDocType}
+              >
                 <DarkInput
                   inputMode="numeric"
-                  placeholder="DNI o CUIT"
+                  placeholder={formData.consumerFinalWithoutCuit ? 'DNI (opcional)' : 'DNI o CUIT'}
                   value={formData.invoiceDocNumber}
                   onChange={changeDocumentNumber}
                   hasError={!!(errors.invoiceDocNumber || errors.invoiceDocType)}
                 />
               </Field>
-            )
+            </>
           )}
 
           {formData.deliveryType === 'pickup' && (

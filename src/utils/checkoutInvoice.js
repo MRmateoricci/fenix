@@ -20,8 +20,9 @@ export function applyInvoiceMode(current, options, needsInvoiceA) {
   const anonymousDocument = documents.find((document) => document.kind === 'consumer_final')
   const digits = String(current.invoiceDocNumber || '').replace(/\D/g, '')
   const consumerFinalWithoutCuit = !needsInvoiceA && current.consumerFinalWithoutCuit === true
+  const consumerFinalDigits = consumerFinalWithoutCuit && digits.length <= 8 ? digits : ''
   const document = consumerFinalWithoutCuit
-    ? anonymousDocument
+    ? consumerFinalDigits ? dniDocument : anonymousDocument
     : needsInvoiceA || documentKindForNumber(digits) === 'cuit'
       ? cuitDocument
       : dniDocument
@@ -34,7 +35,9 @@ export function applyInvoiceMode(current, options, needsInvoiceA) {
       ? (currentCondition ? current.invoiceName : '')
       : `${current.nombre || ''} ${current.apellido || ''}`.trim(),
     invoiceDocType: document ? String(document.id) : '',
-    invoiceDocNumber: consumerFinalWithoutCuit || (needsInvoiceA && digits.length !== 11) ? '' : digits,
+    invoiceDocNumber: consumerFinalWithoutCuit
+      ? consumerFinalDigits
+      : needsInvoiceA && digits.length !== 11 ? '' : digits,
     invoiceVatConditionId: preferredCondition ? String(preferredCondition.id) : '',
   }
 }
