@@ -1,9 +1,23 @@
 import PDFDocument from 'pdfkit';
 import QRCode from 'qrcode';
-import { invoiceClassForVoucherType, voucherPresentation } from './invoiceFiscal.js';
+import { existsSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+import { createCanvas, loadImage } from '@napi-rs/canvas';
+import {
+  classifyReceiverVatCondition,
+  invoiceClassForVoucherType,
+  voucherPresentation,
+} from './invoiceFiscal.js';
 
 const ARCA_QR_BASE_URL = 'https://www.arca.gob.ar/fe/qr/?p=';
 const MONOTRIBUTO_CREDIT_LEGEND = 'El crédito fiscal discriminado en el presente comprobante, solo podrá ser computado a efectos del Régimen de Sostenimiento e Inclusión Fiscal para Pequeños Contribuyentes de la Ley Nº 27.618.';
+const FISCAL_TRANSPARENCY_TITLE = 'Régimen de Transparencia Fiscal al Consumidor (Ley 27.743)';
+const DEFAULT_INVOICE_LOGO_PATH = fileURLToPath(
+  new URL('../../src/assets/logo_fenix-removebg-preview.png', import.meta.url),
+);
+
+let defaultInvoiceLogoPromise;
 
 function isoDate(value) {
   if (!value) return '';
@@ -60,13 +74,83 @@ function presentationFor(invoice) {
   return voucherPresentation(invoice.cbte_tipo, invoice.issuer_snapshot?.aAuthorizationMode);
 }
 
+function receiverVatLegend(invoice, receiver) {
+  const description = receiver.vatCategory
+    || receiver.vatConditionDescription
+    || receiver.vatConditionId
+    || invoice.receiver_vat_condition_id;
+  switch (classifyReceiverVatCondition(description)) {
+    case 'consumer_final': return 'A CONSUMIDOR FINAL';
+    case 'exempt': return 'IVA EXENTO';
+    case 'monotributo': return 'RESPONSABLE MONOTRIBUTO';
+    default: return description;
+  }
+}
+
+function shouldShowFiscalTransparency(invoice, receiver) {
+  const category = classifyReceiverVatCondition(
+    receiver.vatCategory || receiver.vatConditionDescription || receiver.vatConditionId,
+  );
+  return Number(invoice.imp_iva) > 0
+    && ['consumer_final', 'exempt', 'monotributo'].includes(category);
+}
+
+async function trimTransparentImage(source) {
+  const image = await loadImage(source);
+  const sourceCanvas = createCanvas(image.width, image.height);
+  const sourceContext = sourceCanvas.getContext('2d');
+  sourceContext.drawImage(image, 0, 0);
+  const pixels = sourceContext.getImageData(0, 0, image.width, image.height).data;
+  let minX = image.width;
+  let minY = image.height;
+  let maxX = -1;
+  let maxY = -1;
+
+  for (let y = 0; y < image.height; y += 1) {
+    for (let x = 0; x < image.width; x += 1) {
+      if (pixels[((y * image.width) + x) * 4 + 3] > 5) {
+        minX = Math.min(minX, x);
+        minY = Math.min(minY, y);
+        maxX = Math.max(maxX, x);
+        maxY = Math.max(maxY, y);
+      }
+    }
+  }
+
+  if (maxX < minX || maxY < minY) return null;
+
+  const padding = 4;
+  const x = Math.max(0, minX - padding);
+  const y = Math.max(0, minY - padding);
+  const width = Math.min(image.width - x, (maxX - minX + 1) + (padding * 2));
+  const height = Math.min(image.height - y, (maxY - minY + 1) + (padding * 2));
+  const output = createCanvas(width, height);
+  output.getContext('2d').drawImage(image, x, y, width, height, 0, 0, width, height);
+  return output.toBuffer('image/png');
+}
+
+async function loadDefaultInvoiceLogo() {
+  if (!existsSync(DEFAULT_INVOICE_LOGO_PATH)) return null;
+  return trimTransparentImage(await readFile(DEFAULT_INVOICE_LOGO_PATH));
+}
+
+async function invoiceLogo(logoSource) {
+  if (logoSource === false) return null;
+  if (logoSource) {
+    const source = typeof logoSource === 'string' ? await readFile(logoSource) : logoSource;
+    return trimTransparentImage(source);
+  }
+  defaultInvoiceLogoPromise ||= loadDefaultInvoiceLogo().catch(() => null);
+  return defaultInvoiceLogoPromise;
+}
+
 function shouldShowMonotributoLegend(invoice) {
   const receiverCategory = invoice.receiver_snapshot?.vatCategory;
   return ['A', 'ALEY'].includes(invoiceClassForVoucherType(invoice.cbte_tipo))
     && receiverCategory === 'monotributo';
 }
 
-export async function generateInvoicePdf(invoice) {
+export async function generateInvoicePdf(invoice, { logoSource } = {}) {
   if (!invoice || invoice.status !== 'authorized') {
     throw new Error('Solo se puede generar el PDF de una factura autorizada.');
   }
@@ -85,6 +169,7 @@ export async function generateInvoicePdf(invoice) {
     margin: 1,
     errorCorrectionLevel: 'M',
   });
+  const logoImage = await invoiceLogo(logoSource);
 
   return new Promise((resolve, reject) => {
     const document = new PDFDocument({ size: 'A4', margin: 42, info: { Title: presentation.name } });
@@ -93,13 +178,25 @@ export async function generateInvoicePdf(invoice) {
     document.on('error', reject);
     document.on('end', () => resolve(Buffer.concat(chunks)));
 
-    document.font('Helvetica-Bold').fontSize(18).text(issuer.legalName || 'Emisor', 42, 42, { width: 245 });
-    document.font('Helvetica').fontSize(9)
-      .text(`CUIT: ${issuer.cuit || invoice.issuer_cuit}`)
-      .text(`Condición IVA: ${issuer.taxCondition || ''}`)
-      .text(`Domicilio fiscal: ${issuer.taxAddress || ''}`)
-      .text(`Ingresos Brutos: ${issuer.grossIncome || ''}`)
-      .text(`Inicio de actividades: ${displayDate(issuer.activityStartDate)}`);
+    if (logoImage) {
+      document.image(logoImage, 42, 38, { fit: [205, 66], align: 'left', valign: 'center' });
+      document.font('Helvetica-Bold').fontSize(8)
+        .text(issuer.legalName || 'Emisor', 42, 108, { width: 245 });
+      document.font('Helvetica').fontSize(7)
+        .text(`CUIT: ${issuer.cuit || invoice.issuer_cuit}`)
+        .text(`Condición IVA: ${issuer.taxCondition || ''}`)
+        .text(`Domicilio fiscal: ${issuer.taxAddress || ''}`)
+        .text(`Ingresos Brutos: ${issuer.grossIncome || ''}`)
+        .text(`Inicio de actividades: ${displayDate(issuer.activityStartDate)}`);
+    } else {
+      document.font('Helvetica-Bold').fontSize(18).text(issuer.legalName || 'Emisor', 42, 42, { width: 245 });
+      document.font('Helvetica').fontSize(9)
+        .text(`CUIT: ${issuer.cuit || invoice.issuer_cuit}`)
+        .text(`Condición IVA: ${issuer.taxCondition || ''}`)
+        .text(`Domicilio fiscal: ${issuer.taxAddress || ''}`)
+        .text(`Ingresos Brutos: ${issuer.grossIncome || ''}`)
+        .text(`Inicio de actividades: ${displayDate(issuer.activityStartDate)}`);
+    }
 
     document.rect(295, 38, 258, 115).stroke('#555555');
     document.font('Helvetica-Bold').fontSize(28).text(presentation.letter, 305, 45, { width: 45, align: 'center' });
@@ -117,7 +214,7 @@ export async function generateInvoicePdf(invoice) {
     document.font('Helvetica').fontSize(9)
       .text(`Nombre / Razón social: ${receiver.name || ''}`)
       .text(`Documento (${invoice.receiver_doc_type}): ${invoice.receiver_doc_number}`)
-      .text(`Condición IVA: ${receiver.vatConditionDescription || receiver.vatConditionId || invoice.receiver_vat_condition_id}`)
+      .text(`Condición IVA: ${receiverVatLegend(invoice, receiver)}`)
       .text(`Domicilio: ${receiver.address || ''}`);
 
     let y = document.y + 16;
@@ -179,6 +276,24 @@ export async function generateInvoicePdf(invoice) {
       .text(money(invoice.imp_total), 470, y + 2, { width: 83, align: 'right' });
     y += 26;
 
+    if (shouldShowFiscalTransparency(invoice, receiver)) {
+      const otherNationalIndirectTaxes = Number(
+        invoice.other_national_indirect_taxes
+        ?? itemsSnapshot.otherNationalIndirectTaxes
+        ?? 0,
+      );
+      document.font('Helvetica-Bold').fontSize(8)
+        .text(FISCAL_TRANSPARENCY_TITLE, 42, y, { width: 380 });
+      y += 13;
+      document.font('Helvetica').fontSize(8)
+        .text('IVA Contenido:', 42, y, { width: 275 })
+        .text(money(invoice.imp_iva), 320, y, { width: 100, align: 'right' });
+      y += 12;
+      document.text('Otros Impuestos Nacionales Indirectos:', 42, y, { width: 275 })
+        .text(money(otherNationalIndirectTaxes), 320, y, { width: 100, align: 'right' });
+      y += 18;
+    }
+
     if (shouldShowMonotributoLegend(invoice)) {
       document.font('Helvetica').fontSize(7).text(MONOTRIBUTO_CREDIT_LEGEND, 42, y, { width: 511 });
       y = document.y + 8;
@@ -200,4 +315,4 @@ export async function generateInvoicePdf(invoice) {
   });
 }
 
-export { ARCA_QR_BASE_URL, MONOTRIBUTO_CREDIT_LEGEND };
+export { ARCA_QR_BASE_URL, FISCAL_TRANSPARENCY_TITLE, MONOTRIBUTO_CREDIT_LEGEND };

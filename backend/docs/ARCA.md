@@ -184,3 +184,9 @@ El script aborta si falta `--confirm-production`, si `ARCA_PRODUCTION_ENABLED` n
 - La operación recupera respuestas inciertas con `FECompConsultar` y protege la secuencia por CUIT, punto de venta y tipo.
 - Las Facturas A a Monotributistas incluyen la leyenda exigida por la Ley 27.618.
 - No está implementada la Factura de Crédito Electrónica MiPyME ni la selección de múltiples alícuotas dentro de un pedido. Si la relación comercial requiere FCE o el catálogo incorpora tasas mixtas, hay que ampliar la estrategia antes de emitir.
+
+## Representación gráfica y logo
+
+El PDF de los comprobantes alcanzados incluye el bloque `Régimen de Transparencia Fiscal al Consumidor (Ley 27.743)`, el `IVA Contenido` y los `Otros Impuestos Nacionales Indirectos`. La implementación fiscal actual no liquida otros impuestos nacionales indirectos, por lo que ese valor se muestra en cero.
+
+El encabezado reutiliza el logo público versionado en `src/assets/logo_fenix-removebg-preview.png`. No es un secreto y no requiere una variable de Railway. Para cambiarlo, hay que reemplazar ese archivo por otro PNG transparente, conservar el nombre y volver a desplegar; el backend recorta automáticamente el margen transparente antes de insertarlo. Si el asset no estuviera disponible, el PDF mantiene como fallback el encabezado textual del emisor.

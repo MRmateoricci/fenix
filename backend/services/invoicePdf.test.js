@@ -34,6 +34,15 @@ test('PDF contiene comprobante, total, CAE y vencimiento', async () => {
   assert.match(parsed.text, /25\/08\/2026/);
 });
 
+test('PDF incorpora el logo de Fénix cuando el asset está disponible', async () => {
+  const [withLogo, withoutLogo] = await Promise.all([
+    generateInvoicePdf(invoice),
+    generateInvoicePdf(invoice, { logoSource: false }),
+  ]);
+  const imageCount = (buffer) => (buffer.toString('latin1').match(/\/Subtype \/Image/g) || []).length;
+  assert.ok(imageCount(withLogo) > imageCount(withoutLogo));
+});
+
 for (const [voucherType, label] of [[1, 'FACTURA A'], [6, 'FACTURA B']]) {
   test(`PDF ${label} muestra clase, neto, IVA, total y condiciones fiscales`, async () => {
     const fiscalInvoice = {
@@ -61,5 +70,13 @@ for (const [voucherType, label] of [[1, 'FACTURA A'], [6, 'FACTURA B']]) {
     assert.match(parsed.text, /TOTAL/);
     assert.match(parsed.text, /Inicio de actividades: 01\/2024/);
     assert.match(parsed.text, /Responsable Inscripto|Consumidor Final/);
+    if (voucherType === 6) {
+      assert.match(parsed.text, /A CONSUMIDOR FINAL/);
+      assert.match(parsed.text, /Régimen de Transparencia Fiscal al Consumidor \(Ley 27\.743\)/);
+      assert.match(parsed.text, /IVA Contenido/);
+      assert.match(parsed.text, /Otros Impuestos Nacionales Indirectos/);
+    } else {
+      assert.doesNotMatch(parsed.text, /Régimen de Transparencia Fiscal al Consumidor/);
+    }
   });
 }
