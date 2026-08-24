@@ -638,6 +638,11 @@ ALTER TABLE orders ADD COLUMN IF NOT EXISTS invoice_service_from DATE;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS invoice_service_to DATE;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS invoice_payment_due DATE;
 
+-- Cuando el comprador delega el retiro, el local necesita identificar a esa
+-- persona sin reemplazar al titular que pagó y recibió el comprobante.
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS pickup_person_name VARCHAR(100);
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS pickup_person_last_name VARCHAR(100);
+
 ALTER TABLE orders DROP CONSTRAINT IF EXISTS orders_invoice_concept_check;
 ALTER TABLE orders ADD CONSTRAINT orders_invoice_concept_check CHECK (
   invoice_concept IS NULL OR invoice_concept IN (1, 2, 3)

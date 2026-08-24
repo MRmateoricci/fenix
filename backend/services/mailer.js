@@ -41,7 +41,8 @@ function deliveryLine(order) {
   if (order.delivery_type === 'pickup') {
     const when = fmtDate(order.pickup_date)
     const pago = order.payment_method === 'pay_in_store' ? 'Pago en el local al retirar' : 'Pago ya realizado online'
-    return `Retiro en local — 473 entre 14C y 15, City Bell${when ? ` el ${when}` : ''}. ${pago}.`
+    const pickupPerson = [order.pickup_person_name, order.pickup_person_last_name].filter(Boolean).join(' ')
+    return `Retiro en local — 473 entre 14C y 15, City Bell${when ? ` el ${when}` : ''}. ${pago}.${pickupPerson ? ` Persona autorizada: ${pickupPerson}.` : ''}`
   }
   const when = fmtDate(order.estimated_delivery_date)
   const service = order.shipping_service ? ` ${order.shipping_service}` : ''

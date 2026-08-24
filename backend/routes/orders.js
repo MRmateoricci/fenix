@@ -20,6 +20,11 @@ import {
   validateReceiverForVoucher,
 } from '../services/invoiceFiscal.js'
 import { getInvoiceOptions } from '../services/arcaParameters.js'
+import {
+  ArcaTaxpayerRegistryError,
+  lookupTaxpayer,
+  profileForInvoiceA,
+} from '../services/arcaTaxpayerRegistry.js'
 import { safeArcaErrorMessage } from '../services/arcaSafeLog.js'
 import { DEFAULT_VAT_RATE } from '../config/tax.js'
 import 'dotenv/config'
@@ -36,6 +41,43 @@ const PENDING_PAYMENT_EXPIRY_MINUTES = 45
 // caminos termina llamándolo para el mismo pedido).
 export const RELEASES_STOCK = ['cancelled', 'payment_failed', 'expired']
 export const CUSTOMER_ORDER_STATUSES = ['reserved', 'paid', 'preparing', 'shipped', 'delivered']
+
+export async function verifyInvoiceARecipient(
+  receiver,
+  invoiceOptions,
+  taxpayerLookup = lookupTaxpayer,
+) {
+  const selectedCondition = invoiceOptions?.vatConditions
+    ?.find(option => option.id === receiver.vatConditionId)
+  if (!['A', 'ALEY'].includes(selectedCondition?.invoiceClass)) {
+    return { receiver, condition: selectedCondition, verified: false }
+  }
+
+  try {
+    const profile = profileForInvoiceA(
+      await taxpayerLookup(receiver.docNumber),
+      invoiceOptions,
+    )
+    const condition = invoiceOptions.vatConditions
+      .find(option => option.id === profile.vatConditionId)
+    return {
+      receiver: {
+        ...receiver,
+        name: profile.name,
+        docType: 80,
+        docNumber: profile.cuit,
+        vatConditionId: profile.vatConditionId,
+      },
+      condition,
+      verified: true,
+    }
+  } catch (error) {
+    if (error instanceof ArcaTaxpayerRegistryError && error.recoverable === false) {
+      throw new InvoiceValidationError(error.message, error.code)
+    }
+    return { receiver, condition: selectedCondition, verified: false, lookupError: error }
+  }
+}
 
 function dateInputValue(value) {
   if (!value) return ''
@@ -70,6 +112,9 @@ export function buildRetryCheckoutData(order) {
     billingCity: order?.billing_city || '',
     billingPostalCode: order?.billing_postal_code || '',
     billingProvince: order?.billing_province || 'Buenos Aires',
+    pickupByOtherPerson: Boolean(order?.pickup_person_name || order?.pickup_person_last_name),
+    pickupPersonName: order?.pickup_person_name || '',
+    pickupPersonLastName: order?.pickup_person_last_name || '',
   }
 }
 
@@ -219,12 +264,12 @@ router.post('/', attachUserIfPresent, async (req, res) => {
     let customerEmail   = normalizeEmail(customer?.email)
     let orderUserId     = req.userId || null
 
-    const invoiceReceiver = buildReceiverData(customer)
+    let invoiceReceiver = buildReceiverData(customer)
     const invoiceOptions = await getInvoiceOptions()
     if (!invoiceOptions.documents.some(option => option.id === invoiceReceiver.docType)) {
       return res.status(400).json({ error: 'El tipo de documento fiscal no fue informado por ARCA' })
     }
-    const receiverVatCondition = invoiceOptions.vatConditions
+    let receiverVatCondition = invoiceOptions.vatConditions
       .find(option => option.id === invoiceReceiver.vatConditionId)
     if (!receiverVatCondition) {
       return res.status(400).json({ error: 'La condición IVA no es válida para el emisor configurado' })
@@ -232,10 +277,22 @@ router.post('/', attachUserIfPresent, async (req, res) => {
     if (!receiverVatCondition.allowedDocumentTypeIds.includes(invoiceReceiver.docType)) {
       return res.status(400).json({ error: 'El documento no corresponde a la condición IVA elegida' })
     }
+    const registryVerification = await verifyInvoiceARecipient(invoiceReceiver, invoiceOptions)
+    invoiceReceiver = registryVerification.receiver
+    receiverVatCondition = registryVerification.condition
+    if (registryVerification.lookupError) {
+      console.warn(
+        '[POST /api/orders] padrón ARCA no disponible; se conserva validación fiscal manual',
+        registryVerification.lookupError.code || registryVerification.lookupError.name,
+      )
+    }
     const customerDni = invoiceReceiver.docType === 96
       ? invoiceReceiver.docNumber
       : String(customer?.dni || '').replace(/\D/g, '') || null
     const billingSameAsShipping = deliveryType === 'delivery' && customer?.billingSameAsShipping !== false
+    const pickupByOtherPerson = deliveryType === 'pickup' && customer?.pickupByOtherPerson === true
+    const pickupPersonName = pickupByOtherPerson ? String(customer?.pickupPersonName || '').trim() : null
+    const pickupPersonLastName = pickupByOtherPerson ? String(customer?.pickupPersonLastName || '').trim() : null
 
     if (!isValidEmail(customerEmail) || !customer?.nombre || !items?.length) {
       return res.status(400).json({ error: 'Faltan campos requeridos' })
@@ -248,6 +305,9 @@ router.post('/', attachUserIfPresent, async (req, res) => {
     }
     if (deliveryType === 'pickup' && !pickupDate) {
       return res.status(400).json({ error: 'Falta la fecha de retiro' })
+    }
+    if (pickupByOtherPerson && (!pickupPersonName || !pickupPersonLastName)) {
+      return res.status(400).json({ error: 'Completá el nombre y apellido de la persona que retirará el pedido' })
     }
     if (deliveryType === 'delivery' && !SHIPPING_SERVICES.includes(shippingService)) {
       return res.status(400).json({ error: 'Servicio de envío inválido' })
@@ -404,10 +464,11 @@ router.post('/', attachUserIfPresent, async (req, res) => {
             items, user_id, customer_dni, address_extra, province, billing_same_as_shipping,
             billing_address, billing_address_extra, billing_city, billing_postal_code, billing_province,
             coupon_code, discount_amount, invoice_recipient_name, invoice_doc_type,
-            invoice_doc_number, invoice_vat_condition_id, invoice_data_confirmed_at, invoice_concept)
+            invoice_doc_number, invoice_vat_condition_id, invoice_data_confirmed_at, invoice_concept,
+            pickup_person_name, pickup_person_last_name)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,
                  $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29,
-                 $30, $31, $32, $33, NOW(), $34)
+                 $30, $31, $32, $33, NOW(), $34, $35, $36)
          RETURNING *`,
         [
           orderNumber, initialStatus,
@@ -443,6 +504,8 @@ router.post('/', attachUserIfPresent, async (req, res) => {
           invoiceReceiver.docNumber,
           invoiceReceiver.vatConditionId,
           1,
+          pickupPersonName,
+          pickupPersonLastName,
         ]
       )
       order = rows[0]
@@ -515,6 +578,7 @@ const PUBLIC_ORDER_FIELDS = `
   id, order_number, status, customer_name, delivery_type,
   address, city, postal_code, total_amount, shipping_cost, shipping_service,
   payment_method, pickup_date, estimated_delivery_date,
+  pickup_person_name, pickup_person_last_name,
   coupon_code, discount_amount,
   items, created_at, paid_at
 `
@@ -625,6 +689,7 @@ router.get('/mine/:id/retry-data', requireAuth, async (req, res) => {
               o.billing_city, o.billing_province, o.billing_postal_code,
               o.invoice_recipient_name, o.invoice_doc_type, o.invoice_doc_number,
               o.invoice_vat_condition_id, o.payment_method, o.pickup_date, o.shipping_service,
+              o.pickup_person_name, o.pickup_person_last_name,
               u.first_name AS account_first_name, u.last_name AS account_last_name
        FROM orders o
        JOIN users u ON u.id = o.user_id
@@ -654,7 +719,8 @@ router.get('/mine/:id', requireAuth, async (req, res) => {
               invoice_service_from, invoice_service_to, invoice_payment_due,
               total_amount, shipping_cost, shipping_service, payment_method,
               coupon_code, discount_amount,
-              pickup_date, estimated_delivery_date, items, created_at, paid_at
+              pickup_date, estimated_delivery_date, pickup_person_name, pickup_person_last_name,
+              items, created_at, paid_at
        FROM orders
        WHERE id = $1 AND user_id = $2
          AND (status = ANY($3::varchar[]) OR (status = 'cancelled' AND paid_at IS NOT NULL))`,
@@ -706,6 +772,7 @@ router.get('/', requireAdmin, async (req, res) => {
                 o.delivery_type, o.address, o.city, o.postal_code, o.total_amount,
                 o.shipping_cost, o.shipping_service, o.payment_method, o.mp_status,
                 o.pickup_date, o.estimated_delivery_date, o.items,
+                o.pickup_person_name, o.pickup_person_last_name,
                 o.coupon_code, o.discount_amount, o.created_at, o.updated_at,
                 o.paid_at, o.mp_payment_id, o.invoice_data_confirmed_at,
                 o.invoice_recipient_name, o.invoice_doc_type, o.invoice_doc_number,

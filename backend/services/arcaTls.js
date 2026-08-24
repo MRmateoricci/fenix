@@ -29,13 +29,13 @@ export function createArcaHttpsAgent(wsfeUrl) {
   });
 }
 
-export function createArcaWsfeTransport(wsfeUrl, { timeout = 30_000 } = {}) {
-  const httpsAgent = createArcaHttpsAgent(wsfeUrl);
+export function createArcaSoapTransport(serviceUrl, { timeout = 30_000 } = {}) {
+  const httpsAgent = createArcaHttpsAgent(serviceUrl);
   const request = axios.create({ httpsAgent });
   const operationOptions = { timeout, httpsAgent };
   return {
     httpsAgent,
-    legacyCompatibility: requiresArcaLegacyTls(wsfeUrl),
+    legacyCompatibility: requiresArcaLegacyTls(serviceUrl),
     operationOptions,
     soapOptions: {
       request,
@@ -43,6 +43,9 @@ export function createArcaWsfeTransport(wsfeUrl, { timeout = 30_000 } = {}) {
     },
   };
 }
+
+// Alias conservado para no cambiar los consumidores existentes de WSFE.
+export const createArcaWsfeTransport = createArcaSoapTransport;
 
 export {
   ARCA_WSFE_LEGACY_CIPHERS,

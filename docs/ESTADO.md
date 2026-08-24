@@ -202,6 +202,10 @@ productivas están permitidas, pero `FECAESolicitar` continúa bloqueado mientra
   la última respuesta válida
 - Datos fiscales del receptor capturados durante checkout. Pedidos históricos deben
   confirmarlos antes de emitir; el DNI dejó de bloquear el carrito
+- Factura A consulta el CUIT mediante `ws_sr_constancia_inscripcion/getPersona_v2`:
+  completa razón social y condición fiscal, y el backend repite la validación antes
+  de guardar el pedido. La carga manual aparece sólo ante una indisponibilidad técnica
+  del padrón; un CUIT inexistente, inactivo o no habilitado para A se rechaza
 - Pedidos invitados reclamables únicamente por una cuenta verificada con el mismo email
 - Tabla `invoices`, snapshots inmutables y estados `pending`, `processing`,
   `uncertain`, `authorized`, `rejected` y `error`
@@ -331,6 +335,36 @@ Links: envío → `/policies/shipping` (página real). Cuotas → `/faq#medios-d
 ---
 
 ## Bitácora
+
+### 2026-08-24 · Consulta de CUIT para Factura A
+
+El checkbox `Necesito factura A` ya no obliga al comprador a conocer su condición IVA.
+Al completar un CUIT válido, el checkout consulta el padrón oficial de ARCA, muestra
+razón social y condición como datos verificados y el servidor repite esa consulta al
+crear el pedido para no confiar en valores del navegador. Los tickets WSAA se separan
+por servicio y el endpoint público tiene límite por IP, caché breve y respuesta sin
+caché HTTP. Ante caída técnica se habilita la carga manual; los rechazos fiscales no
+tienen fallback. WSDL oficial y firma de la operación verificados; la prueba completa
+local quedó pendiente porque WSAA homologación rechazó el certificado configurado como
+no emitido por una AC de confianza. Debe corregirse el certificado del ambiente y
+autorizar `ws_sr_constancia_inscripcion` antes de considerar operativa la consulta real.
+Build de producción y suite backend: 129 tests pasan, 1 PostgreSQL omitido.
+
+### 2026-08-24 · Checkout fiscal simplificado y retiro por otra persona
+
+El checkout separa visualmente contacto, entrega, destinatario y facturación. Para
+consumidor final solicita solamente DNI o CUIT y resuelve internamente documento y
+condición fiscal. El checkbox `Necesito factura A` muestra CUIT y resuelve razón social
+y condición IVA compatible mediante el padrón. La dirección de facturación usa un único checkbox para reutilizar la
+dirección de entrega.
+
+En retiros se incorporó `Otra persona retirará el pedido`, con nombre y apellido
+condicionales. La persona autorizada queda persistida, vuelve con el borrador tras
+un pago rechazado y se muestra en el detalle administrativo, Mi cuenta y los correos
+de confirmación. Las columnas nuevas son nullable para conservar pedidos históricos.
+Verificado con 121 tests de backend aprobados (uno PostgreSQL omitido por falta de
+`TEST_DATABASE_URL`), 3 tests focalizados del mapeo fiscal y build productivo de
+Vite exitoso. Mobile real queda pendiente de verificación en dispositivo físico.
 
 ### 2026-08-24 · Pago rechazado permanece en checkout
 

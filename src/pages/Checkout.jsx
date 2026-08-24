@@ -6,6 +6,7 @@ import PageSEO from '../components/SEO'
 import { getShippingForCP, SHIPPING_SERVICES } from '../config/shipping'
 import mercadoPagoLogo from '../assets/mercado-pago-horizontal.svg'
 import { POLICIES } from './Policy'
+import { applyInvoiceMode, documentKindForNumber } from '../utils/checkoutInvoice'
 
 const API_BASE = import.meta.env.VITE_API_URL || ''
 const CHECKOUT_PAYMENT_DRAFT_KEY = 'fenix_checkout_payment_draft'
@@ -54,9 +55,12 @@ function validateInvoiceRecipient(d, invoiceOptions) {
   const e = {}
   const docType = Number(d.invoiceDocType)
   const docNumber = String(d.invoiceDocNumber || '').replace(/\D/g, '')
-  if (!d.invoiceName.trim()) e.invoiceName = 'Ingresá el nombre o razón social'
   const vatCondition = invoiceOptions?.vatConditions
     ?.find((option) => option.id === Number(d.invoiceVatConditionId))
+  const invoiceName = d.needsInvoiceA
+    ? d.invoiceName.trim()
+    : `${d.nombre || ''} ${d.apellido || ''}`.trim()
+  if (!invoiceName) e.invoiceName = 'Ingresá el nombre o razón social'
   if (!invoiceOptions?.documents?.some((option) => option.id === docType)) {
     e.invoiceDocType = 'Elegí un tipo de documento válido'
   } else if (vatCondition && !vatCondition.allowedDocumentTypeIds.includes(docType)) {
@@ -70,6 +74,10 @@ function validateInvoiceRecipient(d, invoiceOptions) {
   }
   if (!vatCondition) {
     e.invoiceVatConditionId = 'Elegí la condición frente al IVA'
+  } else if (d.needsInvoiceA && !['A', 'ALEY'].includes(vatCondition.invoiceClass)) {
+    e.invoiceVatConditionId = 'Elegí una condición habilitada para Factura A'
+  } else if (!d.needsInvoiceA && vatCondition.category !== 'consumer_final') {
+    e.invoiceVatConditionId = 'Los comprobantes sin Factura A se emiten a consumidor final'
   }
   return e
 }
@@ -87,6 +95,10 @@ function validateStep2(d, shippingZone) {
   }
   if (d.deliveryType === 'pickup' && !d.pickupDate) {
     e.pickupDate = 'Elegí una fecha de retiro'
+  }
+  if (d.deliveryType === 'pickup' && d.pickupByOtherPerson) {
+    if (!String(d.pickupPersonName || '').trim()) e.pickupPersonName = 'Ingresá el nombre de quien retira'
+    if (!String(d.pickupPersonLastName || '').trim()) e.pickupPersonLastName = 'Ingresá el apellido de quien retira'
   }
   return e
 }
@@ -141,6 +153,7 @@ export default function Checkout() {
     invoiceDocType: '',
     invoiceDocNumber: '',
     invoiceVatConditionId: '',
+    needsInvoiceA: null,
     deliveryType: 'delivery',
     paymentMethod: 'mercadopago',
     shippingService: 'clasico',
@@ -156,6 +169,9 @@ export default function Checkout() {
     billingCity: '',
     billingPostalCode: '',
     billingProvince: 'Buenos Aires',
+    pickupByOtherPerson: false,
+    pickupPersonName: '',
+    pickupPersonLastName: '',
     ...(paymentDraft?.formData || {}),
   })
 
@@ -202,6 +218,15 @@ export default function Checkout() {
         const data = await response.json().catch(() => ({}))
         if (!response.ok) throw new Error(data.error || 'No pudimos obtener las opciones fiscales de ARCA.')
         setInvoiceOptions(data)
+        setFormData((current) => {
+          const selectedCondition = data.vatConditions?.find(
+            (condition) => condition.id === Number(current.invoiceVatConditionId)
+          )
+          const needsInvoiceA = typeof current.needsInvoiceA === 'boolean'
+            ? current.needsInvoiceA
+            : ['A', 'ALEY'].includes(selectedCondition?.invoiceClass)
+          return applyInvoiceMode(current, data, needsInvoiceA)
+        })
         setInvoiceOptionsError(null)
       })
       .catch((error) => {
@@ -209,6 +234,21 @@ export default function Checkout() {
       })
     return () => controller.abort()
   }, [])
+
+  // Un borrador recuperado puede llegar después que las opciones de ARCA.
+  // Recalculamos el modo visible desde la condición persistida para que una
+  // Factura A anterior nunca reaparezca como consumidor final.
+  useEffect(() => {
+    if (!invoiceOptions || !formData.invoiceVatConditionId) return
+    const selected = invoiceOptions.vatConditions?.find(
+      (condition) => condition.id === Number(formData.invoiceVatConditionId)
+    )
+    if (!selected) return
+    const inferredNeedsInvoiceA = ['A', 'ALEY'].includes(selected.invoiceClass)
+    if (inferredNeedsInvoiceA !== formData.needsInvoiceA) {
+      setFormData((current) => applyInvoiceMode(current, invoiceOptions, inferredNeedsInvoiceA))
+    }
+  }, [invoiceOptions, formData.invoiceVatConditionId, formData.needsInvoiceA])
 
   // Si el usuario entra directo a /checkout, el estado de sesión puede
   // resolverse recién después del primer render. Cuando termine de cargar
@@ -403,6 +443,18 @@ export default function Checkout() {
     }
   }
 
+  function setInvoiceMode(needsInvoiceA) {
+    setFormData((current) => applyInvoiceMode(current, invoiceOptions, needsInvoiceA))
+    setErrors((current) => {
+      const next = { ...current }
+      delete next.invoiceName
+      delete next.invoiceDocType
+      delete next.invoiceDocNumber
+      delete next.invoiceVatConditionId
+      return next
+    })
+  }
+
   async function saveProfileChanges(changes) {
     if (!user || Object.keys(changes).length === 0) return
 
@@ -535,7 +587,9 @@ export default function Checkout() {
           customer: {
             ...formData,
             invoiceRecipient: {
-              name: formData.invoiceName,
+              name: formData.needsInvoiceA
+                ? formData.invoiceName
+                : `${formData.nombre} ${formData.apellido}`.trim(),
               docType: Number(formData.invoiceDocType),
               docNumber: formData.invoiceDocNumber,
               vatConditionId: Number(formData.invoiceVatConditionId),
@@ -653,6 +707,7 @@ export default function Checkout() {
               onConfirm={handleConfirm}
               invoiceOptions={invoiceOptions}
               invoiceOptionsError={invoiceOptionsError}
+              onInvoiceModeChange={setInvoiceMode}
             />
             {false && <>
         {/* ── Step 1: Datos personales ── */}
@@ -1058,6 +1113,7 @@ function SinglePageCheckout({
   accountLoginRequired, profileError, submitError, submitting, onConfirm,
   paymentRejected,
   invoiceOptions, invoiceOptionsError,
+  onInvoiceModeChange,
 }) {
   const [activePolicy, setActivePolicy] = useState(null)
   const [accountMenuOpen, setAccountMenuOpen] = useState(false)
@@ -1090,20 +1146,23 @@ function SinglePageCheckout({
     <div className="fnx-single-checkout">
       <section className="fnx-checkout-section">
         {user ? (
-          <div className="fnx-checkout-account-bar">
-            <span className="fnx-checkout-account-avatar">{(user.firstName || user.email || 'U').charAt(0).toUpperCase()}</span>
-            <strong>{user.email}</strong>
-            <div className="fnx-checkout-account-menu">
-              <button type="button" onClick={() => setAccountMenuOpen((open) => !open)} aria-label="Opciones de la cuenta">⋮</button>
-              {accountMenuOpen && (
-                <div><button type="button" onClick={handleLogout}>Cerrar sesión</button></div>
-              )}
+          <>
+            <h2>Datos de contacto</h2>
+            <div className="fnx-checkout-account-bar">
+              <span className="fnx-checkout-account-avatar">{(user.firstName || user.email || 'U').charAt(0).toUpperCase()}</span>
+              <strong>{user.email}</strong>
+              <div className="fnx-checkout-account-menu">
+                <button type="button" onClick={() => setAccountMenuOpen((open) => !open)} aria-label="Opciones de la cuenta">⋮</button>
+                {accountMenuOpen && (
+                  <div><button type="button" onClick={handleLogout}>Cerrar sesión</button></div>
+                )}
+              </div>
             </div>
-          </div>
+          </>
         ) : (
           <>
             <div className="fnx-checkout-section-title">
-              <h2>Contacto</h2>
+              <h2>Datos de contacto</h2>
               <button type="button" onClick={login}>Iniciar sesión</button>
             </div>
             <Field label="Correo electrónico" error={errors.email}>
@@ -1141,21 +1200,21 @@ function SinglePageCheckout({
           ))}
         </div>
 
-        {formData.deliveryType === 'delivery' && (
-          <Field label="País / Región"><DarkInput value="Argentina" onChange={() => {}} readOnly /></Field>
-        )}
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <Field label="Nombre" error={errors.nombre}>
-            <DarkInput placeholder="Nombre" value={formData.nombre} onChange={(value) => setField('nombre', value)} hasError={!!errors.nombre} />
-          </Field>
-          <Field label="Apellidos" error={errors.apellido}>
-            <DarkInput placeholder="Apellidos" value={formData.apellido} onChange={(value) => setField('apellido', value)} hasError={!!errors.apellido} />
-          </Field>
-        </div>
-
         {formData.deliveryType === 'delivery' ? (
           <>
+            <h3 className="fnx-checkout-subheading">Datos del destinatario</h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <Field label="Nombre" error={errors.nombre}>
+                <DarkInput placeholder="Nombre" value={formData.nombre} onChange={(value) => setField('nombre', value)} hasError={!!errors.nombre} />
+              </Field>
+              <Field label="Apellido" error={errors.apellido}>
+                <DarkInput placeholder="Apellido" value={formData.apellido} onChange={(value) => setField('apellido', value)} hasError={!!errors.apellido} />
+              </Field>
+            </div>
+            <Field label="Teléfono" error={errors.telefono}>
+              <DarkInput type="tel" placeholder="Teléfono" value={formData.telefono} onChange={(value) => setField('telefono', value)} hasError={!!errors.telefono} />
+            </Field>
+            <Field label="País / Región"><DarkInput value="Argentina" onChange={() => {}} readOnly /></Field>
             <Field label="Dirección" error={errors.direccion}>
               <DarkInput placeholder="Calle y número" value={formData.direccion} onChange={(value) => setField('direccion', value)} hasError={!!errors.direccion} />
             </Field>
@@ -1182,10 +1241,6 @@ function SinglePageCheckout({
             </Field>
           </>
         )}
-
-        <Field label="Teléfono" error={errors.telefono}>
-          <DarkInput type="tel" placeholder="Teléfono" value={formData.telefono} onChange={(value) => setField('telefono', value)} hasError={!!errors.telefono} />
-        </Field>
 
         {formData.deliveryType === 'delivery' && (
           <div className="fnx-shipping-methods">
@@ -1227,7 +1282,10 @@ function SinglePageCheckout({
         setField={setField}
         options={invoiceOptions}
         loadingError={invoiceOptionsError}
+        onInvoiceModeChange={onInvoiceModeChange}
       />
+
+      <BillingAddress formData={formData} errors={errors} setField={setField} />
 
       <section className="fnx-checkout-section">
         <h2>Pago</h2>
@@ -1237,8 +1295,6 @@ function SinglePageCheckout({
           <p>Se te redirigirá a Mercado Pago para que completes la compra.</p>
         </div>
       </section>
-
-      <BillingAddress formData={formData} errors={errors} setField={setField} />
 
       {(profileError || (!paymentRejected && submitError)) && (
         <p className="fnx-checkout-submit-error">{profileError || submitError}</p>
@@ -1290,75 +1346,213 @@ function SinglePageCheckout({
   )
 }
 
-function InvoiceRecipientFields({ formData, errors, setField, options, loadingError }) {
-  const docType = Number(formData.invoiceDocType)
-  const vatCondition = options?.vatConditions
-    ?.find((option) => option.id === Number(formData.invoiceVatConditionId))
-  const documents = vatCondition
-    ? options.documents.filter((option) => vatCondition.allowedDocumentTypeIds.includes(option.id))
-    : options?.documents || []
-  const chooseDocument = (value) => {
-    const nextType = Number(value)
-    setField('invoiceDocType', value)
-    setField('invoiceDocNumber', nextType === 99 ? '0' : '')
-  }
-  const chooseVatCondition = (value) => {
-    const selected = options?.vatConditions?.find((option) => option.id === Number(value))
-    setField('invoiceVatConditionId', value)
-    if (selected && !selected.allowedDocumentTypeIds.includes(docType)) {
-      setField('invoiceDocType', '')
-      setField('invoiceDocNumber', '')
+function InvoiceRecipientFields({
+  formData, errors, setField, options, loadingError, onInvoiceModeChange,
+}) {
+  const [taxpayerLookup, setTaxpayerLookup] = useState({ status: 'idle' })
+  const aConditions = options?.vatConditions
+    ?.filter((option) => ['A', 'ALEY'].includes(option.invoiceClass)) || []
+  const supportsInvoiceA = aConditions.length > 0
+  const cuit = String(formData.invoiceDocNumber || '').replace(/\D/g, '')
+
+  useEffect(() => {
+    if (!formData.needsInvoiceA || cuit.length !== 11 || !options) {
+      setTaxpayerLookup({ status: 'idle' })
+      return undefined
+    }
+
+    const controller = new AbortController()
+    const timeout = window.setTimeout(() => {
+      setTaxpayerLookup({ status: 'loading' })
+      fetch(`${API_BASE}/api/arca/cuit-profile`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cuit }),
+        signal: controller.signal,
+      })
+        .then(async (response) => {
+          const data = await response.json().catch(() => ({}))
+          if (!response.ok) {
+            const error = new Error(data.error || 'No pudimos consultar el CUIT en ARCA.')
+            error.manualFallbackAllowed = data.manualFallbackAllowed === true
+            throw error
+          }
+          return data
+        })
+        .then((profile) => {
+          const cuitDocument = options.documents?.find((document) => document.kind === 'cuit')
+          setField('invoiceName', profile.name)
+          setField('invoiceVatConditionId', String(profile.vatConditionId))
+          if (cuitDocument) setField('invoiceDocType', String(cuitDocument.id))
+          setTaxpayerLookup({ status: 'success', profile })
+        })
+        .catch((error) => {
+          if (error.name === 'AbortError') return
+          setField('invoiceName', '')
+          setField('invoiceVatConditionId', '')
+          setTaxpayerLookup({
+            status: 'error',
+            message: error.message,
+            manualFallbackAllowed: error.manualFallbackAllowed === true,
+          })
+        })
+    }, 450)
+
+    return () => {
+      window.clearTimeout(timeout)
+      controller.abort()
+    }
+  }, [cuit, formData.needsInvoiceA, options])
+
+  const changeDocumentNumber = (value) => {
+    const digits = value.replace(/\D/g, '').slice(0, 11)
+    setField('invoiceDocNumber', digits)
+    if (formData.needsInvoiceA) {
+      setField('invoiceName', '')
+      setField('invoiceVatConditionId', '')
+      const cuitDocument = options?.documents?.find((option) => option.kind === 'cuit')
+      if (cuitDocument) setField('invoiceDocType', String(cuitDocument.id))
+    } else {
+      const documentKind = documentKindForNumber(digits)
+      const document = options?.documents?.find((option) => option.kind === documentKind)
+      if (document) setField('invoiceDocType', String(document.id))
     }
   }
 
   return (
     <section className="fnx-checkout-section">
-      <h2>Datos para facturación</h2>
-      <p className="fnx-section-caption">
-        Estos datos se confirman ahora y no modifican el importe del pedido.
-      </p>
+      <h2>Datos de facturación</h2>
       {loadingError && <p className="fnx-checkout-submit-error">{loadingError}</p>}
       {!options && !loadingError && <p className="fnx-section-caption">Consultando parámetros de ARCA...</p>}
       {options && (
         <>
-          <Field label="Nombre / Razón social" error={errors.invoiceName}>
-            <DarkInput
-              placeholder="Nombre o razón social"
-              value={formData.invoiceName}
-              onChange={(value) => setField('invoiceName', value)}
-              hasError={!!errors.invoiceName}
+          <Field label="País / Región"><DarkInput value="Argentina" onChange={() => {}} readOnly /></Field>
+          <label className={`fnx-checkout-checkbox${supportsInvoiceA ? '' : ' is-disabled'}`}>
+            <input
+              type="checkbox"
+              checked={Boolean(formData.needsInvoiceA)}
+              disabled={!supportsInvoiceA}
+              onChange={(event) => onInvoiceModeChange(event.target.checked)}
             />
-          </Field>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <Field label="Tipo de documento" error={errors.invoiceDocType}>
-              <DarkSelect
-                value={formData.invoiceDocType}
-                onChange={chooseDocument}
-                hasError={!!errors.invoiceDocType}
-                placeholder="Elegí un documento"
-                options={documents}
-              />
-            </Field>
-            <Field label="Número" error={errors.invoiceDocNumber}>
+            Necesito factura A
+          </label>
+          {!supportsInvoiceA && (
+            <p className="fnx-section-caption fnx-invoice-unavailable">
+              Factura A no está habilitada para la configuración fiscal actual.
+            </p>
+          )}
+
+          {formData.needsInvoiceA ? (
+            <div className="fnx-invoice-conditional">
+              <Field label="CUIT" error={errors.invoiceDocNumber || errors.invoiceDocType}>
+                <DarkInput
+                  inputMode="numeric"
+                  placeholder="CUIT, 11 dígitos"
+                  value={formData.invoiceDocNumber}
+                  onChange={changeDocumentNumber}
+                  hasError={!!(errors.invoiceDocNumber || errors.invoiceDocType)}
+                />
+              </Field>
+              {cuit.length < 11 && (
+                <p className="fnx-taxpayer-status is-hint">
+                  Al completar el CUIT consultaremos la razón social y la condición fiscal en ARCA.
+                </p>
+              )}
+              {taxpayerLookup.status === 'loading' && (
+                <p className="fnx-taxpayer-status is-loading" role="status">Consultando CUIT en ARCA...</p>
+              )}
+              {taxpayerLookup.status === 'error' && (
+                <p className={`fnx-taxpayer-status ${taxpayerLookup.manualFallbackAllowed ? 'is-warning' : 'is-error'}`} role="alert">
+                  {taxpayerLookup.message}
+                </p>
+              )}
+              {taxpayerLookup.status === 'success' && (
+                <div className="fnx-taxpayer-confirmed">
+                  <span className="fnx-taxpayer-confirmed__title">CUIT verificado en ARCA</span>
+                  <Field label="Razón social">
+                    <DarkInput value={taxpayerLookup.profile.name} onChange={() => {}} readOnly />
+                  </Field>
+                  <Field label="Condición frente al IVA">
+                    <DarkInput
+                      value={taxpayerLookup.profile.vatConditionDescription}
+                      onChange={() => {}}
+                      readOnly
+                    />
+                  </Field>
+                </div>
+              )}
+              {taxpayerLookup.status === 'error' && taxpayerLookup.manualFallbackAllowed && (
+                <div className="fnx-taxpayer-manual">
+                  <p>Completá estos datos como figuran en la constancia de inscripción.</p>
+                  <Field label="Razón social" error={errors.invoiceName}>
+                    <DarkInput
+                      placeholder="Razón social"
+                      value={formData.invoiceName}
+                      onChange={(value) => setField('invoiceName', value)}
+                      hasError={!!errors.invoiceName}
+                    />
+                  </Field>
+                  <Field label="Condición frente al IVA" error={errors.invoiceVatConditionId}>
+                    <DarkSelect
+                      value={formData.invoiceVatConditionId}
+                      onChange={(value) => setField('invoiceVatConditionId', value)}
+                      hasError={!!errors.invoiceVatConditionId}
+                      placeholder="Elegí una condición"
+                      options={aConditions}
+                    />
+                  </Field>
+                </div>
+              )}
+            </div>
+          ) : (
+            <Field label="DNI o CUIT" error={errors.invoiceDocNumber || errors.invoiceDocType}>
               <DarkInput
                 inputMode="numeric"
-                placeholder={docType === 80 ? 'CUIT, 11 dígitos' : docType === 96 ? 'DNI, 7 u 8 dígitos' : 'Número'}
+                placeholder="DNI o CUIT"
                 value={formData.invoiceDocNumber}
-                onChange={(value) => setField('invoiceDocNumber', value)}
-                hasError={!!errors.invoiceDocNumber}
-                readOnly={docType === 99}
+                onChange={changeDocumentNumber}
+                hasError={!!(errors.invoiceDocNumber || errors.invoiceDocType)}
               />
             </Field>
-          </div>
-          <Field label="Condición frente al IVA" error={errors.invoiceVatConditionId}>
-            <DarkSelect
-              value={formData.invoiceVatConditionId}
-              onChange={chooseVatCondition}
-              hasError={!!errors.invoiceVatConditionId}
-              placeholder="Elegí una condición"
-              options={options.vatConditions}
-            />
-          </Field>
+          )}
+
+          {formData.deliveryType === 'pickup' && (
+            <div className="fnx-checkout-person-block">
+              <h3>Persona que pagará el pedido</h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <Field label="Nombre" error={errors.nombre}>
+                  <DarkInput placeholder="Nombre" value={formData.nombre} onChange={(value) => setField('nombre', value)} hasError={!!errors.nombre} />
+                </Field>
+                <Field label="Apellido" error={errors.apellido}>
+                  <DarkInput placeholder="Apellido" value={formData.apellido} onChange={(value) => setField('apellido', value)} hasError={!!errors.apellido} />
+                </Field>
+              </div>
+              <Field label="Teléfono" error={errors.telefono}>
+                <DarkInput type="tel" placeholder="Teléfono" value={formData.telefono} onChange={(value) => setField('telefono', value)} hasError={!!errors.telefono} />
+              </Field>
+              <label className="fnx-checkout-checkbox">
+                <input
+                  type="checkbox"
+                  checked={Boolean(formData.pickupByOtherPerson)}
+                  onChange={(event) => setField('pickupByOtherPerson', event.target.checked)}
+                />
+                Otra persona retirará el pedido
+              </label>
+              {formData.pickupByOtherPerson && (
+                <div className="fnx-invoice-conditional">
+                  <h3>Persona que retirará el pedido</h3>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <Field label="Nombre" error={errors.pickupPersonName}>
+                      <DarkInput placeholder="Nombre" value={formData.pickupPersonName} onChange={(value) => setField('pickupPersonName', value)} hasError={!!errors.pickupPersonName} />
+                    </Field>
+                    <Field label="Apellido" error={errors.pickupPersonLastName}>
+                      <DarkInput placeholder="Apellido" value={formData.pickupPersonLastName} onChange={(value) => setField('pickupPersonLastName', value)} hasError={!!errors.pickupPersonLastName} />
+                    </Field>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
           {options.stale && (
             <p className="fnx-section-caption">Se está usando la última respuesta válida guardada de ARCA.</p>
           )}
@@ -1372,37 +1566,21 @@ function BillingAddress({ formData, errors, setField }) {
   const usesShipping = formData.deliveryType === 'delivery' && formData.billingSameAsShipping
 
   return (
-    <section style={{ marginBottom: '1.75rem' }}>
-      <h3 style={{ margin: '0 0 8px', fontSize: '0.8rem', fontWeight: 700, color: 'var(--color-text)' }}>
-        Dirección de facturación
-      </h3>
+    <section className="fnx-billing-address">
       {formData.deliveryType === 'delivery' && (
-        <div style={{ border: '1px solid var(--color-border)', borderRadius: 10, overflow: 'hidden', marginBottom: usesShipping ? 0 : 16 }}>
-          {[
-            { value: true, label: 'La misma dirección de envío' },
-            { value: false, label: 'Usar una dirección de facturación distinta' },
-          ].map((option) => (
-            <button
-              type="button"
-              key={String(option.value)}
-              onClick={() => setField('billingSameAsShipping', option.value)}
-              style={{
-                width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '13px 14px',
-                border: 0, borderBottom: option.value ? '1px solid var(--color-border)' : 0,
-                background: 'var(--color-surface)',
-                color: 'var(--color-text)', fontSize: 12.5, textAlign: 'left', cursor: 'pointer',
-              }}
-            >
-              <span style={{ width: 14, height: 14, borderRadius: '50%', border: `4px solid ${formData.billingSameAsShipping === option.value ? 'var(--color-primary)' : 'var(--color-border)'}` }} />
-              {option.label}
-            </button>
-          ))}
-        </div>
+        <label className="fnx-checkout-checkbox fnx-billing-same-checkbox">
+          <input
+            type="checkbox"
+            checked={Boolean(formData.billingSameAsShipping)}
+            onChange={(event) => setField('billingSameAsShipping', event.target.checked)}
+          />
+          Mis datos de facturación y entrega son los mismos
+        </label>
       )}
 
       {!usesShipping && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-          <Field label="País / Región"><DarkInput value="Argentina" onChange={() => {}} readOnly /></Field>
+        <div className="fnx-billing-address__fields">
+          <h3>Dirección de facturación</h3>
           <Field label="Dirección" error={errors.billingAddress}>
             <DarkInput placeholder="Calle y número" value={formData.billingAddress} onChange={(v) => setField('billingAddress', v)} hasError={!!errors.billingAddress} />
           </Field>

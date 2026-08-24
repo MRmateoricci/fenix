@@ -283,7 +283,7 @@ export default function OrderDetail() {
           </section>
           <aside className="fnx-order-side">
             <section><h2>Dirección de facturación</h2><i /><Address order={order} billing /><p>Estado del pago: <b>{PAID_STATUSES.includes(order.status) ? 'Pagada' : statusLabel(order.status)}</b></p></section>
-            <section><h2>{order.delivery_type === 'pickup' ? 'Retiro' : 'Dirección de envío'}</h2><i />{order.delivery_type === 'pickup' ? <div className="fnx-order-address"><strong>Fénix City Bell</strong><span>473 entre 14C y 15, City Bell</span>{order.pickup_date && <span>Retiro: {new Date(order.pickup_date).toLocaleDateString('es-AR')}</span>}</div> : <Address order={order} />}<p>Estado de finalización: <b>{statusLabel(order.status)}</b></p></section>
+            <section><h2>{order.delivery_type === 'pickup' ? 'Retiro' : 'Dirección de envío'}</h2><i />{order.delivery_type === 'pickup' ? <div className="fnx-order-address"><strong>Fénix City Bell</strong><span>473 entre 14C y 15, City Bell</span>{order.pickup_date && <span>Retiro: {new Date(order.pickup_date).toLocaleDateString('es-AR')}</span>}{(order.pickup_person_name || order.pickup_person_last_name) && <span>Persona autorizada: {[order.pickup_person_name, order.pickup_person_last_name].filter(Boolean).join(' ')}</span>}</div> : <Address order={order} />}<p>Estado de finalización: <b>{statusLabel(order.status)}</b></p></section>
           </aside>
         </div>
       </main>

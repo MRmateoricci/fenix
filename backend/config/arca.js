@@ -18,10 +18,12 @@ const ENVIRONMENTS = Object.freeze({
   homologation: Object.freeze({
     wsaaWsdl: 'https://wsaahomo.afip.gov.ar/ws/services/LoginCms?WSDL',
     wsfeWsdl: 'https://wswhomo.afip.gov.ar/wsfev1/service.asmx?WSDL',
+    taxpayerRegistryWsdl: 'https://awshomo.arca.gob.ar/sr-padron/webservices/personaServiceA5?WSDL',
   }),
   production: Object.freeze({
     wsaaWsdl: 'https://wsaa.afip.gov.ar/ws/services/LoginCms?WSDL',
     wsfeWsdl: 'https://servicios1.afip.gov.ar/wsfev1/service.asmx?WSDL',
+    taxpayerRegistryWsdl: 'https://aws.arca.gob.ar/sr-padron/webservices/personaServiceA5?WSDL',
   }),
 });
 
@@ -377,6 +379,7 @@ export function getArcaConfig({ requirePointOfSale = false, requireIssuerData = 
     productionEmissionEnabled: enabledFlag(process.env.ARCA_PRODUCTION_ENABLED),
     wsaaWsdl: endpoints.wsaaWsdl,
     wsfeWsdl: endpoints.wsfeWsdl,
+    taxpayerRegistryWsdl: endpoints.taxpayerRegistryWsdl,
     service: 'wsfe',
     cuit: normalizeCuit(process.env.ARCA_CUIT),
     pointOfSale,

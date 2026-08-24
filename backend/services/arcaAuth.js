@@ -22,16 +22,13 @@ const TRA_CLOCK_TOLERANCE_MS = 10 * 60 * 1_000;
 const CACHE_RENEWAL_MARGIN_MS = 5 * 60 * 1_000;
 const PERSISTENT_CACHE_REUSE_MARGIN_MS = 30_000;
 const PERSISTENT_CACHE_VERSION = 1;
-const PERSISTENT_CACHE_FILENAME = 'wsaa-homologation-wsfe.json';
-const CACHE_LOCK_FILENAME = 'wsaa-homologation-wsfe.lock';
+const DEFAULT_SERVICE = 'wsfe';
 const CACHE_LOCK_RETRY_MS = 150;
 const CACHE_LOCK_TIMEOUT_MS = 45_000;
 const CACHE_LOCK_STALE_MS = 90_000;
 
-let cachedAccessTicket = null;
-let cachedAccessTicketContext = null;
-let accessTicketRequest = null;
-let accessTicketRequestContext = null;
+const cachedAccessTickets = new Map();
+const accessTicketRequests = new Map();
 let wsaaClientRequest = null;
 let wsaaClientWsdl = null;
 
@@ -51,17 +48,22 @@ function cacheDirectory() {
     : path.resolve(backendRoot, '..', configured);
 }
 
-function persistentCachePaths() {
+function safeServiceName(service = DEFAULT_SERVICE) {
+  return String(service || DEFAULT_SERVICE).replace(/[^a-zA-Z0-9_-]/g, '_');
+}
+
+function persistentCachePaths(service = DEFAULT_SERVICE) {
   const directory = cacheDirectory();
+  const serviceName = safeServiceName(service);
   return {
     directory,
-    ticket: path.join(directory, PERSISTENT_CACHE_FILENAME),
-    lock: path.join(directory, CACHE_LOCK_FILENAME),
+    ticket: path.join(directory, `wsaa-homologation-${serviceName}.json`),
+    lock: path.join(directory, `wsaa-homologation-${serviceName}.lock`),
   };
 }
 
-export function getPersistentAccessTicketCachePath() {
-  return persistentCachePaths().ticket;
+export function getPersistentAccessTicketCachePath(service = DEFAULT_SERVICE) {
+  return persistentCachePaths(service).ticket;
 }
 
 function accessTicketContext(config) {
@@ -112,7 +114,7 @@ async function removeCacheFile(filePath) {
 
 async function readPersistentAccessTicket(config, fingerprint) {
   if (config.environment !== 'homologation') return null;
-  const { ticket: ticketPath } = persistentCachePaths();
+  const { ticket: ticketPath } = persistentCachePaths(config.service);
   let serialized;
   try {
     serialized = await readFile(ticketPath, 'utf8');
@@ -153,11 +155,11 @@ async function readPersistentAccessTicket(config, fingerprint) {
 
 async function writePersistentAccessTicket(config, fingerprint, ticket) {
   if (config.environment !== 'homologation') return;
-  const paths = persistentCachePaths();
+  const paths = persistentCachePaths(config.service);
   await ensureCacheDirectory(paths.directory);
   const temporaryPath = path.join(
     paths.directory,
-    `${PERSISTENT_CACHE_FILENAME}.${process.pid}.${randomUUID()}.tmp`,
+    `${path.basename(paths.ticket)}.${process.pid}.${randomUUID()}.tmp`,
   );
   const payload = JSON.stringify({
     version: PERSISTENT_CACHE_VERSION,
@@ -199,8 +201,8 @@ function processIsRunning(pid) {
 
 const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
-async function acquirePersistentCacheLock() {
-  const paths = persistentCachePaths();
+async function acquirePersistentCacheLock(config) {
+  const paths = persistentCachePaths(config.service);
   await ensureCacheDirectory(paths.directory);
   const startedAt = Date.now();
 
@@ -476,7 +478,7 @@ async function loadOrRequestAccessTicket(config) {
   const persisted = await readPersistentAccessTicket(config, fingerprint);
   if (isTicketUsable(persisted, Date.now(), PERSISTENT_CACHE_REUSE_MARGIN_MS)) return persisted;
 
-  const lock = await acquirePersistentCacheLock();
+  const lock = await acquirePersistentCacheLock(config);
   try {
     // Otro proceso pudo renovar el TA mientras éste esperaba el lock.
     const refreshed = await readPersistentAccessTicket(config, fingerprint);
@@ -501,30 +503,40 @@ async function loadOrRequestAccessTicket(config) {
   }
 }
 
-export async function getAccessTicket() {
-  const config = getArcaConfig();
+export async function getAccessTicketForService(service = DEFAULT_SERVICE) {
+  const config = Object.freeze({ ...getArcaConfig(), service: String(service || DEFAULT_SERVICE) });
   const context = accessTicketContext(config);
-  if (cachedAccessTicketContext === context && isTicketUsable(cachedAccessTicket)) {
+  const cachedAccessTicket = cachedAccessTickets.get(context);
+  if (isTicketUsable(cachedAccessTicket)) {
     return { ...cachedAccessTicket };
   }
-  if (accessTicketRequestContext === context && accessTicketRequest) return accessTicketRequest;
+  const pendingRequest = accessTicketRequests.get(context);
+  if (pendingRequest) return pendingRequest;
 
-  accessTicketRequestContext = context;
-  accessTicketRequest = loadOrRequestAccessTicket(config)
+  const accessTicketRequest = loadOrRequestAccessTicket(config)
     .then((ticket) => {
-      cachedAccessTicket = ticket;
-      cachedAccessTicketContext = context;
+      cachedAccessTickets.set(context, ticket);
       return { ...ticket };
     })
     .finally(() => {
-      accessTicketRequest = null;
-      accessTicketRequestContext = null;
+      accessTicketRequests.delete(context);
     });
+  accessTicketRequests.set(context, accessTicketRequest);
 
   return accessTicketRequest;
 }
 
-export function clearAccessTicketCache() {
-  cachedAccessTicket = null;
-  cachedAccessTicketContext = null;
+export async function getAccessTicket() {
+  return getAccessTicketForService(DEFAULT_SERVICE);
+}
+
+export function clearAccessTicketCache(service = null) {
+  if (!service) {
+    cachedAccessTickets.clear();
+    return;
+  }
+  const normalizedService = String(service);
+  for (const context of cachedAccessTickets.keys()) {
+    if (context.split('|')[1] === normalizedService) cachedAccessTickets.delete(context);
+  }
 }

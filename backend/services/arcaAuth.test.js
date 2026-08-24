@@ -28,6 +28,14 @@ test('caché WSAA renueva tickets dentro del margen de cinco minutos', () => {
   assert.equal(isTicketUsable({ expirationTime: 'inválida' }, now), false);
 });
 
+test('cada servicio WSAA usa un archivo de caché independiente', () => {
+  assert.match(getPersistentAccessTicketCachePath(), /wsaa-homologation-wsfe\.json$/);
+  assert.match(
+    getPersistentAccessTicketCachePath('ws_sr_constancia_inscripcion'),
+    /wsaa-homologation-ws_sr_constancia_inscripcion\.json$/,
+  );
+});
+
 test('reutiliza el TA persistente válido y elimina uno vencido', async () => {
   const temporaryRoot = await mkdtemp(path.join(tmpdir(), 'fenix-arca-auth-'));
   const cacheDirectory = path.join(temporaryRoot, '.cache', 'arca');

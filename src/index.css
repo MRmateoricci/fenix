@@ -560,6 +560,53 @@
 
 .fnx-checkout-checkbox { display: flex; align-items: center; gap: 8px; margin-top: 9px; color: var(--color-text); font-size: 11px; cursor: pointer; }
 .fnx-checkout-checkbox input { width: 14px; height: 14px; accent-color: var(--color-primary); }
+.fnx-checkout-checkbox.is-disabled { cursor: not-allowed; opacity: .55; }
+.fnx-checkout-subheading,
+.fnx-checkout-person-block h3,
+.fnx-invoice-conditional h3,
+.fnx-billing-address__fields > h3 {
+  margin: 18px 0 10px;
+  color: var(--color-text);
+  font-size: 12px;
+  font-weight: 700;
+}
+.fnx-invoice-conditional,
+.fnx-checkout-person-block,
+.fnx-billing-address__fields { display: flex; flex-direction: column; gap: 10px; }
+.fnx-invoice-conditional { margin-top: 12px; }
+.fnx-checkout-person-block { margin-top: 22px; }
+.fnx-invoice-unavailable { margin: 7px 0 0; }
+.fnx-taxpayer-status {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 7px;
+  background: #f7f5f1;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+.fnx-taxpayer-status.is-loading { border-color: #b8cbe7; background: #f1f6fd; color: #244b7a; }
+.fnx-taxpayer-status.is-warning { border-color: #e6c780; background: #fff9e9; color: #72510b; }
+.fnx-taxpayer-status.is-error { border-color: #efaaaa; background: #fff4f4; color: #a30909; }
+.fnx-taxpayer-confirmed,
+.fnx-taxpayer-manual {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.fnx-taxpayer-confirmed {
+  padding: 12px;
+  border: 1px solid #acd7b8;
+  border-radius: 7px;
+  background: #f2fbf4;
+}
+.fnx-taxpayer-confirmed__title { color: #166534; font-size: 11px; font-weight: 700; }
+.fnx-single-checkout .fnx-taxpayer-confirmed .dark-input { background: #e8f4eb !important; }
+.fnx-taxpayer-manual > p { margin: 0; color: var(--color-text-muted); font-size: 11px; line-height: 1.45; }
+.fnx-billing-address { margin: -19px 0 30px; }
+.fnx-billing-same-checkbox { margin: 0; }
+.fnx-billing-address__fields > h3 { margin-top: 0; }
 
 .fnx-checkout-account-bar {
   position: relative;

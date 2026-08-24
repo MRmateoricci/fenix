@@ -3074,10 +3074,17 @@ function OrderDetailModal({ order, onClose, onStatusChange, onInvoice, onInvoice
               : `Domicilio: ${order.address}, ${order.city}${order.postal_code ? ` (CP ${order.postal_code})` : ''}`}
           </p>
           {order.delivery_type === 'pickup' && (
-            <p style={{ fontSize: 12, color: C.text3, marginTop: 4 }}>
-              {order.payment_method === 'pay_in_store' ? 'Pago en el local' : 'Pago online'}
-              {order.pickup_date ? ` · Retira el ${fmtPickupDate(order.pickup_date)}` : ''}
-            </p>
+            <>
+              <p style={{ fontSize: 12, color: C.text3, marginTop: 4 }}>
+                {order.payment_method === 'pay_in_store' ? 'Pago en el local' : 'Pago online'}
+                {order.pickup_date ? ` · Retira el ${fmtPickupDate(order.pickup_date)}` : ''}
+              </p>
+              {(order.pickup_person_name || order.pickup_person_last_name) && (
+                <p style={{ fontSize: 12, color: C.ink, fontWeight: 600, marginTop: 4 }}>
+                  Retira: {[order.pickup_person_name, order.pickup_person_last_name].filter(Boolean).join(' ')}
+                </p>
+              )}
+            </>
           )}
           {order.delivery_type === 'delivery' && order.estimated_delivery_date && (
             <p style={{ fontSize: 12, color: C.text3, marginTop: 4 }}>
@@ -3383,6 +3390,9 @@ function OperationalOrdersSection({ title, subtitle, orders, emptyText, type, on
                   <>
                     <b>Retiro en el local</b>
                     <span>{order.pickup_date ? `Retira el ${fmtPickupDate(order.pickup_date)}` : 'Fecha de retiro sin definir'}</span>
+                    {(order.pickup_person_name || order.pickup_person_last_name) && (
+                      <span>Persona autorizada: {[order.pickup_person_name, order.pickup_person_last_name].filter(Boolean).join(' ')}</span>
+                    )}
                     <small>{order.status === 'reserved' ? 'Cobrar al momento de retirar' : 'Pedido pagado'}</small>
                   </>
                 )}

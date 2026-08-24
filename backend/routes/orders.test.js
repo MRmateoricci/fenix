@@ -1,6 +1,11 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { buildRetryCheckoutData, CUSTOMER_ORDER_STATUSES, resolveProductVariantPrice } from './orders.js'
+import {
+  buildRetryCheckoutData,
+  CUSTOMER_ORDER_STATUSES,
+  resolveProductVariantPrice,
+  verifyInvoiceARecipient,
+} from './orders.js'
 
 test('Mi cuenta solo considera pedidos confirmados', () => {
   assert.deepEqual(CUSTOMER_ORDER_STATUSES, ['reserved', 'paid', 'preparing', 'shipped', 'delivered'])
@@ -19,6 +24,7 @@ test('el reintento autenticado reconstruye facturación y dirección completas',
     postal_code: '1900', province: 'Buenos Aires', billing_same_as_shipping: false,
     billing_address: 'Calle 20 456', billing_address_extra: 'PB', billing_city: 'City Bell',
     billing_postal_code: '1896', billing_province: 'Buenos Aires',
+    pickup_person_name: 'Lucía', pickup_person_last_name: 'Pérez',
   })
 
   assert.deepEqual(data, {
@@ -28,6 +34,7 @@ test('el reintento autenticado reconstruye facturación y dirección completas',
     direccion: 'Calle 10 123', piso: '2 B', ciudad: 'La Plata', codigoPostal: '1900', provincia: 'Buenos Aires',
     billingSameAsShipping: false, billingAddress: 'Calle 20 456', billingAddressExtra: 'PB',
     billingCity: 'City Bell', billingPostalCode: '1896', billingProvince: 'Buenos Aires',
+    pickupByOtherPerson: true, pickupPersonName: 'Lucía', pickupPersonLastName: 'Pérez',
   })
 })
 
@@ -39,6 +46,39 @@ test('el pedido usa el precio con IVA del producto', () => {
   })
 
   assert.equal(result.price, 125)
+})
+
+test('Factura A reemplaza razón social y condición con el padrón de ARCA', async () => {
+  const options = {
+    vatConditions: [
+      { id: 1, category: 'registered', invoiceClass: 'A' },
+      { id: 6, category: 'monotributo', invoiceClass: 'A' },
+    ],
+  }
+  const result = await verifyInvoiceARecipient(
+    { name: 'Dato del navegador', docType: 80, docNumber: '30712345678', vatConditionId: 1 },
+    options,
+    async () => ({ cuit: '30712345678', name: 'EMPRESA VERIFICADA SA', category: 'monotributo' }),
+  )
+
+  assert.equal(result.verified, true)
+  assert.deepEqual(result.receiver, {
+    name: 'EMPRESA VERIFICADA SA',
+    docType: 80,
+    docNumber: '30712345678',
+    vatConditionId: 6,
+  })
+})
+
+test('si el padrón no responde conserva los datos manuales de Factura A', async () => {
+  const receiver = { name: 'Empresa', docType: 80, docNumber: '30712345678', vatConditionId: 1 }
+  const options = { vatConditions: [{ id: 1, category: 'registered', invoiceClass: 'A' }] }
+  const failure = Object.assign(new Error('sin conexión'), { code: 'ARCA_TAXPAYER_CONNECTION_ERROR' })
+  const result = await verifyInvoiceARecipient(receiver, options, async () => { throw failure })
+
+  assert.equal(result.verified, false)
+  assert.equal(result.receiver, receiver)
+  assert.equal(result.lookupError, failure)
 })
 
 test('el pedido calcula el 21 % cuando falta IVA', () => {
