@@ -19,6 +19,19 @@ import {
 
 const CACHE_TTL_MS = 12 * 60 * 60 * 1_000;
 
+const DEV_MOCK_DOCUMENTS = Object.freeze([
+  Object.freeze({ id: 80, description: 'CUIT', validFrom: null, validTo: null, kind: 'cuit' }),
+  Object.freeze({ id: 96, description: 'Documento Nacional de Identidad (DNI)', validFrom: null, validTo: null, kind: 'dni' }),
+  Object.freeze({ id: 99, description: 'Consumidor Final', validFrom: null, validTo: null, kind: 'consumer_final' }),
+]);
+
+const DEV_MOCK_VAT_CONDITIONS = Object.freeze([
+  Object.freeze({ id: 1, description: 'IVA Responsable Inscripto', category: 'registered' }),
+  Object.freeze({ id: 6, description: 'Responsable Monotributo', category: 'monotributo' }),
+  Object.freeze({ id: 4, description: 'IVA Sujeto Exento', category: 'exempt' }),
+  Object.freeze({ id: 5, description: 'Consumidor Final', category: 'consumer_final' }),
+]);
+
 export class ArcaParameterError extends Error {
   constructor(message, { code = 'ARCA_PARAMETER_ERROR', messages = [], cause } = {}) {
     super(message, { cause });
@@ -214,7 +227,50 @@ function allowedDocumentKinds(vatCategory) {
   return new Set(['cuit']);
 }
 
-export async function getInvoiceOptions(config = getArcaConfig()) {
+export function isArcaDevMockEnabled(environmentVariables = process.env) {
+  return String(environmentVariables.NODE_ENV || '').trim().toLowerCase() === 'development'
+    && String(environmentVariables.ARCA_DEV_MOCK_ENABLED || '').trim().toLowerCase() === 'true';
+}
+
+function getDevInvoiceOptions(config) {
+  const invoiceClasses = issuerInvoiceClasses(config);
+  const documents = DEV_MOCK_DOCUMENTS.map((document) => ({ ...document }));
+  const vatConditions = DEV_MOCK_VAT_CONDITIONS.map((condition) => {
+    const voucherType = determineVoucherType({
+      issuerVatCondition: config.issuer.taxCategory,
+      receiverVatCondition: condition.category,
+      aAuthorizationMode: config.issuer.aAuthorizationMode,
+    });
+    const invoiceClass = invoiceClassForVoucherType(voucherType);
+    const allowedKinds = allowedDocumentKinds(condition.category);
+    return {
+      ...condition,
+      validFrom: null,
+      validTo: null,
+      invoiceClass,
+      voucherType,
+      allowedDocumentTypeIds: documents
+        .filter((document) => allowedKinds.has(document.kind))
+        .map((document) => document.id),
+    };
+  }).filter((condition) => invoiceClasses.includes(condition.invoiceClass));
+
+  return {
+    issuerVatCondition: config.issuer.taxCondition,
+    invoiceClasses,
+    documents,
+    vatConditions,
+    stale: false,
+    mocked: true,
+  };
+}
+
+export async function getInvoiceOptions(
+  config = getArcaConfig(),
+  environmentVariables = process.env,
+) {
+  if (isArcaDevMockEnabled(environmentVariables)) return getDevInvoiceOptions(config);
+
   const invoiceClasses = issuerInvoiceClasses(config);
   const [documentsResponse, ...conditionResponses] = await Promise.all([
     getCachedTiposDocumento(),

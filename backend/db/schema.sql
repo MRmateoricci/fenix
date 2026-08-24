@@ -607,6 +607,25 @@ CREATE TRIGGER coupons_updated_at
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS coupon_code VARCHAR(40);
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS discount_amount NUMERIC(12,2) NOT NULL DEFAULT 0;
 
+-- Los intentos nuevos cuentan el cupón recién al aprobarse el pago. El
+-- backfill marca los pedidos anteriores porque la versión previa ya había
+-- incrementado times_used al crearlos, incluso antes de Mercado Pago.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = current_schema()
+      AND table_name = 'orders'
+      AND column_name = 'coupon_usage_counted_at'
+  ) THEN
+    ALTER TABLE orders ADD COLUMN IF NOT EXISTS coupon_usage_counted_at TIMESTAMPTZ;
+    UPDATE orders
+    SET coupon_usage_counted_at = COALESCE(paid_at, created_at)
+    WHERE coupon_code IS NOT NULL;
+  END IF;
+END $$;
+
 -- Datos fiscales confirmados por el comprador. Permanecen nullable para que
 -- los pedidos históricos puedan confirmarlos antes de solicitar comprobante.
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS invoice_recipient_name VARCHAR(160);

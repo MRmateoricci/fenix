@@ -86,8 +86,9 @@ app.use('/api/coupons', couponsRouter)
 // Mercado Pago no acepta back_urls con localhost. En desarrollo la preferencia
 // vuelve primero por APP_BASE_URL (por ejemplo, ngrok) y este puente redirige
 // el navegador al frontend local. En producción ambas URLs suelen ser iguales
-// y la ruta sigue hacia el fallback de React.
-app.get('/order-confirmation', (req, res, next) => {
+// y la ruta sigue hacia el fallback de React. Se cubren tanto la confirmación
+// como el retorno de un pago rechazado al checkout.
+app.get(['/order-confirmation', '/checkout'], (req, res, next) => {
   const appBase = process.env.APP_BASE_URL?.trim().replace(/\/+$/, '')
   const frontendBase = process.env.FRONTEND_BASE_URL?.trim().replace(/\/+$/, '')
 
@@ -101,7 +102,7 @@ app.get('/order-confirmation', (req, res, next) => {
     )
   ).toString()
 
-  res.redirect(302, `${frontendBase}/order-confirmation${query ? `?${query}` : ''}`)
+  res.redirect(302, `${frontendBase}${req.path}${query ? `?${query}` : ''}`)
 })
 
 // ── 404 ───────────────────────────────────────────────────────────────────────

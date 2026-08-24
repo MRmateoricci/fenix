@@ -1,6 +1,35 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { resolveProductVariantPrice } from './orders.js'
+import { buildRetryCheckoutData, CUSTOMER_ORDER_STATUSES, resolveProductVariantPrice } from './orders.js'
+
+test('Mi cuenta solo considera pedidos confirmados', () => {
+  assert.deepEqual(CUSTOMER_ORDER_STATUSES, ['reserved', 'paid', 'preparing', 'shipped', 'delivered'])
+  assert.equal(CUSTOMER_ORDER_STATUSES.includes('pending_payment'), false)
+  assert.equal(CUSTOMER_ORDER_STATUSES.includes('payment_failed'), false)
+  assert.equal(CUSTOMER_ORDER_STATUSES.includes('expired'), false)
+})
+
+test('el reintento autenticado reconstruye facturación y dirección completas', () => {
+  const data = buildRetryCheckoutData({
+    customer_name: 'Mateo José Ricci', account_first_name: 'Mateo José', account_last_name: 'Ricci',
+    customer_email: 'mateo@example.com', customer_phone: '2213628621',
+    invoice_recipient_name: 'Mateo Ricci', invoice_doc_type: 96, invoice_doc_number: '42172999',
+    invoice_vat_condition_id: 5, delivery_type: 'delivery', payment_method: 'mercadopago',
+    shipping_service: 'expreso', address: 'Calle 10 123', address_extra: '2 B', city: 'La Plata',
+    postal_code: '1900', province: 'Buenos Aires', billing_same_as_shipping: false,
+    billing_address: 'Calle 20 456', billing_address_extra: 'PB', billing_city: 'City Bell',
+    billing_postal_code: '1896', billing_province: 'Buenos Aires',
+  })
+
+  assert.deepEqual(data, {
+    nombre: 'Mateo José', apellido: 'Ricci', email: 'mateo@example.com', telefono: '2213628621',
+    invoiceName: 'Mateo Ricci', invoiceDocType: '96', invoiceDocNumber: '42172999', invoiceVatConditionId: '5',
+    deliveryType: 'delivery', paymentMethod: 'mercadopago', shippingService: 'expreso', pickupDate: '',
+    direccion: 'Calle 10 123', piso: '2 B', ciudad: 'La Plata', codigoPostal: '1900', provincia: 'Buenos Aires',
+    billingSameAsShipping: false, billingAddress: 'Calle 20 456', billingAddressExtra: 'PB',
+    billingCity: 'City Bell', billingPostalCode: '1896', billingProvince: 'Buenos Aires',
+  })
+})
 
 test('el pedido usa el precio con IVA del producto', () => {
   const result = resolveProductVariantPrice({

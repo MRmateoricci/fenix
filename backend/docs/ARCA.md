@@ -7,6 +7,7 @@ La integración usa WSAA + WSFEv1 y conserva idempotencia, auditoría, PDF y QR.
 - `ARCA_ENV=production` habilita autenticación y consultas de solo lectura.
 - `ARCA_PRODUCTION_ENABLED=false` bloquea `FECAESolicitar`, incluso si un caller intenta saltear el servicio principal.
 - `ARCA_AUTO_INVOICE_ENABLED=false` impide el intento automático posterior al pago.
+- `ARCA_DEV_MOCK_ENABLED=true` reemplaza los catálogos fiscales por datos locales solamente cuando `NODE_ENV=development`. Si la variable falta, el flujo sigue consultando ARCA; en producción se ignora aunque se configure por error.
 - Para un emisor Responsable Inscripto, `ARCA_A_AUTHORIZATION_MODE` es obligatorio aun para cargar la configuración. No existe fallback a `standard`.
 - `ARCA_ACTIVITY_START_DATE` admite el **PERÍODO DESDE** registral como `YYYY-MM`. Si en algún momento ARCA informa oficialmente el día, también admite `YYYY-MM-DD`; nunca se infiere ni se sustituye con fechas de inscripción o actualización.
 

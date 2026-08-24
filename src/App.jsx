@@ -41,12 +41,19 @@ function MpReturnGuard() {
   useEffect(() => {
     const pendingId = sessionStorage.getItem('fenix_pending_order_id')
     if (!pendingId) return
+    const params = new URLSearchParams(search)
+    if (pathname === '/checkout' && params.get('payment') === 'failure') {
+      // El retorno rechazado de MP pertenece al checkout. Evitamos que el
+      // guard lo mande nuevamente a la pantalla de confirmación.
+      sessionStorage.removeItem('fenix_pending_order_id')
+      return
+    }
     if (pathname === '/order-confirmation') return
     // Si el usuario volvió al sitio sin pasar por la página de confirmación
     // (por ejemplo, cerró la pestaña de MP y abrió el sitio de nuevo),
     // lo redirigimos a la confirmación para que vea el estado real.
     navigate(`/order-confirmation?orderId=${pendingId}&status=pending`, { replace: true })
-  }, [])
+  }, [navigate, pathname, search])
 
   return null
 }

@@ -661,6 +661,15 @@
 .fnx-pay-now { width: 100%; min-height: 46px; border: 0; border-radius: 8px; background: #111; color: #fff; cursor: pointer; font-size: 12px; font-weight: 700; }
 .fnx-pay-now:disabled { cursor: not-allowed; opacity: .55; }
 
+.fnx-payment-failure-notice { z-index: 2300; }
+.fnx-payment-failure-notice .fnx-added-notice__body img {
+  width: 92px;
+  height: auto;
+  border-radius: 0;
+  object-fit: contain;
+  background: transparent;
+}
+
 .fnx-checkout-discount { display: grid; grid-template-columns: 1fr auto; gap: 8px; padding: 14px 1.5rem; }
 .fnx-checkout-discount input { min-width: 0; height: 40px; padding: 0 11px; border: 1px solid var(--color-border); border-radius: 8px; background: #fff; font-size: 11px; }
 .fnx-checkout-discount button { padding: 0 14px; border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-text); color: #fff; font-size: 11px; font-weight: 600; cursor: pointer; }

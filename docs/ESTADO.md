@@ -7,8 +7,8 @@
 > Si el cambio merece un commit con mensaje propio, merece una entrada acá.
 > Un ajuste de padding, no.
 
-**Última actualización:** 20 de agosto de 2026
-**Commit de referencia:** `5a4874f`
+**Última actualización:** 24 de agosto de 2026
+**Commit de referencia:** `888df54` + cambios locales de esta tanda
 
 ---
 
@@ -151,6 +151,17 @@ Requiere además las dimensiones físicas cargadas por producto.
 Mercado Pago Checkout Pro (`services/mercadopago.js`, `mercadopagoPayments.js`).
 Webhook en `/api/webhooks` con validación de firma (`MP_WEBHOOK_SECRET`), recibiendo
 el body raw antes del `express.json()`.
+
+**Rechazos de pago (2026-08-24):** Mercado Pago devuelve a la etapa de pago del checkout,
+que restaura formulario, receptor fiscal, direcciones, cupón y carrito, verifica el pago contra la API privada y
+libera el stock mediante la conciliación existente. Si el retorno no trae
+`payment_id`, se resuelve el pago desde `merchant_order_id`; las preferencias
+nuevas usan modo binario para que el intento sea aprobado o rechazado, no pendiente.
+Los estados técnicos
+`pending_payment`, `payment_failed` y `expired` no se muestran como pedidos en Mi
+cuenta. El intento permanece en la base para auditoría/webhooks, pero no avanza como
+pedido comercial. Los cupones nuevos se contabilizan una sola vez al aprobarse el
+pago; la migración marca los pedidos históricos para no contarlos nuevamente.
 
 **Cuotas — fuente de verdad (2026-08-18):** `backend/config/payments.js` define
 `CUOTAS = [{cantidad:3, minimo:0}, {cantidad:6, minimo:500000}]` y
@@ -320,6 +331,32 @@ Links: envío → `/policies/shipping` (página real). Cuotas → `/faq#medios-d
 ---
 
 ## Bitácora
+
+### 2026-08-24 · Pago rechazado permanece en checkout
+
+El retorno `failure` de Checkout Pro ahora apunta a `/checkout`. El formulario
+completo se autoguarda en `sessionStorage` con cada cambio, incluidos receptor fiscal
+y dirección de facturación; al volver se conserva también el carrito y una
+notificación flotante, con el mismo lenguaje visual del aviso de producto agregado,
+informa el rechazo desde la parte superior. El navegador
+reconcilia el `payment_id` o, cuando Mercado Pago lo devuelve nulo, el pago asociado
+al `merchant_order_id` con el backend para no
+confiar en la URL y para liberar inmediatamente el stock; el webhook sigue siendo el
+respaldo. Para intentos anteriores sin borrador, una cuenta autenticada recupera el
+formulario desde un endpoint privado que valida la pertenencia del pedido; DNI y
+domicilios no se agregaron al endpoint público. Preferencias anteriores que todavía
+vuelvan a `order-confirmation` se redirigen al mismo flujo, y el puente de desarrollo
+admite también `/checkout`.
+
+Mi cuenta lista y permite abrir únicamente pedidos confirmados. Los intentos fallidos
+siguen disponibles internamente para conciliación y auditoría, sin aparecer como
+“no pagados”. Además, el uso de cupón dejó de incrementarse al crear el intento y se
+registra idempotentemente al aprobar el pago (`coupon_usage_counted_at`). Verificado
+con 115 tests de backend aprobados (uno PostgreSQL omitido por falta de
+`TEST_DATABASE_URL`) y build productivo de Vite exitoso. La ampliación para
+`merchant_order_id` quedó verificada con 120 tests aprobados (uno PostgreSQL omitido)
+y build productivo de Vite exitoso. Mobile real queda pendiente
+de verificación en dispositivo físico.
 
 ### 2026-08-19 · Fix: "Failed to fetch" al importar carpetas grandes de imágenes
 

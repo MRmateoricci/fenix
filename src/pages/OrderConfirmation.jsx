@@ -26,6 +26,8 @@ export default function OrderConfirmation() {
   const paymentStatus     = searchParams.get('collection_status')
     || returnedStatuses.find((status) => ['approved', 'rejected', 'in_process'].includes(status))
   const paymentId         = searchParams.get('payment_id') || searchParams.get('collection_id')
+  const merchantOrderId   = searchParams.get('merchant_order_id')
+  const preferenceId      = searchParams.get('preference_id')
   const orderId           = searchParams.get('orderId')
 
   const [order, setOrder]     = useState(null)
@@ -97,12 +99,23 @@ export default function OrderConfirmation() {
 
   useEffect(() => {
     if (['paid', 'preparing', 'shipped', 'delivered', 'reserved'].includes(order?.status)) {
+      sessionStorage.removeItem('fenix_checkout_payment_draft')
       clearCart()
     }
   }, [order?.status])
 
   // Sin parámetros → redirigir a home
   if (!orderId && !loading) return <Navigate to="/" replace />
+
+  // Compatibilidad con preferencias creadas antes de que el back_url de
+  // rechazo apuntara directamente al checkout.
+  if ((mpStatus === 'failure' || order?.status === 'payment_failed') && orderId) {
+    const params = new URLSearchParams({ payment: 'failure', orderId })
+    if (paymentId) params.set('payment_id', paymentId)
+    if (merchantOrderId) params.set('merchant_order_id', merchantOrderId)
+    if (preferenceId) params.set('preference_id', preferenceId)
+    return <Navigate to={`/checkout?${params}`} replace />
+  }
 
   if (loading) {
     return (

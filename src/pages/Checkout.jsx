@@ -1,5 +1,5 @@
 import { useState, Fragment, useMemo, useEffect } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useCart } from '../context/CartContext'
 import { useAuth } from '../context/AuthContext'
 import PageSEO from '../components/SEO'
@@ -8,6 +8,17 @@ import mercadoPagoLogo from '../assets/mercado-pago-horizontal.svg'
 import { POLICIES } from './Policy'
 
 const API_BASE = import.meta.env.VITE_API_URL || ''
+const CHECKOUT_PAYMENT_DRAFT_KEY = 'fenix_checkout_payment_draft'
+const PAYMENT_FAILURE_MESSAGE = 'No se efectuó el pago. Tus datos y productos siguen cargados para que puedas intentarlo nuevamente.'
+
+function readCheckoutPaymentDraft() {
+  try {
+    const stored = sessionStorage.getItem(CHECKOUT_PAYMENT_DRAFT_KEY)
+    return stored ? JSON.parse(stored) : null
+  } catch {
+    return null
+  }
+}
 
 const fmt = (n) =>
   new Intl.NumberFormat('es-AR', {
@@ -95,8 +106,15 @@ function validateBilling(d) {
 // ═══════════════════════════════════════════════════════════════════════════════
 export default function Checkout() {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const { items, totalPrice, clearCart, shippingConfig } = useCart()
   const { user, authLoading, updateProfile, logout } = useAuth()
+  const [paymentDraft] = useState(readCheckoutPaymentDraft)
+  const paymentReturn = searchParams.get('payment')
+  const returnedOrderId = searchParams.get('orderId')
+  const returnedPaymentId = searchParams.get('payment_id') || searchParams.get('collection_id')
+  const returnedMerchantOrderId = searchParams.get('merchant_order_id')
+  const returnedPreferenceId = searchParams.get('preference_id')
   const [step, setStep]             = useState(1)
   const [errors, setErrors]         = useState({})
   const [submitting, setSubmitting] = useState(false)
@@ -107,11 +125,12 @@ export default function Checkout() {
   const [emailChecking, setEmailChecking] = useState(false)
   const [accountLoginRequired, setAccountLoginRequired] = useState(false)
   const [discountCode, setDiscountCode] = useState('')
-  const [appliedCoupon, setAppliedCoupon] = useState(null)
+  const [appliedCoupon, setAppliedCoupon] = useState(paymentDraft?.appliedCoupon || null)
   const [couponChecking, setCouponChecking] = useState(false)
   const [couponError, setCouponError] = useState(null)
   const [invoiceOptions, setInvoiceOptions] = useState(null)
   const [invoiceOptionsError, setInvoiceOptionsError] = useState(null)
+  const [showPaymentFailureNotice, setShowPaymentFailureNotice] = useState(paymentReturn === 'failure')
 
   const [formData, setFormData] = useState({
     nombre:       user?.firstName  || '',
@@ -137,10 +156,44 @@ export default function Checkout() {
     billingCity: '',
     billingPostalCode: '',
     billingProvince: 'Buenos Aires',
+    ...(paymentDraft?.formData || {}),
   })
 
   const [deliveryEstimate, setDeliveryEstimate] = useState(null)
   const [deliveryEstimateLoading, setDeliveryEstimateLoading] = useState(false)
+
+  // El checkout viaja a otro dominio para pagar. Guardamos cada cambio, no
+  // solamente el instante de la redirección, para que dirección, receptor
+  // fiscal y facturación sobrevivan incluso si MP o la red interrumpen el
+  // flujo antes de recibir la respuesta final.
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(CHECKOUT_PAYMENT_DRAFT_KEY, JSON.stringify({ formData, appliedCoupon }))
+    } catch { /* ignore storage quota */ }
+  }, [formData, appliedCoupon])
+
+  useEffect(() => {
+    if (paymentReturn !== 'failure' || !returnedOrderId || paymentDraft?.formData) return undefined
+
+    const controller = new AbortController()
+    fetch(`${API_BASE}/api/orders/mine/${returnedOrderId}/retry-data`, {
+      credentials: 'include',
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        const data = await response.json().catch(() => ({}))
+        if (!response.ok) throw new Error(data.error || 'No pudimos recuperar los datos')
+        return data
+      })
+      .then((data) => {
+        if (data?.formData) setFormData((current) => ({ ...current, ...data.formData }))
+      })
+      .catch((error) => {
+        if (error.name !== 'AbortError') return
+      })
+
+    return () => controller.abort()
+  }, [paymentReturn, returnedOrderId, paymentDraft])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -193,8 +246,58 @@ export default function Checkout() {
   useEffect(() => {
     if (authLoading || authResolved) return
     setAuthResolved(true)
-    if (user && !needsPersonalData) setStep(2)
-  }, [authLoading, authResolved, user, needsPersonalData])
+    if (paymentReturn === 'failure') setStep(3)
+    else if (user && !needsPersonalData) setStep(2)
+  }, [authLoading, authResolved, user, needsPersonalData, paymentReturn])
+
+  useEffect(() => {
+    if (paymentReturn !== 'failure') return undefined
+
+    sessionStorage.removeItem('fenix_pending_order_id')
+    setShowPaymentFailureNotice(true)
+    setStep(3)
+    setSubmitting(Boolean(returnedOrderId && (returnedPaymentId || returnedMerchantOrderId)))
+    setSubmitError(PAYMENT_FAILURE_MESSAGE)
+
+    if (!returnedOrderId || (!returnedPaymentId && !returnedMerchantOrderId)) return undefined
+
+    const controller = new AbortController()
+    async function verifyRejectedPayment() {
+      try {
+        const response = await fetch(`${API_BASE}/api/orders/public/${returnedOrderId}/reconcile-payment`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            paymentId: returnedPaymentId,
+            merchantOrderId: returnedMerchantOrderId,
+            preferenceId: returnedPreferenceId,
+          }),
+          signal: controller.signal,
+        })
+        const data = await response.json().catch(() => ({}))
+        if (!response.ok) throw new Error(data.error || 'No pudimos verificar el pago')
+
+        if (['paid', 'preparing', 'shipped', 'delivered'].includes(data.status)) {
+          sessionStorage.removeItem(CHECKOUT_PAYMENT_DRAFT_KEY)
+          navigate(`/order-confirmation?orderId=${returnedOrderId}&status=success`, { replace: true })
+        }
+      } catch (error) {
+        // El webhook de Mercado Pago queda como respaldo. Mientras tanto el
+        // cliente conserva el carrito y puede seguir en la etapa de pago.
+        if (error.name === 'AbortError') return
+      } finally {
+        if (!controller.signal.aborted) setSubmitting(false)
+      }
+    }
+    verifyRejectedPayment()
+    return () => controller.abort()
+  }, [paymentReturn, returnedOrderId, returnedPaymentId, returnedMerchantOrderId, returnedPreferenceId, navigate])
+
+  useEffect(() => {
+    if (!showPaymentFailureNotice) return undefined
+    const timer = setTimeout(() => setShowPaymentFailureNotice(false), 7000)
+    return () => clearTimeout(timer)
+  }, [showPaymentFailureNotice])
 
   const localShippingZone = useMemo(() => {
     if (formData.deliveryType !== 'delivery') return null
@@ -454,6 +557,9 @@ export default function Checkout() {
       }
       const { orderId, checkoutUrl } = await res.json()
       if (checkoutUrl) {
+        try {
+          sessionStorage.setItem(CHECKOUT_PAYMENT_DRAFT_KEY, JSON.stringify({ formData, appliedCoupon }))
+        } catch { /* ignore storage quota */ }
         sessionStorage.setItem('fenix_pending_order_id', orderId)
         window.location.href = checkoutUrl
       } else {
@@ -500,6 +606,9 @@ export default function Checkout() {
   return (
     <>
     <PageSEO title="Finalizar compra" description="Completá tu pedido en Fénix Iluminación y pagá de forma segura con Mercado Pago." url="/checkout" />
+    {showPaymentFailureNotice && paymentReturn === 'failure' && (
+      <PaymentFailureNotice onClose={() => setShowPaymentFailureNotice(false)} />
+    )}
     <div style={{ backgroundColor: 'var(--color-bg)', minHeight: '100vh' }}>
       <div style={{ maxWidth: '70rem', margin: '0 auto', padding: '3rem 1.5rem 6rem' }}>
 
@@ -539,6 +648,7 @@ export default function Checkout() {
               accountLoginRequired={accountLoginRequired}
               profileError={profileError}
               submitError={submitError}
+              paymentRejected={paymentReturn === 'failure'}
               submitting={submitting || profileSaving || emailChecking}
               onConfirm={handleConfirm}
               invoiceOptions={invoiceOptions}
@@ -926,10 +1036,27 @@ export default function Checkout() {
   )
 }
 
+function PaymentFailureNotice({ onClose }) {
+  return (
+    <div className="fnx-added-notice fnx-payment-failure-notice" role="alert" aria-live="assertive">
+      <div className="fnx-added-notice__title">
+        <span>Mercado Pago</span>
+        <strong>Pago no efectuado</strong>
+      </div>
+      <div className="fnx-added-notice__body">
+        <button type="button" onClick={onClose} aria-label="Cerrar notificación">×</button>
+        <img src={mercadoPagoLogo} alt="" />
+        <button type="button" onClick={onClose}>Intentar nuevamente</button>
+      </div>
+    </div>
+  )
+}
+
 function SinglePageCheckout({
   formData, errors, setField, user, onLogout, navigate, shippingZone,
   deliveryEstimate, deliveryEstimateMatches, deliveryEstimateLoading,
   accountLoginRequired, profileError, submitError, submitting, onConfirm,
+  paymentRejected,
   invoiceOptions, invoiceOptionsError,
 }) {
   const [activePolicy, setActivePolicy] = useState(null)
@@ -1113,7 +1240,7 @@ function SinglePageCheckout({
 
       <BillingAddress formData={formData} errors={errors} setField={setField} />
 
-      {(profileError || submitError) && (
+      {(profileError || (!paymentRejected && submitError)) && (
         <p className="fnx-checkout-submit-error">{profileError || submitError}</p>
       )}
 

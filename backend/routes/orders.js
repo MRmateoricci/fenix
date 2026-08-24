@@ -8,7 +8,7 @@ import { estimateDeliveryDate } from '../services/correoArgentino.js'
 import { SHIPPING_SERVICES, qualifiesForFreeShipping } from '../config/shipping.js'
 import { quoteShipping } from '../services/shippingQuotes.js'
 import { sendOrderConfirmationNotifications } from '../services/orderNotifications.js'
-import { PaymentReconciliationError, reconcileMercadoPagoPayment } from '../services/mercadopagoPayments.js'
+import { PaymentReconciliationError, reconcileMercadoPagoReturn } from '../services/mercadopagoPayments.js'
 import { sendReviewInvitationForOrder } from '../services/reviewInvitations.js'
 import { isValidEmail, normalizeEmail } from '../utils/email.js'
 import { resolveVariantRule, ruleMatches } from '../services/productVariants.js'
@@ -35,6 +35,43 @@ const PENDING_PAYMENT_EXPIRY_MINUTES = 45
 // — releaseOrderStock es idempotente, así que da igual si más de uno de estos
 // caminos termina llamándolo para el mismo pedido).
 export const RELEASES_STOCK = ['cancelled', 'payment_failed', 'expired']
+export const CUSTOMER_ORDER_STATUSES = ['reserved', 'paid', 'preparing', 'shipped', 'delivered']
+
+function dateInputValue(value) {
+  if (!value) return ''
+  if (value instanceof Date) return value.toISOString().slice(0, 10)
+  return String(value).slice(0, 10)
+}
+
+export function buildRetryCheckoutData(order) {
+  const nameParts = String(order?.customer_name || '').trim().split(/\s+/).filter(Boolean)
+  const fallbackFirstName = nameParts.shift() || ''
+  return {
+    nombre: order?.account_first_name || fallbackFirstName,
+    apellido: order?.account_last_name || nameParts.join(' '),
+    email: order?.customer_email || '',
+    telefono: order?.customer_phone || '',
+    invoiceName: order?.invoice_recipient_name || order?.customer_name || '',
+    invoiceDocType: order?.invoice_doc_type == null ? '' : String(order.invoice_doc_type),
+    invoiceDocNumber: order?.invoice_doc_number || '',
+    invoiceVatConditionId: order?.invoice_vat_condition_id == null ? '' : String(order.invoice_vat_condition_id),
+    deliveryType: order?.delivery_type || 'delivery',
+    paymentMethod: order?.payment_method || 'mercadopago',
+    shippingService: order?.shipping_service || 'clasico',
+    pickupDate: dateInputValue(order?.pickup_date),
+    direccion: order?.address || '',
+    piso: order?.address_extra || '',
+    ciudad: order?.city || '',
+    codigoPostal: order?.postal_code || '',
+    provincia: order?.province || 'Buenos Aires',
+    billingSameAsShipping: order?.billing_same_as_shipping !== false,
+    billingAddress: order?.billing_address || '',
+    billingAddressExtra: order?.billing_address_extra || '',
+    billingCity: order?.billing_city || '',
+    billingPostalCode: order?.billing_postal_code || '',
+    billingProvince: order?.billing_province || 'Buenos Aires',
+  }
+}
 
 // ── Genera número de orden legible (FX-A3B9C2) ───────────────────────────────
 function generateOrderNumber() {
@@ -301,7 +338,6 @@ router.post('/', attachUserIfPresent, async (req, res) => {
     // monto que haya calculado el navegador en /api/coupons/validate).
     let discountAmount = 0
     let couponCode = null
-    let couponId = null
     if (req.body?.discountCode) {
       const coupon = await findCouponByCode(req.body.discountCode)
       const evaluation = evaluateCoupon(coupon, productsTotal)
@@ -310,7 +346,6 @@ router.post('/', attachUserIfPresent, async (req, res) => {
       }
       discountAmount = evaluation.amount
       couponCode = coupon.code
-      couponId = coupon.id
     }
 
     // Envío: costo por zona + estimación de entrega (Correo Argentino + margen
@@ -411,9 +446,6 @@ router.post('/', attachUserIfPresent, async (req, res) => {
         ]
       )
       order = rows[0]
-      if (couponId) {
-        await client.query('UPDATE coupons SET times_used = times_used + 1 WHERE id = $1', [couponId])
-      }
       await client.query('COMMIT')
     } catch (err) {
       await client.query('ROLLBACK')
@@ -488,14 +520,25 @@ const PUBLIC_ORDER_FIELDS = `
 `
 
 // POST /api/orders/public/:id/reconcile-payment
-// El retorno de Checkout Pro puede llegar antes que el webhook. Usamos el ID
+// El retorno de Checkout Pro puede llegar antes que el webhook. Usamos los IDs
 // solo para volver a consultar a Mercado Pago y verificar orden, monto y moneda.
 router.post('/public/:id/reconcile-payment', async (req, res) => {
   try {
-    const { paymentId } = req.body || {}
-    const { order } = await reconcileMercadoPagoPayment({
+    const { paymentId, merchantOrderId, preferenceId } = req.body || {}
+    const { rows } = await pool.query(
+      'SELECT mp_preference_id FROM orders WHERE id = $1',
+      [req.params.id]
+    )
+    if (!rows.length) return res.status(404).json({ error: 'Pedido no encontrado' })
+    if (preferenceId && String(preferenceId) !== String(rows[0].mp_preference_id || '')) {
+      return res.status(409).json({ error: 'La preferencia no corresponde a este pedido' })
+    }
+
+    const { order } = await reconcileMercadoPagoReturn({
       paymentId,
+      merchantOrderId,
       expectedOrderId: req.params.id,
+      expectedPreferenceId: rows[0].mp_preference_id,
     })
 
     res.set('Cache-Control', 'no-store')
@@ -508,7 +551,7 @@ router.post('/public/:id/reconcile-payment', async (req, res) => {
     if (err instanceof PaymentReconciliationError) {
       return res.status(err.statusCode).json({ error: err.message })
     }
-    console.error(`[payment-reconcile] order=${req.params.id} payment=${req.body?.paymentId || '-'} status=error code=${err.code || err.name}`)
+    console.error(`[payment-reconcile] order=${req.params.id} payment=${req.body?.paymentId || '-'} merchant_order=${req.body?.merchantOrderId || '-'} status=error code=${err.code || err.name}`)
     res.status(502).json({ error: 'No pudimos verificar el pago con Mercado Pago' })
   }
 })
@@ -556,14 +599,44 @@ router.get('/track/:orderNumber', async (req, res) => {
 router.get('/mine', requireAuth, async (req, res) => {
   try {
     const { rows } = await pool.query(
-      `SELECT ${PUBLIC_ORDER_FIELDS}
-       FROM orders WHERE user_id = $1
+       `SELECT ${PUBLIC_ORDER_FIELDS}
+       FROM orders
+       WHERE user_id = $1
+         AND (status = ANY($2::varchar[]) OR (status = 'cancelled' AND paid_at IS NOT NULL))
        ORDER BY created_at DESC`,
-      [req.userId]
+      [req.userId, CUSTOMER_ORDER_STATUSES]
     )
     res.json(rows)
   } catch (err) {
     console.error('[GET /api/orders/mine]', err)
+    res.status(500).json({ error: 'Error interno' })
+  }
+})
+
+// Recupera el formulario de un intento no confirmado únicamente para el dueño
+// autenticado. Se mantiene separado del detalle público porque contiene DNI y
+// domicilios que no deben quedar protegidos solamente por conocer un UUID.
+router.get('/mine/:id/retry-data', requireAuth, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT o.customer_name, o.customer_email, o.customer_phone,
+              o.delivery_type, o.address, o.address_extra, o.city, o.province, o.postal_code,
+              o.billing_same_as_shipping, o.billing_address, o.billing_address_extra,
+              o.billing_city, o.billing_province, o.billing_postal_code,
+              o.invoice_recipient_name, o.invoice_doc_type, o.invoice_doc_number,
+              o.invoice_vat_condition_id, o.payment_method, o.pickup_date, o.shipping_service,
+              u.first_name AS account_first_name, u.last_name AS account_last_name
+       FROM orders o
+       JOIN users u ON u.id = o.user_id
+       WHERE o.id = $1 AND o.user_id = $2
+         AND o.status IN ('pending_payment', 'payment_failed', 'expired')`,
+      [req.params.id, req.userId]
+    )
+    if (!rows.length) return res.status(404).json({ error: 'Intento de pago no encontrado' })
+    res.set('Cache-Control', 'no-store')
+    res.json({ formData: buildRetryCheckoutData(rows[0]) })
+  } catch (err) {
+    console.error('[GET /api/orders/mine/:id/retry-data]', err)
     res.status(500).json({ error: 'Error interno' })
   }
 })
@@ -582,8 +655,10 @@ router.get('/mine/:id', requireAuth, async (req, res) => {
               total_amount, shipping_cost, shipping_service, payment_method,
               coupon_code, discount_amount,
               pickup_date, estimated_delivery_date, items, created_at, paid_at
-       FROM orders WHERE id = $1 AND user_id = $2`,
-      [req.params.id, req.userId]
+       FROM orders
+       WHERE id = $1 AND user_id = $2
+         AND (status = ANY($3::varchar[]) OR (status = 'cancelled' AND paid_at IS NOT NULL))`,
+      [req.params.id, req.userId, CUSTOMER_ORDER_STATUSES]
     )
     if (!rows.length) return res.status(404).json({ error: 'Pedido no encontrado' })
     res.set('Cache-Control', 'no-store')

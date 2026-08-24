@@ -3,9 +3,49 @@ import assert from 'node:assert/strict';
 import {
   ArcaParameterError,
   documentKind,
+  getInvoiceOptions,
+  isArcaDevMockEnabled,
   resolveVatRateType,
   validateConfiguredPointOfSale,
 } from './arcaParameters.js';
+
+test('el mock ARCA es opt-in y nunca se activa en producción', () => {
+  assert.equal(isArcaDevMockEnabled({ NODE_ENV: 'development' }), false);
+  assert.equal(isArcaDevMockEnabled({
+    NODE_ENV: 'development',
+    ARCA_DEV_MOCK_ENABLED: 'true',
+  }), true);
+  assert.equal(isArcaDevMockEnabled({
+    NODE_ENV: 'production',
+    ARCA_DEV_MOCK_ENABLED: 'true',
+  }), false);
+});
+
+test('el mock devuelve opciones fiscales locales compatibles sin consultar ARCA', async () => {
+  const options = await getInvoiceOptions({
+    issuer: {
+      taxCondition: 'Responsable Inscripto',
+      taxCategory: 'registered',
+      aAuthorizationMode: 'subject_to_withholding',
+    },
+  }, {
+    NODE_ENV: 'development',
+    ARCA_DEV_MOCK_ENABLED: 'true',
+  });
+
+  assert.equal(options.mocked, true);
+  assert.deepEqual(options.invoiceClasses, ['ALEY', 'B']);
+  assert.deepEqual(options.documents.map((item) => item.id), [80, 96, 99]);
+  assert.deepEqual(options.vatConditions.map((item) => item.id), [1, 6, 4, 5]);
+  assert.deepEqual(
+    options.vatConditions.find((item) => item.category === 'consumer_final').allowedDocumentTypeIds,
+    [80, 96, 99],
+  );
+  assert.deepEqual(
+    options.vatConditions.find((item) => item.category === 'registered').allowedDocumentTypeIds,
+    [80],
+  );
+});
 
 test('reconoce la descripción productiva de documento 99 sin aceptar otros códigos', () => {
   assert.equal(documentKind({ id: 99, description: 'Doc. (otro)' }), 'consumer_final');

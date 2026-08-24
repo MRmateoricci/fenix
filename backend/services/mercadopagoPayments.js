@@ -1,4 +1,4 @@
-import { MercadoPagoConfig, Payment } from 'mercadopago'
+import { MercadoPagoConfig, MerchantOrder, Payment } from 'mercadopago'
 import { pool } from '../db/pool.js'
 import { releaseOrderStock } from './stockReservation.js'
 import { sendOrderConfirmationNotifications } from './orderNotifications.js'
@@ -7,6 +7,8 @@ import 'dotenv/config'
 
 const mpClient = new MercadoPagoConfig({ accessToken: process.env.MP_ACCESS_TOKEN })
 const PAID_ORDER_STATUSES = ['paid', 'preparing', 'shipped', 'delivered']
+const merchantOrderApi = new MerchantOrder(mpClient)
+const paymentApi = new Payment(mpClient)
 
 export class PaymentReconciliationError extends Error {
   constructor(message, statusCode = 400) {
@@ -24,6 +26,77 @@ export function mapMpStatus(mpStatus) {
   return null
 }
 
+export function shouldCountCouponUsage(order, newStatus) {
+  return newStatus === 'paid' && Boolean(order?.coupon_code) && !order?.coupon_usage_counted_at
+}
+
+function validPaymentId(value) {
+  return /^\d{6,30}$/.test(String(value || ''))
+}
+
+export function selectMerchantOrderPayment(merchantOrder, { expectedOrderId, expectedPreferenceId = null }) {
+  if (String(merchantOrder?.external_reference || '') !== String(expectedOrderId || '')) {
+    throw new PaymentReconciliationError('La orden de Mercado Pago no corresponde a este pedido', 409)
+  }
+  if (expectedPreferenceId && String(merchantOrder?.preference_id || '') !== String(expectedPreferenceId)) {
+    throw new PaymentReconciliationError('La preferencia de Mercado Pago no corresponde a este pedido', 409)
+  }
+
+  const statusPriority = {
+    approved: 4,
+    pending: 3,
+    in_process: 3,
+    authorized: 3,
+    rejected: 2,
+    cancelled: 2,
+    refunded: 1,
+    charged_back: 1,
+  }
+  return (Array.isArray(merchantOrder?.payments) ? merchantOrder.payments : [])
+    .filter((payment) => validPaymentId(payment?.id) && statusPriority[payment?.status])
+    .sort((left, right) => {
+      const byStatus = statusPriority[right.status] - statusPriority[left.status]
+      if (byStatus) return byStatus
+      return String(right.last_modified || right.date_created || '')
+        .localeCompare(String(left.last_modified || left.date_created || ''))
+    })[0] || null
+}
+
+/**
+ * El retorno failure de Checkout Pro a veces no trae payment_id, pero sí el
+ * merchant_order_id. Consultamos esa orden con las credenciales privadas y
+ * recién entonces conciliamos el pago real asociado.
+ */
+export async function reconcileMercadoPagoReturn({
+  paymentId,
+  merchantOrderId,
+  expectedOrderId,
+  expectedPreferenceId = null,
+}, {
+  getMerchantOrder = (id) => merchantOrderApi.get({ merchantOrderId: id }),
+  searchPayments = (externalReference) => paymentApi.search({ options: { external_reference: externalReference, limit: 10 } }),
+  reconcilePayment = reconcileMercadoPagoPayment,
+} = {}) {
+  if (validPaymentId(paymentId)) {
+    return reconcilePayment({ paymentId: String(paymentId), expectedOrderId })
+  }
+  let payment = null
+  if (/^\d{3,30}$/.test(String(merchantOrderId || ''))) {
+    const merchantOrder = await getMerchantOrder(String(merchantOrderId))
+    payment = selectMerchantOrderPayment(merchantOrder, { expectedOrderId, expectedPreferenceId })
+  } else {
+    const search = await searchPayments(String(expectedOrderId))
+    payment = selectMerchantOrderPayment({
+      external_reference: expectedOrderId,
+      payments: search?.results,
+    }, { expectedOrderId })
+  }
+  if (!payment) {
+    throw new PaymentReconciliationError('Mercado Pago todavía no informó el resultado del pago', 409)
+  }
+  return reconcilePayment({ paymentId: String(payment.id), expectedOrderId })
+}
+
 function amountsMatch(left, right) {
   const leftCents = Math.round(Number(left) * 100)
   const rightCents = Math.round(Number(right) * 100)
@@ -35,11 +108,10 @@ function amountsMatch(left, right) {
  * orden. Nunca confia en el estado recibido por la URL de retorno o el webhook.
  */
 export async function reconcileMercadoPagoPayment({ paymentId, expectedOrderId = null }) {
-  if (!/^\d{6,30}$/.test(String(paymentId || ''))) {
+  if (!validPaymentId(paymentId)) {
     throw new PaymentReconciliationError('Identificador de pago invalido')
   }
 
-  const paymentApi = new Payment(mpClient)
   const mpPayment = await paymentApi.get({ id: String(paymentId) })
   const externalReference = String(mpPayment.external_reference || '')
   const mpStatus = String(mpPayment.status || '')
@@ -104,6 +176,25 @@ export async function reconcileMercadoPagoPayment({ paymentId, expectedOrderId =
       [effectiveStatus, String(mpPayment.id), mpStatus, newStatus, externalReference]
     )
     order = updated.rows[0]
+
+    // Un intento rechazado no consume el cupón. La contabilización ocurre una
+    // sola vez, al confirmar el pago, dentro del mismo lock de la orden.
+    if (shouldCountCouponUsage(order, newStatus)) {
+      await client.query(
+        `UPDATE coupons
+         SET times_used = times_used + 1
+         WHERE UPPER(code) = UPPER($1)`,
+        [order.coupon_code]
+      )
+      const counted = await client.query(
+        `UPDATE orders
+         SET coupon_usage_counted_at = NOW()
+         WHERE id = $1 AND coupon_usage_counted_at IS NULL
+         RETURNING *`,
+        [externalReference]
+      )
+      order = counted.rows[0] || order
+    }
 
     await client.query('COMMIT')
   } catch (err) {
