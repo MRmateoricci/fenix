@@ -107,6 +107,8 @@ una codificación: la confidencialidad depende del almacenamiento sealed.
 El proceso principal realiza esta validación antes de `app.listen()`: una pareja
 Base64 incompleta o inválida impide el startup, y las lecturas posteriores de la
 configuración reutilizan la materialización existente sin reescribirla.
+Las variables definidas con valor vacío también se consideran una configuración
+inválida; el fallback local sólo se usa cuando ninguna de las dos está definida.
 
 ## Consultas seguras de producción
 

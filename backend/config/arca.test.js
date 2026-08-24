@@ -205,6 +205,14 @@ test('rechaza credenciales Base64 incompletas sin exponer su contenido', () => {
   );
 });
 
+test('rechaza durante startup dos variables Base64 presentes pero vacías', () => {
+  assert.throws(
+    () => initializeArcaCredentials({ ARCA_CERT_BASE64: '', ARCA_KEY_BASE64: '' }),
+    (error) => error instanceof ArcaConfigError
+      && error.code === 'ARCA_BASE64_CREDENTIALS_INCOMPLETE',
+  );
+});
+
 test('rechaza Base64 inválido y contenido que no sea PEM', () => {
   const privateKey = Buffer.from(
     '-----BEGIN PRIVATE KEY-----\ndGVzdA==\n-----END PRIVATE KEY-----\n',

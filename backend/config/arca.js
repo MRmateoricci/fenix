@@ -208,12 +208,20 @@ export function resolveArcaCredentialPaths(
   environmentVariables = process.env,
   temporaryRoot = os.tmpdir(),
 ) {
+  const certificateVariablePresent = Object.hasOwn(
+    environmentVariables,
+    'ARCA_CERT_BASE64',
+  );
+  const privateKeyVariablePresent = Object.hasOwn(
+    environmentVariables,
+    'ARCA_KEY_BASE64',
+  );
   const encodedCertificate = String(environmentVariables.ARCA_CERT_BASE64 || '').trim();
   const encodedPrivateKey = String(environmentVariables.ARCA_KEY_BASE64 || '').trim();
   const hasCertificate = Boolean(encodedCertificate);
   const hasPrivateKey = Boolean(encodedPrivateKey);
 
-  if (!hasCertificate && !hasPrivateKey) {
+  if (!certificateVariablePresent && !privateKeyVariablePresent) {
     return Object.freeze({
       certificatePath: resolveBackendPath(
         environmentVariables.ARCA_CERT_PATH || './config/arca/arca_certificate.crt',
@@ -227,7 +235,7 @@ export function resolveArcaCredentialPaths(
 
   if (!hasCertificate || !hasPrivateKey) {
     throw new ArcaConfigError(
-      'ARCA_CERT_BASE64 y ARCA_KEY_BASE64 deben configurarse juntas.',
+      'ARCA_CERT_BASE64 y ARCA_KEY_BASE64 deben configurarse juntas y contener valores no vacíos.',
       'ARCA_BASE64_CREDENTIALS_INCOMPLETE',
     );
   }
