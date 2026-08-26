@@ -37,6 +37,25 @@ const fmt = (n) =>
 const fmtDate = (d) =>
   d ? new Date(d).toLocaleDateString('es-AR', { day: '2-digit', month: 'long', year: 'numeric' }) : null
 
+// Ventana de entrega. Los pedidos anteriores al cambio de modelo tienen sólo
+// `estimated_delivery_date` y siguen mostrándose con esa fecha única.
+const fmtDiaMes = (d) =>
+  new Date(d).toLocaleDateString('es-AR', { day: 'numeric', month: 'long' })
+
+function ventanaEntrega(order) {
+  const desde = order.estimated_delivery_date
+  const hasta = order.estimated_delivery_max_date
+  if (!desde && !hasta) return null
+  if (!desde || !hasta) return `el ${fmtDiaMes(desde || hasta)}`
+  const a = new Date(desde)
+  const b = new Date(hasta)
+  if (a.getTime() === b.getTime()) return `el ${fmtDiaMes(a)}`
+  const mismoMes = a.getMonth() === b.getMonth() && a.getFullYear() === b.getFullYear()
+  return mismoMes
+    ? `entre el ${a.getDate()} y el ${fmtDiaMes(b)}`
+    : `entre el ${fmtDiaMes(a)} y el ${fmtDiaMes(b)}`
+}
+
 function deliveryLine(order) {
   if (order.delivery_type === 'pickup') {
     const when = fmtDate(order.pickup_date)
@@ -44,24 +63,33 @@ function deliveryLine(order) {
     const pickupPerson = [order.pickup_person_name, order.pickup_person_last_name].filter(Boolean).join(' ')
     return `Retiro en local — 473 entre 14C y 15, City Bell${when ? ` el ${when}` : ''}. ${pago}.${pickupPerson ? ` Persona autorizada: ${pickupPerson}.` : ''}`
   }
-  const when = fmtDate(order.estimated_delivery_date)
+  const when = ventanaEntrega(order)
   const service = order.shipping_service ? ` ${order.shipping_service}` : ''
-  return `Envío${service} a ${order.address}, ${order.city}${order.postal_code ? ` (CP ${order.postal_code})` : ''}${when ? ` — llega aprox. el ${when}` : ''}.`
+  return `Envío${service} a ${order.address}, ${order.city}${order.postal_code ? ` (CP ${order.postal_code})` : ''}${when ? ` — llega ${when}` : ''}.`
 }
 
-function itemsRows(order) {
+// `flagRepuestos` marca item por item cuáles hay que traer del proveedor. Sólo
+// se usa en el mail del admin, que es quien tiene que salir a conseguirlos; al
+// cliente esa distinción no le sirve de nada — a él le importa una sola fecha.
+function itemsRows(order, { flagRepuestos = false } = {}) {
   return (order.items || [])
-    .map((i) => `<tr><td style="padding:4px 8px">${i.name}${i.aPedido ? `<br><span style="font-size:11px;color:#8A5A00">A pedido · llega en ~${i.diasEntregaPedido} días hábiles</span>` : ''}</td><td style="padding:4px 8px">${i.quantity}</td><td style="padding:4px 8px">${fmt(i.subtotal)}</td></tr>`)
+    .map((i) => {
+      const aviso = flagRepuestos && i.aPedido
+        ? `<br><span style="font-size:11px;color:#8A5A00">Hay que pedirlo al proveedor (~${i.diasEntregaPedido} días hábiles)</span>`
+        : ''
+      return `<tr><td style="padding:4px 8px">${i.name}${aviso}</td><td style="padding:4px 8px">${i.quantity}</td><td style="padding:4px 8px">${fmt(i.subtotal)}</td></tr>`
+    })
     .join('')
 }
 
-// Aviso agregado cuando el pedido incluye items a pedido — el plazo mostrado
-// es el mayor entre esos items, no una suma (cada uno llega por su cuenta).
-function aPedidoNotice(order) {
+// Aviso agregado cuando algo del pedido no estaba en el local. El plazo mostrado
+// es el mayor entre esos items, no una suma: se despachan juntos, así que manda
+// el que más tarda en estar.
+function preparationNotice(order) {
   const dias = (order.items || []).filter((i) => i.aPedido).map((i) => Number(i.diasEntregaPedido) || 0)
   if (!dias.length) return ''
   const maxDias = Math.max(...dias)
-  return `<p style="background:#FDF0DC;color:#8A5A00;padding:10px 14px;border-radius:6px;">Este pedido incluye productos a pedido. El plazo de entrega es de hasta ${maxDias} días hábiles.</p>`
+  return `<p style="background:#FDF0DC;color:#8A5A00;padding:10px 14px;border-radius:6px;">Preparamos tu pedido en hasta ${maxDias} días hábiles antes de despacharlo.</p>`
 }
 
 const appBaseUrl = () =>
@@ -155,7 +183,7 @@ export function customerConfirmationEmail(order) {
       <h2>${isReserved ? 'Tu reserva fue confirmada' : 'Gracias por tu compra'}</h2>
       <p>Pedido <strong>${order.order_number}</strong></p>
       <p>${deliveryLine(order)}</p>
-      ${aPedidoNotice(order)}
+      ${preparationNotice(order)}
       <table style="border-collapse: collapse; margin: 12px 0;">${itemsRows(order)}</table>
       <p><strong>Total: ${fmt(order.total_amount)}</strong>${order.shipping_cost ? ` (incluye envío ${fmt(order.shipping_cost)})` : ''}</p>
       <p>Ante cualquier consulta, escribinos por WhatsApp mencionando el número de pedido.</p>
@@ -175,12 +203,12 @@ export function adminNewOrderEmail(order) {
       <h2>${order.status === 'reserved' ? 'Nueva reserva de retiro' : 'Nuevo pedido'}</h2>
       <p>Pedido <strong>${order.order_number}</strong> — ${order.customer_name} (${order.customer_email}, ${order.customer_phone})</p>
       <p>${deliveryLine(order)}</p>
-      ${aPedidoNotice(order)}
-      <table style="border-collapse: collapse; margin: 12px 0;">${itemsRows(order)}</table>
+      ${preparationNotice(order)}
+      <table style="border-collapse: collapse; margin: 12px 0;">${itemsRows(order, { flagRepuestos: true })}</table>
       <p><strong>Total: ${fmt(order.total_amount)}</strong></p>
       ${order.delivery_type === 'delivery'
-        ? '<p><strong>Importante:</strong> confirmá que hay stock o conseguilo antes del próximo despacho de Correo Argentino.</p>'
-        : '<p><strong>Importante:</strong> este stock ya está reservado — no lo vendas en el local.</p>'}
+        ? '<p><strong>Importante:</strong> separá la mercadería o pedila al proveedor antes del próximo despacho de Correo Argentino.</p>'
+        : '<p><strong>Importante:</strong> separá esta mercadería para el retiro — no la vendas en el local.</p>'}
     </div>
   `
   return { subject, html }

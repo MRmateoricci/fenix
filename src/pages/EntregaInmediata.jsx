@@ -2,17 +2,21 @@ import { useAdmin } from '../context/AdminContext'
 import ProductCard from '../components/ProductCard'
 import PageSEO from '../components/SEO'
 
-export default function ProductosAPedido() {
+// Antes esta página era "Productos a pedido" y listaba lo que NO había —
+// una página que nadie quiere visitar. Con el modelo de disponibilidad nuevo
+// muestra lo contrario, que es lo que sí vende: lo que está en el local y sale
+// para el correo enseguida.
+export default function EntregaInmediata() {
   const { products } = useAdmin()
 
-  const productosAPedido = products.filter((p) => !p.inStock && p.aPedido)
+  const disponibles = products.filter((p) => p.stockInmediato)
 
   return (
     <>
       <PageSEO
-        title="Productos a pedido"
-        description="Productos que Fénix Iluminación consigue a pedido: consultá disponibilidad y tiempos de entrega."
-        url="/productos-a-pedido"
+        title="Entrega inmediata"
+        description="Productos que Fénix Iluminación tiene en el local y despacha enseguida, sin esperar reposición del proveedor."
+        url="/entrega-inmediata"
       />
       <div style={{ backgroundColor: 'var(--color-bg)', minHeight: '100vh' }}>
         <div style={{ maxWidth: '78rem', margin: '0 auto', padding: '3rem 1.5rem 6rem' }}>
@@ -23,18 +27,18 @@ export default function ProductosAPedido() {
               textAlign: 'center', marginBottom: '0.75rem',
             }}
           >
-            Productos a pedido
+            Entrega inmediata
           </h1>
           <p style={{
             textAlign: 'center', color: 'var(--color-text-muted)',
             maxWidth: '38rem', margin: '0 auto 2.5rem',
           }}>
-            Estos productos no están en stock inmediato, pero los podés comprar igual: los conseguimos especialmente para vos y te mostramos el plazo de entrega estimado en cada ficha.
+            Estos productos están en el local ahora mismo: los preparamos y los despachamos sin esperar la reposición del proveedor.
           </p>
 
-          {productosAPedido.length === 0 ? (
+          {disponibles.length === 0 ? (
             <p style={{ textAlign: 'center', color: 'var(--color-text-muted)' }}>
-              Por ahora no hay productos a pedido disponibles.
+              Por ahora no hay productos marcados con entrega inmediata.
             </p>
           ) : (
             <div style={{
@@ -42,7 +46,7 @@ export default function ProductosAPedido() {
               gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
               gap: 28,
             }}>
-              {productosAPedido.map((p) => <ProductCard key={p.id} product={p} />)}
+              {disponibles.map((p) => <ProductCard key={p.id} product={p} />)}
             </div>
           )}
         </div>

@@ -44,13 +44,12 @@ function toBackendPayload(p) {
   if ('published' in p)     out.published          = p.published
   if ('isNew' in p)         out.is_new             = p.isNew
   if ('bestSeller' in p)    out.best_seller        = p.bestSeller
-  if ('aPedido' in p)       out.a_pedido           = p.aPedido
+  if ('stockInmediato' in p) out.stock_inmediato   = p.stockInmediato
   if ('diasEntregaPedido' in p) out.dias_entrega_pedido = p.diasEntregaPedido === '' ? null : p.diasEntregaPedido
-  // El backend solo tiene `stock` (entero) — inStock es stock > 0 derivado al
-  // leer. Si viene stock explícito se usa tal cual; si solo viene el toggle
-  // inStock, se traduce a un stock mínimo (1) o a 0.
+  // `stock` sigue siendo escribible desde el inventario aunque la tienda no lo
+  // use: el dueño lo carga cuando quiere tener el número a mano. No decide
+  // nada de la venta — eso lo hace stock_inmediato.
   if ('stock' in p)        out.stock = Number(p.stock) || 0
-  else if ('inStock' in p) out.stock = p.inStock ? 1 : 0
   return out
 }
 
@@ -82,7 +81,7 @@ export function AdminProvider({ children }) {
   const [importResult, setImportResult]          = useState(null)
   const [importLoading, setImportLoading]        = useState(false)
   const [importError, setImportError]            = useState(null)
-  const [currencySettings, setCurrencySettings]  = useState({ usdArsRate: 1510, diasEntregaPedidoDefault: 7, updatedAt: null })
+  const [currencySettings, setCurrencySettings]  = useState({ usdArsRate: 1510, diasDespachoInmediato: 1, diasReposicion: 3, updatedAt: null })
   const [supplierSettings, setSupplierSettings]  = useState([])
   const [subcategories, setSubcategories]        = useState([])
   const [productTypes, setProductTypes]          = useState([])
@@ -391,7 +390,7 @@ export function AdminProvider({ children }) {
     setInventory(current => current.map(product => updated.get(product.id) || product))
     setProducts(current => current.map(product => {
       const saved = updated.get(product.id)
-      return saved ? { ...product, stock: saved.stock, inStock: saved.stock > 0 } : product
+      return saved ? { ...product, stock: saved.stock } : product
     }))
     return data.products || []
   }, [])
@@ -443,14 +442,17 @@ export function AdminProvider({ children }) {
     return data
   }, [])
 
-  const updateDeliverySettings = useCallback(async (diasEntregaPedidoDefault) => {
+  // Los dos plazos se guardan juntos: el backend valida que el despacho
+  // inmediato no tarde más que la reposición, y esa comparación necesita ver
+  // ambos valores en la misma llamada.
+  const updateDeliverySettings = useCallback(async ({ diasDespachoInmediato, diasReposicion }) => {
     const res = await fetch(`${API_BASE}/api/products/delivery-settings`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json', 'x-admin-token': ADMIN_PASSWORD },
-      body: JSON.stringify({ diasEntregaPedidoDefault }),
+      body: JSON.stringify({ diasDespachoInmediato, diasReposicion }),
     })
     const data = await res.json()
-    if (!res.ok) throw new Error(data.error || 'No se pudo guardar el plazo')
+    if (!res.ok) throw new Error(data.error || 'No se pudieron guardar los plazos')
     setCurrencySettings(prev => ({ ...prev, ...data }))
     return data
   }, [])

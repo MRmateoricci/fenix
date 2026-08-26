@@ -11,7 +11,7 @@ import AnnouncementBar from './components/AnnouncementBar'
 import { PAGE_CONTENT_OFFSET } from './config/layout'
 import Home from './pages/Home'
 import Products from './pages/Products'
-import ProductosAPedido from './pages/ProductosAPedido'
+import EntregaInmediata from './pages/EntregaInmediata'
 import ProductDetail from './pages/ProductDetail'
 import Cart from './pages/Cart'
 import Checkout from './pages/Checkout'
@@ -123,7 +123,10 @@ export default function App() {
                 <Route element={<Layout />}>
                   <Route path="/" element={<Home />} />
                   <Route path="/products" element={<Products />} />
-                  <Route path="/productos-a-pedido" element={<ProductosAPedido />} />
+                  <Route path="/entrega-inmediata" element={<EntregaInmediata />} />
+                  {/* La ruta vieja quedó indexada aunque nunca se linkeó desde
+                      el sitio. Redirige en vez de tirar 404. */}
+                  <Route path="/productos-a-pedido" element={<Navigate to="/entrega-inmediata" replace />} />
                   <Route path="/products/:id" element={<ProductDetail />} />
                   <Route path="/cart" element={<Cart />} />
                   <Route path="/checkout" element={<Checkout />} />

@@ -16,17 +16,22 @@ const SELECT_FIELDS = `
   original_price, original_price_usd, price_currency,
   COALESCE((SELECT usd_ars_rate FROM store_settings WHERE id = 1), 1510) AS usd_ars_rate,
   description_larga,
-  image_url, hover_image_url, gallery_images, stock, watts, amperes, ip_rating, color_temp, material, cable_type, product_type,
-  color_options, size_options, tone_options, variant_stock, length_cm, width_cm, height_cm, weight_kg,
-  is_new, best_seller, a_pedido, dias_entrega_pedido,
-  COALESCE(dias_entrega_pedido, (SELECT dias_entrega_pedido_default FROM store_settings WHERE id = 1), 7) AS dias_entrega_pedido_effective,
+  image_url, hover_image_url, gallery_images, watts, amperes, ip_rating, color_temp, material, cable_type, product_type,
+  color_options, size_options, tone_options, length_cm, width_cm, height_cm, weight_kg,
+  is_new, best_seller, stock_inmediato,
+  -- Plazo de preparación ya resuelto acá para que ningún componente tenga que
+  -- combinar bandera + settings + override por su cuenta (y se desincronice).
+  CASE WHEN stock_inmediato
+    THEN COALESCE((SELECT dias_despacho_inmediato FROM store_settings WHERE id = 1), 1)
+    ELSE COALESCE(dias_entrega_pedido, (SELECT dias_entrega_pedido_default FROM store_settings WHERE id = 1), 3)
+  END AS dias_entrega_efectivo,
   COALESCE((
     SELECT jsonb_agg(jsonb_build_object(
       'id', vr.id, 'color', vr.color_name, 'colorHex', vr.color_hex, 'size', vr.size_label, 'tone', vr.tone_name, 'toneHex', vr.tone_hex,
       'image', vr.image_url, 'productData', vr.product_data,
       'price', vr.precio_venta, 'priceUsd', vr.precio_venta_usd,
       'priceWithTax', vr.precio_iva, 'priceWithTaxUsd', vr.precio_iva_usd,
-      'currency', vr.price_currency, 'stock', vr.stock
+      'currency', vr.price_currency
     ) ORDER BY vr.created_at)
     FROM product_variant_rules vr WHERE vr.product_id=products.id
   ), '[]'::jsonb) AS variant_rules
@@ -63,7 +68,6 @@ export function mapRow(r) {
       currency: rule.currency,
       usdArsRate,
     }),
-    stock: rule.stock == null ? null : Number(rule.stock),
   }))
   return {
     id: r.id,
@@ -83,8 +87,6 @@ export function mapRow(r) {
     image: r.image_url,
     hoverImage: r.hover_image_url,
     galleryImages: Array.isArray(r.gallery_images) ? r.gallery_images : [],
-    inStock: r.stock > 0,
-    stock: r.stock,
     colorTemp: r.color_temp != null ? Number(r.color_temp) : null,
     ipRating: r.ip_rating,
     watts: r.watts != null ? Number(r.watts) : null,
@@ -135,13 +137,14 @@ export function mapRow(r) {
       priceCostUsd: tone.priceCostUsd == null ? null : Number(tone.priceCostUsd),
       priceWithTaxUsd: tone.priceWithTaxUsd == null ? null : Number(tone.priceWithTaxUsd),
     })),
-    variantStock: r.variant_stock || {},
     variantRules,
     priceFrom: variantRules.filter(rule => rule.price != null).length > 1,
     isNew: Boolean(r.is_new),
     bestSeller: Boolean(r.best_seller),
-    aPedido: Boolean(r.a_pedido),
-    diasEntregaPedido: Number(r.dias_entrega_pedido_effective) || 7,
+    // Todo lo publicado es comprable: la tienda no consulta stock. Lo único
+    // que distingue a un producto de otro es en cuántos días hábiles sale.
+    stockInmediato: Boolean(r.stock_inmediato),
+    diasEntrega: Number(r.dias_entrega_efectivo) || 3,
     published: true,
   }
 }

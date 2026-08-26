@@ -388,10 +388,16 @@ router.post('/merge', async (req, res) => {
 // ambas monedas. El catalogo y los cobros continuan expresados en ARS.
 router.get('/currency-settings', async (_req, res) => {
   try {
-    const { rows } = await pool.query('SELECT usd_ars_rate, dias_entrega_pedido_default, updated_at FROM store_settings WHERE id = 1')
+    const { rows } = await pool.query(
+      'SELECT usd_ars_rate, dias_entrega_pedido_default, dias_despacho_inmediato, updated_at FROM store_settings WHERE id = 1'
+    )
     res.json({
       usdArsRate: Number(rows[0]?.usd_ars_rate || 1510),
-      diasEntregaPedidoDefault: Number(rows[0]?.dias_entrega_pedido_default || 7),
+      // Días de reposición del proveedor: el plazo de todo producto que no está
+      // en el local. Sigue guardado en dias_entrega_pedido_default para no
+      // duplicar el mismo número en dos columnas.
+      diasReposicion: Number(rows[0]?.dias_entrega_pedido_default || 3),
+      diasDespachoInmediato: Number(rows[0]?.dias_despacho_inmediato || 1),
       updatedAt: rows[0]?.updated_at || null,
     })
   } catch (err) {
@@ -400,26 +406,41 @@ router.get('/currency-settings', async (_req, res) => {
   }
 })
 
-// Plazo por default (en días hábiles) para productos a_pedido que no tienen su
-// propio dias_entrega_pedido cargado. Endpoint separado del de cotización porque
-// no dispara ninguna conversión de precios.
+// Los dos plazos de entrega de la tienda, en días hábiles: cuánto tarda en
+// salir algo que está en el local (dias_despacho_inmediato) y cuánto tarda algo
+// que hay que reponer del proveedor (dias_entrega_pedido_default). Endpoint
+// separado del de cotización porque no dispara ninguna conversión de precios.
 router.patch('/delivery-settings', async (req, res) => {
-  const diasEntregaPedidoDefault = Math.trunc(Number(req.body.diasEntregaPedidoDefault))
-  if (!Number.isFinite(diasEntregaPedidoDefault) || diasEntregaPedidoDefault <= 0) {
-    return res.status(400).json({ error: 'El plazo debe ser un número mayor a cero' })
+  const diasReposicion = Math.trunc(Number(req.body.diasReposicion))
+  const diasDespachoInmediato = Math.trunc(Number(req.body.diasDespachoInmediato))
+  if (!Number.isFinite(diasReposicion) || diasReposicion <= 0) {
+    return res.status(400).json({ error: 'El plazo de reposición debe ser un número mayor a cero' })
+  }
+  // El despacho inmediato sí puede ser 0: "sale hoy mismo" es un caso real.
+  if (!Number.isFinite(diasDespachoInmediato) || diasDespachoInmediato < 0) {
+    return res.status(400).json({ error: 'El plazo de despacho no puede ser negativo' })
+  }
+  if (diasDespachoInmediato > diasReposicion) {
+    return res.status(400).json({ error: 'El despacho inmediato no puede tardar más que la reposición' })
   }
   try {
     const { rows } = await pool.query(
-      `INSERT INTO store_settings (id, dias_entrega_pedido_default, updated_at)
-       VALUES (1, $1, NOW())
-       ON CONFLICT (id) DO UPDATE SET dias_entrega_pedido_default = EXCLUDED.dias_entrega_pedido_default, updated_at = NOW()
-       RETURNING dias_entrega_pedido_default, updated_at`,
-      [diasEntregaPedidoDefault]
+      `INSERT INTO store_settings (id, dias_entrega_pedido_default, dias_despacho_inmediato, updated_at)
+       VALUES (1, $1, $2, NOW())
+       ON CONFLICT (id) DO UPDATE SET dias_entrega_pedido_default = EXCLUDED.dias_entrega_pedido_default,
+                                      dias_despacho_inmediato     = EXCLUDED.dias_despacho_inmediato,
+                                      updated_at = NOW()
+       RETURNING dias_entrega_pedido_default, dias_despacho_inmediato, updated_at`,
+      [diasReposicion, diasDespachoInmediato]
     )
-    res.json({ diasEntregaPedidoDefault: Number(rows[0].dias_entrega_pedido_default), updatedAt: rows[0].updated_at })
+    res.json({
+      diasReposicion: Number(rows[0].dias_entrega_pedido_default),
+      diasDespachoInmediato: Number(rows[0].dias_despacho_inmediato),
+      updatedAt: rows[0].updated_at,
+    })
   } catch (err) {
     console.error('[PATCH /api/products/delivery-settings]', err)
-    res.status(500).json({ error: 'No se pudo guardar el plazo' })
+    res.status(500).json({ error: 'No se pudieron guardar los plazos' })
   }
 })
 
@@ -894,7 +915,7 @@ const FIELD_TRANSFORMS = {
   published:         (v) => Boolean(v),
   is_new:            (v) => Boolean(v),
   best_seller:       (v) => Boolean(v),
-  a_pedido:          (v) => Boolean(v),
+  stock_inmediato:   (v) => Boolean(v),
   dias_entrega_pedido: (v) => (v === null || v === '' ? null : Math.max(1, Math.trunc(Number(v)))),
 }
 const EDITABLE_FIELDS = Object.keys(FIELD_TRANSFORMS)
@@ -931,7 +952,7 @@ router.post('/batch', async (req, res) => {
       return res.status(400).json({ error: 'Acción masiva no válida' })
     }
 
-    const singleFields = ['precio_venta', 'precio_costo', 'published', 'a_pedido']
+    const singleFields = ['precio_venta', 'precio_costo', 'published', 'stock_inmediato']
     const groupFields = ['category', 'subcategory']
     const changes = req.body.changes && typeof req.body.changes === 'object' ? req.body.changes : {}
     const singlePresent = singleFields.filter(field => field in changes)

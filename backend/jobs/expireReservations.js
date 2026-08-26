@@ -1,13 +1,13 @@
 import { pool } from '../db/pool.js'
-import { releaseOrderStock } from '../services/stockReservation.js'
 
 const SWEEP_INTERVAL_MS = 30 * 60 * 1000 // 30 minutos
 
-// ── Barrido de reservas vencidas ─────────────────────────────────────────────
+// ── Barrido de pedidos vencidos ──────────────────────────────────────────────
 // Cubre tanto reservas de retiro a pagar en el local ('reserved', vencen a los
 // pickupDate + 2 días) como pedidos de Mercado Pago abandonados sin pagar
-// ('pending_payment', vencen a los 45 min) — ambos casos dejaron stock
-// reservado en POST /api/orders y necesitan liberarlo si nadie los completó.
+// ('pending_payment', vencen a los 45 min). Ya no libera stock — la tienda dejó
+// de llevarlo (ver products.stock_inmediato) — pero el barrido sigue haciendo
+// falta para que esos pedidos no queden colgados en la lista del admin.
 //
 // El UPDATE ... WHERE status IN (...) AND reservation_expires_at < NOW() es
 // atómico: si un webhook o el admin ya movieron el pedido a otro estado un
@@ -20,11 +20,8 @@ async function sweepExpiredReservations() {
        WHERE status IN ('reserved', 'pending_payment') AND reservation_expires_at < NOW()
        RETURNING id`
     )
-    for (const { id } of rows) {
-      await releaseOrderStock(id)
-    }
     if (rows.length) {
-      console.log(`[expireReservations] ${rows.length} reserva(s) vencida(s), stock liberado`)
+      console.log(`[expireReservations] ${rows.length} pedido(s) vencido(s)`)
     }
   } catch (err) {
     console.error('[expireReservations] Error en el barrido:', err)

@@ -1,9 +1,12 @@
 // Copia para la vista previa del checkout. El backend vuelve a cotizar siempre
 // antes de crear la orden y es la autoridad final sobre el costo.
 
+// `expreso` está fuera de circulación hasta tener una API de envíos real (ver
+// backend/config/shipping.js, que es la autoridad). Con un solo servicio el
+// checkout no muestra selector: elegir entre una opción no es elegir. Volver a
+// agregarlo acá y allá reactiva el selector solo.
 export const SHIPPING_SERVICES = [
   { id: 'clasico', label: 'Clásico' },
-  { id: 'expreso', label: 'Expreso' },
 ]
 
 // Zonas por rango de CP — misma tabla que backend/config/shipping.js. Si

@@ -703,12 +703,14 @@
 .fnx-shipping-methods { margin-top: 22px !important; }
 .fnx-shipping-methods h3 { margin: 0 0 10px; font-size: 12.5px; }
 .fnx-shipping-placeholder { padding: 15px; border-radius: 8px; background: var(--color-surface-2); color: var(--color-text-muted); font-size: 11px; text-align: center; }
-.fnx-shipping-methods > button { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px; border: 1px solid var(--color-border); background: #fff; color: var(--color-text); cursor: pointer; text-align: left; }
+.fnx-shipping-methods > button, .fnx-shipping-methods > .fnx-shipping-single { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px; border: 1px solid var(--color-border); background: #fff; color: var(--color-text); text-align: left; }
+/* El cursor sólo en el botón: con un único servicio la fila es informativa. */
+.fnx-shipping-methods > button { cursor: pointer; }
 .fnx-shipping-methods > button + button { border-top: 0; }
-.fnx-shipping-methods > button.is-active { border-color: var(--color-text); background: #fff; }
-.fnx-shipping-methods > button span { display: flex; flex-direction: column; gap: 3px; font-size: 11px; }
-.fnx-shipping-methods > button small { color: var(--color-text-muted); font-size: 10px; font-weight: 400; }
-.fnx-shipping-methods > button strong { font-size: 11px; white-space: nowrap; }
+.fnx-shipping-methods > button.is-active, .fnx-shipping-methods > .fnx-shipping-single { border-color: var(--color-text); background: #fff; }
+.fnx-shipping-methods > button span, .fnx-shipping-methods > .fnx-shipping-single span { display: flex; flex-direction: column; gap: 3px; font-size: 11px; }
+.fnx-shipping-methods > button small, .fnx-shipping-methods > .fnx-shipping-single small { color: var(--color-text-muted); font-size: 10px; font-weight: 400; }
+.fnx-shipping-methods > button strong, .fnx-shipping-methods > .fnx-shipping-single strong { font-size: 11px; white-space: nowrap; }
 .fnx-delivery-estimate { min-height: 14px; margin: 6px 0 0; color: var(--color-text-muted); font-size: 10px; }
 
 .fnx-section-caption { margin: -7px 0 10px; color: var(--color-text-muted); font-size: 10.5px; }
@@ -1254,6 +1256,37 @@
 .fnx-promo-arrow--previous { left: 8px; }
 .fnx-promo-arrow--next { right: 8px; }
 
+/* Recuento de colores en texto: reemplaza a las miniaturas en mobile, donde
+   no entran a dos columnas. En desktop mandan las miniaturas, que además
+   dejan elegir el color desde la tarjeta. */
+.fnx-product-card__variant-count {
+  display: none;
+}
+
+/* Barra de progreso del carrusel. Sustituye a las flechas en mobile, donde
+   quedaban superpuestas sobre las tarjetas. En desktop no se muestra. */
+.fnx-promo-progress {
+  display: none;
+  position: relative;
+  width: min(46%, 180px);
+  height: 2px;
+  margin: 2px auto 0;
+  border-radius: 2px;
+  background: var(--color-border, #DED6C7);
+}
+
+.fnx-promo-progress__thumb {
+  position: absolute;
+  inset-block: 0;
+  width: 34%;
+  border-radius: 2px;
+  background: var(--color-text, #16110B);
+  /* left + translate del propio ancho: mapea el progreso 0–1 al recorrido del
+     riel sin depender del ancho del pulgar. */
+  left: calc(var(--promo-progress, 0) * 100%);
+  transform: translateX(calc(var(--promo-progress, 0) * -100%));
+}
+
 @media (max-width: 1199px) {
   .fnx-promo-carousel {
     --promo-gap: 24px;
@@ -1297,22 +1330,28 @@
 
   .fnx-promo-carousel {
     --promo-gap: 10px;
-    grid-auto-columns: calc((100% - var(--promo-gap)) / 2);
+    /* 2,25 columnas: la tercera tarjeta asoma. Con dos columnas justas nada
+       delataba que la lista sigue, y el carrusel se leía como una grilla. */
+    grid-auto-columns: calc((100% - (2 * var(--promo-gap))) / 2.25);
     padding-bottom: 6px;
+    /* `mandatory` peleaba con el arrastre a dos columnas: soltar el dedo a
+       mitad de camino tironeaba de vuelta. `proximity` sólo acomoda cuando ya
+       quedó cerca. */
+    scroll-snap-type: x proximity;
   }
 
   .fnx-home-product-image {
     padding: 8px;
   }
 
+  /* En mobile se desliza con el dedo: las flechas sólo tapaban producto. */
   .fnx-promo-arrow {
-    width: 28px;
-    height: 28px;
+    display: none;
   }
 
-  .fnx-promo-arrow svg { width: 13px; height: 13px; }
-  .fnx-promo-arrow--previous { left: 1px; }
-  .fnx-promo-arrow--next { right: 1px; }
+  .fnx-promo-progress {
+    display: block;
+  }
 
   :where(.fnx-promo-slide, .fnx-products-grid) .fnx-product-card__stock {
     top: 6px !important;
@@ -1356,11 +1395,21 @@
     line-height: 1.35 !important;
   }
 
+  /* Las miniaturas de color no entran a dos columnas; en su lugar aparece el
+     recuento en texto, que en desktop está oculto. */
   :where(.fnx-promo-slide, .fnx-products-grid) .fnx-product-card__variants,
   :where(.fnx-promo-slide, .fnx-products-grid) .fnx-product-card__badges,
-  :where(.fnx-promo-slide, .fnx-products-grid) .fnx-product-card__tax,
   :where(.fnx-promo-slide, .fnx-products-grid) .fnx-product-card__reviews {
     display: none !important;
+  }
+
+  :where(.fnx-promo-slide, .fnx-products-grid) .fnx-product-card__variant-count {
+    display: block !important;
+  }
+
+  :where(.fnx-promo-slide, .fnx-products-grid) .fnx-product-card__tax {
+    font-size: 10px !important;
+    line-height: 1.3;
   }
 
   :where(.fnx-promo-slide, .fnx-products-grid) .fnx-product-card__installments {

@@ -66,7 +66,7 @@ function useFilterParams(priceMax) {
   const selectedCategories = searchParams.getAll('category')
   const sub                = searchParams.get('sub') || ''
   const productType        = searchParams.get('ctype') || searchParams.get('type') || ''
-  const onlyInStock        = searchParams.get('stock') === '1'
+  const onlyEntregaInmediata = searchParams.get('inmediato') === '1'
   const sortBy             = searchParams.get('sort') || 'default'
   const minPrice           = Math.max(PRICE_MIN, Number(searchParams.get('min')) || PRICE_MIN)
   const maxPrice           = Math.min(priceMax, Number(searchParams.get('max')) || priceMax)
@@ -126,11 +126,11 @@ function useFilterParams(priceMax) {
   }
 
   const hasActiveFilters =
-    query !== '' || selectedCategories.length > 0 || sub !== '' || productType !== '' || onlyInStock ||
+    query !== '' || selectedCategories.length > 0 || sub !== '' || productType !== '' || onlyEntregaInmediata ||
     sortBy !== 'default' || minPrice > PRICE_MIN || maxPrice < priceMax ||
     selectedColorTemps.length > 0 || selectedIPs.length > 0
 
-  return { query, selectedCategories, sub, productType, onlyInStock, sortBy, minPrice, maxPrice, priceMax, selectedColorTemps, selectedIPs, set, setSub, setProductType, toggleCategory, toggleMulti, clearAll, selectCategory, hasActiveFilters }
+  return { query, selectedCategories, sub, productType, onlyEntregaInmediata, sortBy, minPrice, maxPrice, priceMax, selectedColorTemps, selectedIPs, set, setSub, setProductType, toggleCategory, toggleMulti, clearAll, selectCategory, hasActiveFilters }
 }
 
 // ─── Breadcrumb + title ────────────────────────────────────────────────────────
@@ -238,8 +238,8 @@ export default function Products() {
       list = list.filter(p => p.subcategory === filters.sub)
     if (filters.productType)
       list = list.filter(p => (p.productType || p.cableType) === filters.productType)
-    if (filters.onlyInStock)
-      list = list.filter(p => p.inStock)
+    if (filters.onlyEntregaInmediata)
+      list = list.filter(p => p.stockInmediato)
     if (filters.selectedColorTemps.length > 0)
       list = list.filter(p => p.colorTemp != null && filters.selectedColorTemps.includes(p.colorTemp))
     if (filters.selectedIPs.length > 0)
@@ -251,7 +251,7 @@ export default function Products() {
       case 'name-az':    return [...list].sort((a, b) => a.name.localeCompare(b.name, 'es'))
       default:           return list
     }
-  }, [products, filters.query, filters.selectedCategories, filters.sub, filters.productType, filters.onlyInStock, filters.sortBy, filters.minPrice, filters.maxPrice, filters.selectedColorTemps, filters.selectedIPs])
+  }, [products, filters.query, filters.selectedCategories, filters.sub, filters.productType, filters.onlyEntregaInmediata, filters.sortBy, filters.minPrice, filters.maxPrice, filters.selectedColorTemps, filters.selectedIPs])
 
   const seoCategory = filters.selectedCategories.length === 1 ? filters.selectedCategories[0] : null
   const seoTitle = seoCategory
@@ -685,23 +685,23 @@ function FilterPanel({ filters, products }) {
         </div>
         <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }}>
           <span style={{ fontFamily: "var(--font-sans)", fontSize: 13.5, color: T.ink }}>
-            Solo disponibles
+            Solo entrega inmediata
           </span>
           <div
-            onClick={() => filters.set('stock', filters.onlyInStock ? null : '1')}
+            onClick={() => filters.set('inmediato', filters.onlyEntregaInmediata ? null : '1')}
             style={{
               position: 'relative', width: 38, height: 22, borderRadius: 11,
-              background: filters.onlyInStock ? T.ink : T.surface2,
+              background: filters.onlyEntregaInmediata ? T.ink : T.surface2,
               border: `1px solid ${T.hairlineStrong}`,
               cursor: 'pointer', transition: 'background .2s',
             }}
-            role="switch" aria-checked={filters.onlyInStock}
+            role="switch" aria-checked={filters.onlyEntregaInmediata}
           >
             <div style={{
               position: 'absolute', top: 2,
               width: 16, height: 16, borderRadius: '50%',
               background: '#fff', boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
-              transform: filters.onlyInStock ? 'translateX(18px)' : 'translateX(2px)',
+              transform: filters.onlyEntregaInmediata ? 'translateX(18px)' : 'translateX(2px)',
               transition: 'transform .2s',
             }} />
           </div>

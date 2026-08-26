@@ -800,3 +800,51 @@ CREATE TRIGGER arca_parameter_cache_updated_at
 -- Se agrega al final como migracion compatible para instalaciones existentes.
 ALTER TABLE invoices
   ADD COLUMN IF NOT EXISTS iva_breakdown JSONB NOT NULL DEFAULT '[]'::jsonb;
+
+-- ── Disponibilidad: reemplaza el control de stock por producto ───────────────
+-- El mismo inventario físico se vende en el mostrador y online, sin POS que los
+-- sincronice, así que cualquier número de stock queda viejo en días — y stock
+-- equivocado es peor que no tener stock: bloquea ventas posibles o promete lo
+-- que no está. Con reposición de proveedor de ~3 días, lo único que el cliente
+-- necesita saber es el plazo de entrega. Esta bandera invierte el eje de
+-- `a_pedido`: por defecto un producto se repone (FALSE) y el admin marca a mano
+-- los que puede despachar enseguida.
+--
+-- `stock`, `variant_stock` y product_variant_rules.stock quedan intactos y sin
+-- uso: la tienda dejó de leerlos y la reserva transaccional está apagada, pero
+-- el dato sigue ahí por si más adelante se vuelve a llevar stock de un
+-- subconjunto del catálogo.
+--
+-- El backfill corre una sola vez, dentro del mismo IF que crea la columna, para
+-- que el catálogo no arranque entero como "reposición" y para no pisar después
+-- las marcas que el admin haya hecho a mano.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'products' AND column_name = 'stock_inmediato'
+  ) THEN
+    ALTER TABLE products ADD COLUMN stock_inmediato BOOLEAN NOT NULL DEFAULT FALSE;
+    UPDATE products SET stock_inmediato = TRUE WHERE stock > 0;
+  END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_products_stock_inmediato ON products(stock_inmediato);
+
+-- Días hábiles entre la compra y el despacho cuando el producto SÍ está en el
+-- local. Configurable porque depende de cómo trabaja el negocio, no del código
+-- (misma regla que el umbral de envío gratis).
+ALTER TABLE store_settings ADD COLUMN IF NOT EXISTS dias_despacho_inmediato INTEGER NOT NULL DEFAULT 1;
+
+-- `dias_entrega_pedido_default` pasa a significar "días hábiles de reposición
+-- del proveedor" — el plazo de todo producto sin stock inmediato. Se reusa la
+-- columna en vez de crear otra para no dejar dos fuentes de verdad del mismo
+-- número. `products.dias_entrega_pedido` sigue siendo el override por producto,
+-- para el proveedor puntual que tarda más que el resto.
+
+-- Extremo superior de la ventana de entrega. `estimated_delivery_date` pasa a
+-- ser el extremo inferior: la tienda dejó de prometer un día exacto porque el
+-- tránsito varía según la localidad dentro de cada zona de CP, y una fecha
+-- inventada con esa precisión es justamente la que genera el reclamo.
+-- Los pedidos anteriores tienen NULL acá y se siguen mostrando con su fecha única.
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS estimated_delivery_max_date DATE;

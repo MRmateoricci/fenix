@@ -170,8 +170,10 @@ export default function OverviewDashboard({ products, onNavigate }) {
       order.delivery_type === 'pickup'
       && ['reserved', ...ACTIVE_STATUSES].includes(order.status)
     )
-    const lowStock = products.filter((product) => product.inStock && product.stock != null && product.stock <= 5)
-    const outOfStock = products.filter((product) => !product.inStock)
+    // Ya no se cuentan unidades. Lo único accionable del catálogo es cuánto
+    // está publicado sin poder despacharse enseguida: no es un error, pero le
+    // dice al dueño cuánto de su vidriera depende del proveedor.
+    const aReposicion = products.filter((product) => !product.stockInmediato)
     let chartValues
     let chartLabels
     if (periodMode === 'month') {
@@ -218,7 +220,7 @@ export default function OverviewDashboard({ products, onNavigate }) {
 
     return {
       periodSales, periodOrders, revenue, averageTicket, ordersToShip, pickupsToManage,
-      lowStock, outOfStock, chartValues, chartLabels, statusGroups,
+      aReposicion, chartValues, chartLabels, statusGroups,
       revenueTrend: percentageChange(revenue, previousRevenue),
       ordersTrend: percentageChange(periodSales.length, previousSales.length),
       ticketTrend: percentageChange(averageTicket, previousAverage),
@@ -368,12 +370,11 @@ export default function OverviewDashboard({ products, onNavigate }) {
           ) : <EmptyState text="Todavía no hay pedidos registrados." />}
         </Panel>
 
-        <Panel title="Atención requerida" subtitle="Pendientes operativos e inventario">
+        <Panel title="Atención requerida" subtitle="Pendientes operativos y disponibilidad">
           <div className="adm-attention-list">
             <AttentionItem label="Pedidos a enviar" value={data.ordersToShip.length} tone={C.blue} onClick={() => onNavigate('orders')} />
             <AttentionItem label="Retiros en el local" value={data.pickupsToManage.length} tone={C.amber} onClick={() => onNavigate('orders')} />
-            <AttentionItem label="Productos con stock bajo" value={data.lowStock.length} tone={C.amberDark} onClick={() => onNavigate('products')} />
-            <AttentionItem label="Productos sin stock" value={data.outOfStock.length} tone={C.red} onClick={() => onNavigate('products')} />
+            <AttentionItem label="Productos a reposición" value={data.aReposicion.length} tone={C.amberDark} onClick={() => onNavigate('products')} />
           </div>
         </Panel>
       </div>

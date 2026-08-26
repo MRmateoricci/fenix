@@ -133,15 +133,28 @@ Si agregás un valor que el cliente pueda querer cambiar, va acá, no en el JSX.
 - Ese valor debe estar sincronizado con lo configurado en el panel de comerciante
   de MP. Si difieren, el cliente ve una promesa que el checkout no cumple.
 
-### 4.4 Stock y variantes
+### 4.4 Disponibilidad y variantes
 
-- Los productos pueden tener tres ejes de variante: **color**, **medida** y **tono de
-  luz**. `variant_stock` (JSONB) guarda stock por combinación exacta.
-- `variant_stock` vacío (`{}`) = el producto usa la columna `stock` plana. Cuando se
-  carga, `stock` pasa a ser la suma de todas las celdas.
-- `stockReservation.js` descuenta stock **dentro de la transacción del pedido**. Si un
-  item falla, tira `InsufficientStockError` y el caller hace ROLLBACK — no quedan
-  descuentos a medias.
+- **La tienda no lleva stock.** El mismo inventario se vende en el mostrador y online
+  sin POS que los sincronice, así que los números quedaban viejos en días. La
+  disponibilidad es una bandera por producto: `products.stock_inmediato`.
+- **Todo lo publicado es comprable.** La única palanca para sacar algo de venta es
+  `published = false`. No agregar condiciones de compra basadas en cantidades.
+- Lo único que cambia entre un producto y otro es el **plazo**: `dias_despacho_inmediato`
+  si está en el local, `dias_entrega_pedido` ?? `dias_entrega_pedido_default` si hay que
+  reponerlo. `routes/catalog.js` ya lo resuelve y lo expone como `diasEntrega` — no
+  recombinar bandera + settings + override en el frontend.
+- La redacción de plazos vive en `src/utils/plazoEntrega.js`. Usarla, no escribir
+  frases nuevas: si cada pantalla redacta la suya, el cliente lee dos promesas
+  distintas del mismo pedido.
+- La disponibilidad es **por producto, no por variante**. No reconstruir una matriz de
+  disponibilidad por color/medida/tono: es exactamente lo que se sacó.
+- Los productos siguen teniendo tres ejes de variante (**color**, **medida**, **tono de
+  luz**) para precio, imagen y ficha. `variant_stock` sigue existiendo en la base pero
+  **sin uso**.
+- `stockReservation.js` está **fuera de servicio**. Si alguna vez se reactiva, reserva y
+  liberación se prenden **juntas**: con una sola de las dos, cada pedido cancelado
+  descuadra el stock de forma permanente.
 
 ### 4.5 Envíos
 
@@ -179,9 +192,11 @@ hay funcionalidad completa que no es obvia desde el nombre del archivo. Un
 
 Ejemplos de cosas que ya están hechas y podrían parecer pendientes:
 
-- Productos a pedido (`a_pedido`) — schema, admin, badge, página y carrusel del home
+- Disponibilidad por producto (`stock_inmediato`) — schema, admin, chip, filtro del
+  catálogo y página `/entrega-inmediata`
 - Cupones de descuento — tabla, endpoints, sección de admin
-- Alertas de stock ("avisame cuando vuelva")
+- Alertas de stock ("avisame cuando vuelva") — tabla y endpoints existen pero están
+  **fuera de uso**: si todo lo publicado es comprable, no hay "vuelta" que avisar
 - Reseñas propias **y** reseñas de Google Places
 - Import de listas de precios desde XLSX y desde PDF de factura
 - Import masivo de imágenes de catálogo con revisión y autoguardado de borrador

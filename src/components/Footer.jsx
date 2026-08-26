@@ -47,6 +47,7 @@ export default function Footer() {
                 tienda
               </span>
               <Link to="/products" style={LINK} onMouseEnter={enter} onMouseLeave={leave}>Catálogo</Link>
+              <Link to="/entrega-inmediata" style={LINK} onMouseEnter={enter} onMouseLeave={leave}>Entrega inmediata</Link>
               <a
                 href="#destacados"
                 style={LINK}

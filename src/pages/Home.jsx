@@ -153,6 +153,7 @@ export default function Home() {
       <div style={{ position: 'relative' }}>
         <CategoriasSection />
         <DestacadosSection />
+        <NovedadesSection />
         <MostSearchedSection />
         <HistoriaSection />
         <ResenasSection />
@@ -640,6 +641,38 @@ function DestacadosSection() {
   )
 }
 
+// Novedades — se alimenta de la misma bandera `is_new` que ya pinta la etiqueta
+// "Nuevo" en la tarjeta, en vez de agregar una segunda lista curada. Con dos
+// listas separadas el producto termina etiquetado como nuevo pero fuera de la
+// sección, o al revés, y nadie se acuerda de sincronizarlas.
+function NovedadesSection() {
+  const { products } = useAdmin()
+  const novedades = products.filter((product) => product.isNew)
+
+  if (novedades.length === 0) return null
+
+  return (
+    <section
+      id="novedades"
+      className="fnx-home-product-section"
+      style={{
+        margin: 0,
+        padding: '14px 24px',
+        scrollMarginTop: 90,
+      }}
+    >
+      <Reveal>
+        <div className="fnx-tonal-product-section">
+          <div className="fnx-tonal-product-section__header">
+            <h2 className="fnx-tonal-product-section__title">Novedades</h2>
+          </div>
+          <InfiniteProductCarousel products={novedades} label="Novedades" />
+        </div>
+      </Reveal>
+    </section>
+  )
+}
+
 function MostSearchedSection() {
   const { products } = useAdmin()
   const [bestSellerIds, setBestSellerIds] = useState([])
@@ -693,6 +726,10 @@ function InfiniteProductCarousel({ products, label }) {
   const carouselRef = useRef(null)
   const normalizeTimer = useRef(null)
   const [canScroll, setCanScroll] = useState(false)
+  // Progreso del scroll para la barrita de mobile, donde no hay flechas. Es
+  // el único indicio de cuánto queda por deslizar: sin él, con el carrusel en
+  // loop infinito el dedo no tiene referencia de dónde está parado.
+  const [progress, setProgress] = useState(0)
   const shouldLoop = products.length > 5
   const carouselProducts = shouldLoop
     ? Array.from({ length: 3 }, () => products).flat()
@@ -727,7 +764,18 @@ function InfiniteProductCarousel({ products, label }) {
       if (metrics) jumpTo(metrics.middleStart)
     }
 
+    function updateProgress() {
+      const metrics = getMetrics()
+      // En loop el recorrido útil es un set; sin loop, el ancho sobrante.
+      const span = metrics ? metrics.setWidth : carousel.scrollWidth - carousel.clientWidth
+      if (!span || span <= 0) { setProgress(0); return }
+      const offset = metrics ? carousel.scrollLeft - metrics.middleStart : carousel.scrollLeft
+      // El módulo mantiene la barra dentro de 0–1 mientras el loop reposiciona.
+      setProgress(((offset % span) + span) % span / span)
+    }
+
     function normalizePosition() {
+      updateProgress()
       if (!shouldLoop) return
       clearTimeout(normalizeTimer.current)
       normalizeTimer.current = setTimeout(() => {
@@ -787,6 +835,14 @@ function InfiniteProductCarousel({ products, label }) {
       >
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9.5 5 7 7-7 7" /></svg>
       </button>
+      {canScroll && (
+        <div className="fnx-promo-progress" aria-hidden="true">
+          <span
+            className="fnx-promo-progress__thumb"
+            style={{ '--promo-progress': progress }}
+          />
+        </div>
+      )}
     </div>
   )
 }

@@ -7,8 +7,8 @@
 > Si el cambio merece un commit con mensaje propio, merece una entrada acá.
 > Un ajuste de padding, no.
 
-**Última actualización:** 24 de agosto de 2026
-**Commit de referencia:** `888df54` + cambios locales de esta tanda
+**Última actualización:** 26 de agosto de 2026
+**Commit de referencia:** `f9b29fc` + cambios locales de esta tanda
 
 ---
 
@@ -20,17 +20,17 @@
 | Panel de administración | ✅ Funcionando | 7 secciones |
 | Importación de listas de precios | ✅ Funcionando | XLSX + PDF de factura |
 | Importación de imágenes de catálogo | ✅ Funcionando | Con revisión y borrador |
-| Variantes (color × medida × tono) | ✅ Funcionando | Stock por combinación exacta |
+| Variantes (color × medida × tono) | ✅ Funcionando | Precio e imagen por combinación; el stock por celda quedó sin uso |
 | Carrito y checkout | ✅ Funcionando | Mercado Pago + datos fiscales dinámicos A/B/C |
-| Cotización de envío | 🟡 Provisorio | Tarifario manual por zona |
+| Cotización de envío | 🟡 Provisorio | Tarifario manual por zona · plazos de tránsito propios (Shipnow) |
 | Envío gratis por monto | ✅ Funcionando | Umbral por env var |
 | Cupones de descuento | ✅ Funcionando | |
 | Cuentas de cliente | ✅ Funcionando | Email + OAuth Google/Facebook |
 | Pedidos y seguimiento | ✅ Funcionando | Con notificaciones por mail |
 | Reseñas | ✅ Funcionando | Propias + Google Places |
-| Alertas de stock | ✅ Funcionando | "Avisame cuando vuelva" |
+| Alertas de stock | ⚪ Fuera de uso | Tabla y endpoints intactos, formulario retirado de la ficha |
 | Newsletter | ✅ Funcionando | |
-| Productos a pedido | ✅ Funcionando | Compra sin stock con plazo de entrega — ver detalle abajo |
+| Disponibilidad y plazos | ✅ Funcionando | Reemplazó al control de stock y a "productos a pedido" — ver detalle abajo |
 | SEO | ✅ Funcionando | Helmet + sitemap + robots |
 | Facturación electrónica ARCA | 🟡 Implementada, producción bloqueada | A/B para RI y C para Monotributo; falta confirmar habilitación A real de Fenix |
 
@@ -67,38 +67,70 @@ reasignar categoría/subcategoría a los productos seleccionados en una sola
 transacción (`POST /api/products/batch`, acción `category`), sumada a las
 acciones de precio/publicación/"a pedido" que ya existían.
 
-### Productos a pedido
+### Disponibilidad y plazos de entrega
 
-`a_pedido` ya no es una etiqueta suelta: significa "este producto se consigue a
-pedido cuando no hay stock inmediato", y cambia si el producto se puede comprar.
+**La tienda no lleva stock.** El mismo inventario físico se vende en el mostrador
+y online sin POS que los sincronice, así que cualquier número quedaba viejo en
+días — y stock equivocado es peor que no tener stock: bloquea ventas posibles o
+promete lo que no está. Con reposición de proveedor de ~3 días, lo único que el
+cliente necesita saber es el plazo de entrega.
 
-| Estado | Condición | Comportamiento |
+**Todo lo publicado se puede comprar.** La única palanca para sacar algo de venta
+es `published = false`.
+
+| Marca | Qué significa | Plazo que ve el cliente |
 |---|---|---|
-| En stock | `stock > 0` | Sin cambios |
-| A pedido | `stock = 0` y `a_pedido = true` | Comprable, muestra plazo de entrega |
-| Sin stock | `stock = 0` y `a_pedido = false` | No comprable, alerta de stock |
+| `stock_inmediato = true` | Está en el local | `store_settings.dias_despacho_inmediato` (default 1) |
+| `stock_inmediato = false` | Se pide al proveedor | `products.dias_entrega_pedido` ?? `store_settings.dias_entrega_pedido_default` (default 3) |
 
-- `products.a_pedido BOOLEAN NOT NULL DEFAULT FALSE` (`schema.sql:260`)
-- `products.dias_entrega_pedido INTEGER` nullable — override por producto; si es
-  `NULL` se usa `store_settings.dias_entrega_pedido_default` (`schema.sql:260-343`)
-- Expuesto como `aPedido` / `diasEntregaPedido` en `routes/catalog.js`
-- Backend acepta la compra sin stock: `stockReservation.js` deja el stock en negativo
-  cuando `a_pedido = true`, leído siempre de la DB dentro de la misma transacción
-  (nunca de un dato mandado por el cliente). Marca `item.aPedido` en la orden solo
-  para los items que efectivamente usaron la excepción
-- Toggle + input de días en el admin (`AdminDashboard.jsx` ~1076), default global
-  editable en la pestaña Tienda
-- Ficha de producto: badge de tres estados, bloque de plazo, CTA activo con
-  "Agregar al carrito · a pedido", alerta de stock oculta cuando es a pedido
-  (`ProductDetail.jsx`)
-- Card, carrito, checkout y mail de confirmación muestran el plazo (el mayor entre
-  los items a pedido del pedido, no una suma)
-- Página `/productos-a-pedido` y carrusel del home filtran por `!inStock && aPedido`
+- `products.stock_inmediato BOOLEAN NOT NULL DEFAULT FALSE`, con backfill único
+  `stock > 0 → TRUE` dentro del mismo `IF` que crea la columna (final de `schema.sql`)
+- `store_settings.dias_despacho_inmediato` nuevo; `dias_entrega_pedido_default`
+  se reusó como "días de reposición" en vez de crear otra columna con el mismo número
+- `routes/catalog.js` resuelve el plazo en SQL y lo expone como `stockInmediato` /
+  `diasEntrega`: ningún componente combina bandera + settings + override por su cuenta
+- La disponibilidad es **por producto, no por variante**. A 3 días de reposición no
+  vale la pena una matriz que nadie va a poder mantener
+- `src/utils/plazoEntrega.js` es la única redacción de plazos, compartida por ficha,
+  carrito, drawer y checkout, para que no digan cosas distintas del mismo pedido
+- La estimación de entrega ya no suma un buffer fijo: `estimateDeliveryDate` recibe
+  el mayor plazo de preparación del carrito (máximo, nunca suma — se despacha junto)
 
-**Pendiente:** el selector de cantidad en `ProductDetail.jsx` sigue limitado a 1
-para items a pedido (el stepper usa `availableStock`, que es 0) — el backend ya
-soporta cantidades mayores en backorder, falta habilitarlo en la UI si se necesita.
-Verificación en mobile pendiente (no confiable con `resize_window` en este proyecto).
+**Qué se apagó, sin borrar nada:**
+
+- `stock`, `variant_stock` y `product_variant_rules.stock` quedan en la base, con el
+  `stock` plano todavía editable desde el inventario del admin
+- `stockReservation.js` quedó fuera de servicio con un encabezado que lo explica.
+  Reserva y liberación se apagaron **juntas**: con una sola de las dos, cada pedido
+  cancelado descuadra el stock de forma permanente. Si se reactiva, se reactivan juntas
+- `jobs/expireReservations.js` sigue venciendo pedidos colgados, ya sin liberar stock
+- El formulario de "avisame cuando vuelva" salió de la ficha; la tabla `stock_alerts`
+  y sus endpoints quedan intactos
+
+**Dónde se ve un plazo (2026-08-26, ajuste posterior):** en ningún lugar de la
+navegación. Ni chip en la tarjeta, ni chip ni línea en la ficha, ni aviso en el
+carrito o el drawer. Antes de conocer el domicilio cualquier número es incompleto,
+y adelantarlo espanta compras que igual llegaban a tiempo.
+
+Quedan exactamente dos lugares:
+
+1. **Checkout con envío** — dentro de "Entrega estimada: <fecha>", que ya combina
+   preparación + correo. No se repite el plazo suelto al lado: serían dos números
+   distintos diciendo lo mismo.
+2. **Checkout con retiro en local** — una línea con el plazo de preparación, porque
+   ahí no hay fecha de envío que lo cubra.
+
+Más el resumen del pedido ya hecho (`OrderItemsBlock`), donde el cliente ya compró
+y necesita saber cuándo lo tiene.
+
+`schema.org` sigue pasando a `InStock` / `BackOrder`. La marca `stock_inmediato`
+se sigue exponiendo de forma agrupada: página `/entrega-inmediata` (era
+`/productos-a-pedido`, huérfana; ahora linkeada desde el footer, con la ruta vieja
+redirigiendo) y filtro "solo entrega inmediata" en el catálogo.
+
+**Pendiente:** verificación en mobile en dispositivo real (no confiable con
+`resize_window` en este proyecto). Aplicar el schema en producción (`npm run
+db:migrate`) — no se corrió desde acá.
 
 ### Precios
 
@@ -120,6 +152,49 @@ Fuentes de precio soportadas: `catalog`, `price_list`, `sale`, `purchase`, `manu
 confirmadas, así una relación se revisa una sola vez.
 
 ### Envíos
+
+**Ventana de entrega, no una fecha (2026-08-26).** El checkout dice "Llega entre
+el 3 y el 8 de septiembre", no "Entrega estimada: 3 de septiembre". El tránsito
+varía según la localidad exacta dentro de cada zona de CP y esa granularidad no
+se conoce desde el código postal: un día exacto es precisión inventada, y la
+fecha inventada es la que después genera el reclamo.
+
+- `TRANSIT_BUSINESS_DAYS` en `backend/config/shipping.js`: `{ min, max }` de días
+  hábiles por zona, con los valores del tarifario de tránsito de Shipnow (que da
+  capital y "otras zonas" por provincia). El `min` es la capital más rápida de la
+  zona, el `max` la localidad más lenta.
+- Se resuelve **por CP, no por la provincia del formulario**: `provincia` es un
+  input de texto libre ("Bs As", "caba", "Buenos aires"); el CP ya está validado
+  y es el mismo dato con el que se cotiza el precio.
+- Buenos Aires y CABA no están en ese tarifario (se despacha desde City Bell):
+  Gran La Plata 1-3, CABA y GBA 2-3, interior de BA 3-5.
+- `TRANSIT_OVERRIDES` cubre destinos que romperían el rango de su zona. Hoy sólo
+  Tierra del Fuego (CP 9400-9499, 12-14 días): dentro de Patagonia dejaría a toda
+  la región mostrando "entre 3 y 14 días", que no le sirve a nadie.
+- El plazo de preparación se suma a **los dos extremos** — ocurre antes del envío
+  en cualquier escenario.
+- `orders.estimated_delivery_max_date` guarda el extremo superior;
+  `estimated_delivery_date` pasó a ser el inferior. Los pedidos anteriores tienen
+  NULL en la nueva y se siguen mostrando con su fecha única, en la web, el mail y
+  el admin.
+
+**`expreso` está fuera de circulación (2026-08-26).** Sin una API de envíos real
+no había con qué justificar que llegara antes: mostraba la misma ventana de
+entrega que el clásico, por más plata. `SHIPPING_SERVICES` quedó en `['clasico']`
+y con eso deja de cotizarse, validarse y ofrecerse.
+
+- Los precios `expreso` siguen en `SHIPPING_ZONES` y en `LARGE_PACKAGE_RATE`:
+  reactivarlo es agregarlo a `SHIPPING_SERVICES` en los dos config (backend y
+  `src/config/shipping.js`).
+- Con un solo servicio el checkout **no muestra selector** — elegir entre una
+  opción no es elegir. El costo se sigue mostrando como fila informativa. El
+  selector vuelve solo cuando la lista tenga más de un elemento.
+- `normalizeShippingService()` cubre el reintento de pedidos viejos: un pedido
+  guardado como `expreso` llenaría el formulario con un servicio que el backend
+  después rechaza. Cae al vigente.
+- Los pedidos históricos conservan `shipping_service = 'expreso'` y se muestran
+  tal cual en el mail, el admin y el detalle del pedido.
+
 
 **Estado actual: tarifario manual por zona** (`backend/config/shipping.js`).
 
@@ -268,13 +343,15 @@ alícuotas, ejecutar solo las consultas productivas seguras y validar el punto d
 - Favoritos, historial de pedidos, seguimiento por número de pedido
 - Mails transaccionales vía Gmail SMTP: confirmación de pedido, verificación de cuenta,
   invitación a dejar reseña, aviso al admin de pedido nuevo
-- Alertas de stock: el cliente deja su mail y se le avisa cuando el producto vuelve
+- Alertas de stock: fuera de uso desde el cambio de modelo de disponibilidad — si todo
+  lo publicado es comprable, no hay "vuelta" que avisar. Tabla y endpoints intactos
 - Reseñas propias moderables + reseñas reales de Google Places (límite de 5 de la API)
 
-### Reserva y expiración de stock
+### Expiración de pedidos
 
-`stockReservation.js` descuenta stock dentro de la transacción del pedido.
-`jobs/expireReservations.js` libera reservas vencidas.
+`jobs/expireReservations.js` marca como `expired` los pedidos de retiro sin pagar
+y los de Mercado Pago abandonados. Ya no libera stock — ver *Disponibilidad y
+plazos de entrega*.
 
 ### Barra de anuncios (announcement bar)
 
@@ -335,6 +412,53 @@ Links: envío → `/policies/shipping` (página real). Cuotas → `/faq#medios-d
 ---
 
 ## Bitácora
+
+### 2026-08-26 · Se retira el envío expreso
+
+Con el tarifario manual, expreso y clásico mostraban la misma ventana de entrega:
+el cliente pagaba más por la misma fecha. Se retira hasta tener una API de envíos
+que confirme un tránsito distinto.
+
+Se apagó desde `SHIPPING_SERVICES` en vez de borrar la columna de precios, así
+volver a prenderlo es una línea. Lo que sí hubo que agregar es
+`normalizeShippingService()`: un pedido viejo guardado como `expreso` reconstruía
+el checkout con ese valor y el POST siguiente lo rechazaba.
+
+### 2026-08-26 · Entrega como ventana, con tránsito real por zona
+
+El checkout prometía un día exacto calculado con un tránsito fijo de 5 días para
+todo el país. Ahora muestra "Llega entre el X y el Y", con los días hábiles de
+tránsito del tarifario de Shipnow por zona de CP (ver *Envíos*).
+
+Dos decisiones que valen la pena recordar: el plazo se resuelve por CP y no por
+el campo `provincia` (que es texto libre y no se puede parsear con confianza), y
+Tierra del Fuego quedó como excepción explícita porque sus 12-14 días arrastraban
+el rango de toda la Patagonia.
+
+**Pendiente relacionado:** medir el tiempo real de despacho (pago → estado
+`shipped`) para saber si el plazo de preparación configurado a mano se parece a
+la realidad. Hoy es un número que el dueño estima, sin nada que lo contraste.
+
+### 2026-08-26 · La tienda deja de llevar stock
+
+Decisión del dueño: el inventario físico se vende en el mostrador y online sin POS
+que los sincronice, y el proveedor repone en ~3 días. Llevar stock por SKU (y peor,
+por color × medida × tono) era imposible de mantener, y un número viejo bloquea
+ventas o promete lo que no está.
+
+Se invirtió el eje: `a_pedido` era una excepción sobre el stock; ahora
+`stock_inmediato` es la marca primaria y el stock desapareció de la venta. Todo lo
+publicado es comprable; lo único que cambia entre un producto y otro es el plazo.
+
+Se apagaron **juntas** la reserva y la liberación de stock — con una sola de las
+dos, cada pedido cancelado descuadra el stock para siempre. `stockReservation.js`,
+las columnas de stock y `stock_alerts` quedan en su lugar, sin uso y documentados.
+
+De regalo: `/productos-a-pedido` (huérfana, nunca linkeada) pasó a ser
+`/entrega-inmediata`, y el filtro "solo disponibles" del catálogo pasó a "solo
+entrega inmediata" — mismo mecanismo, sentido comercial opuesto. También salió del
+código el `STOCK_BUFFER_BUSINESS_DAYS = 3` hardcodeado que se sumaba a *toda*
+estimación de entrega.
 
 ### 2026-08-24 · Consulta de CUIT para Factura A
 

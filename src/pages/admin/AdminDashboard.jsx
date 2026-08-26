@@ -59,6 +59,16 @@ const fmtUsd = n =>
 const fmtPickupDate = (d) =>
   new Date(d).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: '2-digit' })
 
+// La entrega es una ventana, no un día. Los pedidos anteriores al cambio sólo
+// tienen el extremo inferior y se siguen mostrando con esa fecha sola.
+const fmtVentanaEntrega = (order) => {
+  const desde = order.estimated_delivery_date
+  const hasta = order.estimated_delivery_max_date
+  if (!desde) return null
+  if (!hasta || String(desde).slice(0, 10) === String(hasta).slice(0, 10)) return fmtPickupDate(desde)
+  return `${fmtPickupDate(desde)} - ${fmtPickupDate(hasta)}`
+}
+
 const pct = (price, original) =>
   original ? Math.round((1 - price / original) * 100) : 0
 
@@ -745,8 +755,8 @@ const EMPTY = {
   description: '', image: '', hoverImage: '', galleryImages: [],
   watts: '', amperes: '',
   lengthCm: '', widthCm: '', heightCm: '', weightKg: '',
-  inStock: true, stock: '', colors: [], sizes: [], tones: [], variantStock: {}, variantRules: [],
-  published: true, isNew: false, bestSeller: false, aPedido: false, diasEntregaPedido: '',
+  stock: '', colors: [], sizes: [], tones: [], variantStock: {}, variantRules: [],
+  published: true, isNew: false, bestSeller: false, stockInmediato: false, diasEntregaPedido: '',
 }
 
 // Normaliza una fila de la API para editar todos sus datos en un único modal.
@@ -769,7 +779,7 @@ function draftFromInventoryRow(inv) {
     price:       inv.precio_venta ?? inv.precio_costo ?? '',
     originalPrice: inv.original_price ?? '',
     stock:       inv.stock ?? '',
-    inStock:     inv.stock > 0,
+
     image:       inv.image_url || '',
     hoverImage:  inv.hover_image_url || '',
     galleryImages: Array.isArray(inv.gallery_images) ? inv.gallery_images : [],
@@ -791,7 +801,7 @@ function draftFromInventoryRow(inv) {
     published:   Boolean(inv.published),
     isNew:       Boolean(inv.is_new),
     bestSeller:  Boolean(inv.best_seller),
-    aPedido:     Boolean(inv.a_pedido),
+    stockInmediato: Boolean(inv.stock_inmediato),
     diasEntregaPedido: inv.dias_entrega_pedido ?? '',
   }
 }
@@ -832,7 +842,7 @@ function toUnifiedProductPayload(data) {
     published: Boolean(data.published),
     is_new: Boolean(data.isNew),
     best_seller: Boolean(data.bestSeller),
-    a_pedido: Boolean(data.aPedido),
+    stock_inmediato: Boolean(data.stockInmediato),
     dias_entrega_pedido: data.diasEntregaPedido === '' || data.diasEntregaPedido == null ? null : Number(data.diasEntregaPedido),
   }
   if (data.stock !== undefined) payload.stock = data.stock === '' ? 0 : Number(data.stock)
@@ -1096,7 +1106,7 @@ function ProductModal({ product, onSave, onClose, onVariantsChanged, publishOnSa
     out.price = variantSummary.sale === '' ? null : variantSummary.sale
     out.priceWithTax = variantSummary.tax === '' ? null : variantSummary.tax
     out.stock = variantSummary.stock
-    out.inStock = out.stock > 0
+
     out.image = primaryRule?.image || form.image || null
     out.hoverImage = primaryData.hoverImage || form.hoverImage || null
     out.originalPrice = form.originalPrice ? Number(form.originalPrice) : null
@@ -1272,25 +1282,34 @@ function ProductModal({ product, onSave, onClose, onVariantsChanged, publishOnSa
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-                <label style={lbl}>Producto "A pedido"</label>
+                <label style={lbl}>Stock inmediato</label>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, height: 38 }}>
-                  <Toggle value={form.aPedido} onChange={v => set('aPedido', v)} />
-                  <span style={{ fontSize: 13, color: form.aPedido ? C.green : C.text3, fontWeight: 600 }}>
-                    {form.aPedido ? 'Se puede comprar sin stock, con plazo de entrega' : 'Sin stock no se puede comprar'}
+                  <Toggle value={form.stockInmediato} onChange={v => set('stockInmediato', v)} />
+                  <span style={{ fontSize: 13, color: form.stockInmediato ? C.green : C.text3, fontWeight: 600 }}>
+                    {form.stockInmediato
+                      ? `Está en el local — despacho en ${currencySettings.diasDespachoInmediato ?? 1} día(s)`
+                      : `Se pide al proveedor — ${form.diasEntregaPedido || currencySettings.diasReposicion || 3} día(s)`}
                   </span>
                 </div>
-                {form.aPedido && (
+                <span style={{ fontSize: 11, color: C.muted }}>
+                  Todo lo publicado se puede comprar. Esto sólo cambia el plazo que ve el
+                  cliente. Para sacar un producto de venta, despublicalo.
+                </span>
+                {/* El override sólo aplica a lo que hay que reponer: si está en
+                    el local, el plazo es el de despacho de la tienda. */}
+                {!form.stockInmediato && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 4 }}>
-                    <label style={lbl}>Plazo de entrega (días hábiles)</label>
+                    <label style={lbl}>Plazo de reposición (días hábiles)</label>
                     <input
                       type="number" min="1" step="1"
                       value={form.diasEntregaPedido}
                       onChange={e => set('diasEntregaPedido', e.target.value)}
-                      placeholder={`Default de la tienda: ${currencySettings.diasEntregaPedidoDefault || 7}`}
+                      placeholder={`Default de la tienda: ${currencySettings.diasReposicion || 3}`}
                       style={{ ...inp, maxWidth: 240 }}
                     />
                     <span style={{ fontSize: 11, color: C.muted }}>
-                      Si lo dejás vacío, se usa el default de la tienda ({currencySettings.diasEntregaPedidoDefault || 7} días).
+                      Sólo para el proveedor que tarda distinto al resto. Vacío = default
+                      de la tienda ({currencySettings.diasReposicion || 3} días).
                     </span>
                   </div>
                 )}
@@ -1751,17 +1770,18 @@ function OverviewTab({ products }) {
     return () => clearTimeout(timeout)
   }, [statusToast])
 
-  const inStock    = products.filter(p => p.inStock).length
-  const outOfStock = products.length - inStock
-  const withOffer  = products.filter(p => p.originalPrice).length
+  // La tienda ya no cuenta unidades: lo que se mide es cuánto del catálogo se
+  // puede despachar enseguida. "A reposición" no es una alarma — es el caso
+  // normal — así que no se pinta de rojo como el viejo "Sin stock".
+  const inmediatos  = products.filter(p => p.stockInmediato).length
+  const aReposicion = products.length - inmediatos
+  const withOffer   = products.filter(p => p.originalPrice).length
 
   const byCat = categoryTree.map(node => {
     const cat = getCategoryValue(node)
     const items = products.filter(p => p.category === cat)
-    return { cat, label: node.label, count: items.length, inStock: items.filter(p => p.inStock).length }
+    return { cat, label: node.label, count: items.length, inmediatos: items.filter(p => p.stockInmediato).length }
   })
-
-  const lowStock = products.filter(p => p.stock !== undefined && p.stock <= 5 && p.inStock)
 
   const now    = new Date()
   const monthLabel = `${MONTH_NAMES[now.getMonth()]} ${now.getFullYear()}`
@@ -1968,14 +1988,14 @@ function OverviewTab({ products }) {
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 14, marginBottom: 28 }}>
         <StatCard label="Total productos" value={products.length} accent={C.border} />
-        <StatCard label="En stock" value={inStock} accent={C.green} />
-        <StatCard label="Sin stock" value={outOfStock} accent={outOfStock > 0 ? C.red : C.border} />
+        <StatCard label="Entrega inmediata" value={inmediatos} accent={C.green} />
+        <StatCard label="A reposición" value={aReposicion} accent={C.border} />
         <StatCard label="Con oferta" value={withOffer} accent={C.amber} />
       </div>
 
       <h3 style={sectionTitle}>Productos por categoría</h3>
       <div style={{ background: C.white, borderRadius: 10, border: `1px solid ${C.border}`, overflow: 'hidden' }}>
-        {byCat.map(({ cat, label, count, inStock }, i) => (
+        {byCat.map(({ cat, label, count, inmediatos }, i) => (
           <div key={cat} style={{
             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
             padding: '14px 20px',
@@ -1986,41 +2006,15 @@ function OverviewTab({ products }) {
               <span style={{ fontSize: 13, color: C.text3 }}>{count} productos</span>
               <span style={{
                 fontSize: 11, fontWeight: 600, padding: '3px 10px', borderRadius: 20,
-                background: inStock < count ? C.redLight : C.greenLight,
-                color: inStock < count ? C.red : C.green,
+                background: inmediatos === 0 ? C.border : C.greenLight,
+                color: inmediatos === 0 ? C.text3 : C.green,
               }}>
-                {inStock}/{count} en stock
+                {inmediatos}/{count} inmediatos
               </span>
             </div>
           </div>
         ))}
       </div>
-
-      {lowStock.length > 0 && (
-        <>
-          <h3 style={{ ...sectionTitle, marginTop: 28 }}>Stock bajo (≤ 5 unidades)</h3>
-          <div style={{ background: C.white, borderRadius: 10, border: `1px solid ${C.border}`, overflow: 'hidden' }}>
-            {lowStock.map((p, i) => (
-              <div key={p.id} style={{
-                display: 'flex', alignItems: 'center', gap: 14, padding: '12px 20px',
-                borderBottom: i < lowStock.length - 1 ? `1px solid ${C.hairline}` : 'none',
-              }}>
-                {p.image && <img src={p.image} alt="" style={{ width: 40, height: 40, objectFit: 'cover', borderRadius: 6 }} />}
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 13, color: C.ink, fontWeight: 600 }}>{p.name}</div>
-                  <div style={{ fontSize: 12, color: C.text3 }}>{p.category}</div>
-                </div>
-                <span style={{
-                  fontSize: 12, fontWeight: 600, padding: '3px 10px', borderRadius: 20,
-                  background: C.amberLight, color: C.amberDark,
-                }}>
-                  {p.stock} unidades
-                </span>
-              </div>
-            ))}
-          </div>
-        </>
-      )}
 
       {selectedOrder && (
         <OrderDetailModal
@@ -2062,7 +2056,7 @@ function StoreTab({ products, onUpdate, onDelete }) {
   }, [products, catFilter, search])
 
   const withOffer  = products.filter(p => p.originalPrice).length
-  const outOfStock = products.filter(p => !p.inStock).length
+  const inmediatos = products.filter(p => p.stockInmediato).length
 
   async function openStoreProduct(product) {
     if (loadingProductId) return
@@ -2089,7 +2083,7 @@ function StoreTab({ products, onUpdate, onDelete }) {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
           <span style={pill('#F3F4F6', C.text3)}>{products.length} productos</span>
-          {outOfStock > 0 && <span style={pill(C.redLight, C.red)}>{outOfStock} sin stock</span>}
+          {inmediatos > 0 && <span style={pill(C.greenLight, C.green)}>{inmediatos} con entrega inmediata</span>}
           {withOffer > 0 && <span style={pill(C.amberLight, C.amberDark)}>{withOffer} con oferta</span>}
         </div>
         <button onClick={() => setPickerOpen(true)} style={{ ...solidBtn, background: C.red, color: '#fff' }}>
@@ -2187,11 +2181,12 @@ function StoreTab({ products, onUpdate, onDelete }) {
               )}
             </div>
 
-            {/* Stock de referencia; se edita desde Productos. */}
+            {/* Disponibilidad de referencia; se edita desde Productos. Un
+                producto a reposición no es un problema, así que no va en rojo. */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexShrink: 0, minWidth: 110 }}>
-              <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: '50%', background: p.inStock ? C.green : C.red }} />
-              <span style={{ fontSize: 12, color: p.inStock ? C.green : C.red, fontWeight: 600 }}>
-                Stock: {p.stock ?? 0}
+              <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: '50%', background: p.stockInmediato ? C.green : C.border }} />
+              <span style={{ fontSize: 12, color: p.stockInmediato ? C.green : C.text3, fontWeight: 600 }}>
+                {p.stockInmediato ? 'Inmediata' : 'A reposición'}
               </span>
             </div>
 
@@ -3088,7 +3083,7 @@ function OrderDetailModal({ order, onClose, onStatusChange, onInvoice, onInvoice
           )}
           {order.delivery_type === 'delivery' && order.estimated_delivery_date && (
             <p style={{ fontSize: 12, color: C.text3, marginTop: 4 }}>
-              Entrega estimada: {fmtPickupDate(order.estimated_delivery_date)}
+              Entrega estimada: {fmtVentanaEntrega(order)}
             </p>
           )}
         </div>
@@ -3384,7 +3379,7 @@ function OperationalOrdersSection({ title, subtitle, orders, emptyText, type, on
                   <>
                     <b>Enviar a</b>
                     <span>{order.address || 'Dirección sin completar'}{order.city ? `, ${order.city}` : ''}{order.postal_code ? ` (CP ${order.postal_code})` : ''}</span>
-                    {order.estimated_delivery_date && <small>Entrega estimada: {fmtPickupDate(order.estimated_delivery_date)}</small>}
+                    {order.estimated_delivery_date && <small>Entrega estimada: {fmtVentanaEntrega(order)}</small>}
                   </>
                 ) : (
                   <>
@@ -5391,21 +5386,37 @@ function CurrencySettingsCard({ settings, onSave }) {
   )
 }
 
+// Los dos plazos que definen todo lo que la tienda le promete al cliente. Van
+// juntos en una tarjeta porque sólo tienen sentido comparados entre sí, y
+// porque el backend los valida como par.
 function DeliveryDefaultCard({ settings, onSave }) {
-  const [value, setValue] = useState(String(settings.diasEntregaPedidoDefault || 7))
+  const [inmediato, setInmediato] = useState(String(settings.diasDespachoInmediato ?? 1))
+  const [reposicion, setReposicion] = useState(String(settings.diasReposicion ?? 3))
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState('')
 
-  useEffect(() => setValue(String(settings.diasEntregaPedidoDefault || 7)), [settings.diasEntregaPedidoDefault])
+  useEffect(() => {
+    setInmediato(String(settings.diasDespachoInmediato ?? 1))
+    setReposicion(String(settings.diasReposicion ?? 3))
+  }, [settings.diasDespachoInmediato, settings.diasReposicion])
 
   const save = async () => {
-    const days = Math.trunc(Number(value))
-    if (!Number.isFinite(days) || days <= 0) { setMessage('Ingresá una cantidad de días válida.'); return }
+    const diasDespachoInmediato = Math.trunc(Number(inmediato))
+    const diasReposicion = Math.trunc(Number(reposicion))
+    if (!Number.isFinite(diasDespachoInmediato) || diasDespachoInmediato < 0) {
+      setMessage('El despacho inmediato no puede ser negativo.'); return
+    }
+    if (!Number.isFinite(diasReposicion) || diasReposicion <= 0) {
+      setMessage('Ingresá un plazo de reposición válido.'); return
+    }
+    if (diasDespachoInmediato > diasReposicion) {
+      setMessage('El despacho inmediato no puede tardar más que la reposición.'); return
+    }
     setSaving(true)
     setMessage('')
     try {
-      await onSave(days)
-      setMessage('Plazo guardado.')
+      await onSave({ diasDespachoInmediato, diasReposicion })
+      setMessage('Plazos guardados.')
     } catch (err) {
       setMessage(err.message || 'No se pudo guardar.')
     } finally {
@@ -5415,13 +5426,20 @@ function DeliveryDefaultCard({ settings, onSave }) {
 
   return (
     <div style={{ background: C.white, borderRadius: 10, border: `1px solid ${C.border}`, padding: '11px 13px', display: 'flex', flexDirection: 'column', gap: 5 }}>
-      <div style={{ fontSize: 12.5, fontWeight: 600, color: C.ink }}>Plazo de entrega "a pedido"</div>
-      <p style={{ fontSize: 10.5, color: C.muted, margin: 0 }}>Default para productos a pedido sin plazo propio cargado.</p>
-      <div style={{ display: 'flex', gap: 7 }}>
-        <input type="number" min="1" step="1" value={value} onChange={event => { setValue(event.target.value); setMessage('') }} aria-label="Días hábiles de entrega por default" style={{ ...inp, minWidth: 0 }} />
+      <div style={{ fontSize: 12.5, fontWeight: 600, color: C.ink }}>Plazos de entrega</div>
+      <p style={{ fontSize: 10.5, color: C.muted, margin: 0 }}>Días hábiles antes de despachar, según si el producto está en el local o hay que pedirlo.</p>
+      <div style={{ display: 'flex', gap: 7, alignItems: 'center' }}>
+        <label style={{ fontSize: 10.5, color: C.muted, minWidth: 74 }}>En el local</label>
+        <input type="number" min="0" step="1" value={inmediato} onChange={event => { setInmediato(event.target.value); setMessage('') }} aria-label="Días hábiles de despacho con stock inmediato" style={{ ...inp, minWidth: 0 }} />
+      </div>
+      <div style={{ display: 'flex', gap: 7, alignItems: 'center' }}>
+        <label style={{ fontSize: 10.5, color: C.muted, minWidth: 74 }}>Reposición</label>
+        <input type="number" min="1" step="1" value={reposicion} onChange={event => { setReposicion(event.target.value); setMessage('') }} aria-label="Días hábiles de reposición del proveedor" style={{ ...inp, minWidth: 0 }} />
         <button type="button" onClick={save} disabled={saving} style={{ ...outlineBtn, padding: '5px 9px', whiteSpace: 'nowrap' }}>{saving ? 'Guardando...' : 'Guardar'}</button>
       </div>
-      <div style={{ minHeight: 14, fontSize: 10.5, color: message.includes('guardado') ? C.green : C.red }}>{message || `${Math.trunc(Number(value)) || 7} días hábiles`}</div>
+      <div style={{ minHeight: 14, fontSize: 10.5, color: message.includes('guardados') ? C.green : C.red }}>
+        {message || `${Math.trunc(Number(inmediato)) || 0} días si está · ${Math.trunc(Number(reposicion)) || 3} si hay que pedirlo`}
+      </div>
     </div>
   )
 }
@@ -7614,8 +7632,8 @@ function UnifiedProductsTab() {
     return result
   }
 
-  async function handleDeliveryDefaultSave(days) {
-    const result = await updateDeliverySettings(days)
+  async function handleDeliveryDefaultSave(plazos) {
+    const result = await updateDeliverySettings(plazos)
     await fetchCatalog()
     return result
   }
@@ -7861,10 +7879,10 @@ function UnifiedProductsTab() {
       ? { published: true }
       : bulkAction === 'unpublished'
         ? { published: false }
-        : bulkAction === 'a_pedido_on'
-          ? { a_pedido: true }
-          : bulkAction === 'a_pedido_off'
-            ? { a_pedido: false }
+        : bulkAction === 'stock_inmediato_on'
+          ? { stock_inmediato: true }
+          : bulkAction === 'stock_inmediato_off'
+            ? { stock_inmediato: false }
             : bulkAction === 'category'
               ? { category: bulkCategory, subcategory: bulkSubcategory || null }
               : { [bulkAction]: Number(bulkPrice) }
@@ -8284,8 +8302,8 @@ function UnifiedProductsTab() {
             <option value="precio_costo">Precio de costo</option>
             <option value="published">Publicar en tienda</option>
             <option value="unpublished">Quitar de tienda</option>
-            <option value="a_pedido_on">Marcar "a pedido"</option>
-            <option value="a_pedido_off">Quitar "a pedido"</option>
+            <option value="stock_inmediato_on">Marcar entrega inmediata</option>
+            <option value="stock_inmediato_off">Quitar entrega inmediata</option>
             <option value="category">Cambiar categoría</option>
           </select>
           {(bulkAction === 'precio_venta' || bulkAction === 'precio_costo') && (

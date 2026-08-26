@@ -1,3 +1,5 @@
+import { diasHabiles } from '../utils/plazoEntrega'
+
 const fmt = (n) =>
   new Intl.NumberFormat('es-AR', {
     style: 'currency',
@@ -22,6 +24,12 @@ export function OrderItemsBlock({
   imageSizeClass = 'w-12 h-12',
   totalSizeClass = 'text-xl font-bold',
 }) {
+  // Se lee `diasEntregaPedido` y no `diasEntrega` porque acá los items vienen
+  // del JSONB congelado del pedido, no del catálogo: los pedidos anteriores al
+  // cambio de modelo traen ese campo sólo en los items que eran "a pedido", y
+  // el resto en null — que cae a 0 y no afecta el máximo.
+  const preparacionDias = Math.max(0, ...items.map((item) => Number(item.diasEntregaPedido) || 0))
+
   return (
     <>
       {items.map((item, i) => (
@@ -45,11 +53,6 @@ export function OrderItemsBlock({
             <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
               {item.quantity} × {fmt(item.price)}{item.color ? ` · ${item.color}` : ''}{item.tone ? ` · ${item.tone}` : ''}{item.size ? ` · ${item.size}` : ''}
             </p>
-            {item.aPedido && (
-              <p className="text-xs" style={{ color: '#8A5A00', marginTop: 2 }}>
-                A pedido · llega en ~{item.diasEntregaPedido} días hábiles
-              </p>
-            )}
           </div>
           <p className="text-sm font-semibold shrink-0" style={{ color: 'var(--color-text)' }}>
             {fmt(item.subtotal)}
@@ -80,6 +83,16 @@ export function OrderItemsBlock({
               ? 'Retiro en local — 473 entre 14C y 15, City Bell'
               : `Envío a ${address}, ${city}`}
           </p>
+          {/* Un solo plazo para todo el pedido, no uno por item: se despacha
+              junto, así que el que manda es el que más tarda en estar listo.
+              Los pedidos viejos traen estos mismos campos serializados. */}
+          {preparacionDias > 0 && (
+            <p className="text-xs mt-1" style={{ color: 'var(--color-text-muted)' }}>
+              {deliveryType === 'pickup'
+                ? `Te avisamos cuando esté listo para retirar — hasta ${diasHabiles(preparacionDias)}.`
+                : `Lo preparamos en hasta ${diasHabiles(preparacionDias)} antes de despacharlo.`}
+            </p>
+          )}
         </div>
       </div>
     </>

@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { useCart } from '../context/CartContext'
 import { useAuth } from '../context/AuthContext'
 import { useFavorites } from '../context/FavoritesContext'
+import { precioSinIva } from '../config/tax'
 
 const T = {
   paper:          '#F7F4EF',
@@ -28,7 +29,6 @@ const fmt = (n) =>
   }).format(n)
 
 const INSTALLMENTS = 3
-const NATIONAL_TAX_RATE = 0.21 // IVA — se descuenta para estimar el "precio sin impuestos nacionales"
 
 // Rating/reseñas de ejemplo, estables por producto (no hay datos reales de
 // reseñas agregadas conectados a la tarjeta todavía — ver src/pages/ProductDetail.jsx
@@ -41,15 +41,6 @@ function placeholderReviews(id) {
   const rating = 4 + Math.floor(seed % 10) / 10 // 4.0–4.9
   const reviews = 3 + Math.floor(seed % 45) // 3–47
   return { rating, reviews }
-}
-
-function ClockIcon({ size = 12 }) {
-  return (
-    <svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="1.8">
-      <circle cx="12" cy="12" r="9" />
-      <path d="M12 7v5l3.5 2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  )
 }
 
 function StarRow({ value, size = 12 }) {
@@ -92,7 +83,7 @@ export default function ProductCard({ product }) {
   function handleAdd(e) {
     e.preventDefault()
     e.stopPropagation()
-    if (!product.inStock || added) return
+    if (added) return
     if (product.variantRules?.length) {
       navigate(`/products/${product.id}`)
       return
@@ -107,6 +98,11 @@ export default function ProductCard({ product }) {
       color: selectedColor?.name,
       size: defaultSize?.label,
       tone: selectedTone?.name,
+      // Sin esto el checkout estima la entrega sin margen de preparación para
+      // todo lo que se agregó desde el catálogo. La orden real igual lo
+      // recalcula contra la DB, pero la fecha de la vista previa quedaba corta.
+      stockInmediato: Boolean(product.stockInmediato),
+      diasEntrega: Number(product.diasEntrega) || 3,
     })
     setAdded(true)
     setTimeout(() => setAdded(false), 1500)
@@ -234,16 +230,16 @@ export default function ProductCard({ product }) {
           type="button"
           className="fnx-product-card__cart"
           onClick={handleAdd}
-          disabled={!product.inStock || added}
-          aria-label={product.variantRules?.length ? 'Elegir opciones' : added ? 'Agregado al carrito' : product.inStock ? 'Agregar al carrito' : 'Sin stock'}
+          disabled={added}
+          aria-label={product.variantRules?.length ? 'Elegir opciones' : added ? 'Agregado al carrito' : 'Agregar al carrito'}
           style={{
             position: 'absolute', bottom: -18, right: 14, zIndex: 3,
             width: 40, height: 40, borderRadius: '50%',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             background: added ? T.green : T.ink,
             border: `3px solid ${T.paper}`,
-            cursor: product.inStock && !added ? 'pointer' : 'default',
-            opacity: product.inStock ? 1 : 0.5,
+            cursor: added ? 'default' : 'pointer',
+            opacity: 1,
             boxShadow: '0 6px 16px -4px rgba(22,17,11,0.35)',
             transition: 'background .2s ease, transform .2s ease',
             transform: cardHovered ? 'scale(1.06)' : 'scale(1)',
@@ -357,14 +353,23 @@ export default function ProductCard({ product }) {
             Hasta {INSTALLMENTS} cuotas sin interés de <strong style={{ fontWeight: 600 }}>{fmt(displayPrice / INSTALLMENTS)}</strong>
           </span>
           <span className="fnx-product-card__tax" style={{ fontFamily: "'Inter', system-ui, sans-serif", fontSize: 11, color: T.muted2 }}>
-            Precio sin impuestos nacionales: {fmt(displayPrice * (1 - NATIONAL_TAX_RATE))}
+            Precio sin impuestos nacionales: {fmt(precioSinIva(displayPrice))}
           </span>
-          {!product.inStock && product.aPedido && (
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontFamily: "'Inter', system-ui, sans-serif", fontSize: 11.5, color: T.amber, fontWeight: 500 }}>
-              <ClockIcon /> A pedido · llega en ~{product.diasEntregaPedido} días hábiles
-            </span>
-          )}
         </div>
+
+        {/* Recuento de colores en texto. Sólo se ve en mobile: ahí las
+            miniaturas de color no entran a dos columnas, pero perder el dato
+            de que el producto viene en varios colores sí se nota. En desktop
+            manda la fila de miniaturas, que además deja elegir. */}
+        {product.colors?.length > 1 && (
+          <span className="fnx-product-card__variant-count" style={{
+            fontFamily: "'Inter', system-ui, sans-serif",
+            fontSize: 10, fontWeight: 500, letterSpacing: '.06em',
+            textTransform: 'uppercase', color: T.text3,
+          }}>
+            {product.colors.length} colores disponibles
+          </span>
+        )}
 
         <div className="fnx-product-card__reviews" style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 'auto' }}>
           <StarRow value={rating} />

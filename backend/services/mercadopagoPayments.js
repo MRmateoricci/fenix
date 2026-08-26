@@ -1,6 +1,5 @@
 import { MercadoPagoConfig, MerchantOrder, Payment } from 'mercadopago'
 import { pool } from '../db/pool.js'
-import { releaseOrderStock } from './stockReservation.js'
 import { sendOrderConfirmationNotifications } from './orderNotifications.js'
 import { attemptAutomaticInvoiceForApprovedPayment } from './invoiceAttempts.js'
 import 'dotenv/config'
@@ -219,11 +218,6 @@ export async function reconcileMercadoPagoPayment({ paymentId, expectedOrderId =
     console.error(`[mercadopago] Falló el intento de factura order=${order.id} code=${error.code || error.name}`)
   }
 
-  if (order.status === 'payment_failed') {
-    await releaseOrderStock(order.id).catch((error) => {
-      console.error(`[mercadopago] No se pudo liberar stock order=${order.id} code=${error.code || error.name}`)
-    })
-  }
   if (PAID_ORDER_STATUSES.includes(order.status)) {
     await sendOrderConfirmationNotifications(order.id).catch((error) => {
       console.error(`[mercadopago] No se pudo enviar notificación order=${order.id} code=${error.code || error.name}`)

@@ -15,22 +15,17 @@ import {
   resolvePublicVariantRule,
 } from '../utils/productVariants'
 
+// Tope de unidades por item. No es una restricción de stock —la tienda ya no
+// lleva stock— sino un freno a los tipeos: una obra que necesita 200 plafones
+// llama o escribe por WhatsApp, no los carga de a uno en el selector.
+const MAX_QTY_POR_ITEM = 20
+
 const fmt = (n) =>
   new Intl.NumberFormat('es-AR', {
     style: 'currency',
     currency: 'ARS',
     maximumFractionDigits: 0,
   }).format(n)
-
-// Combina color + tono en una sola clave de fila para variantStock: un
-// producto puede tener color de carcasa y tono de luz (cálido/neutro/frío) a
-// la vez, pero la matriz de stock sigue siendo 2D (fila × medida). Misma
-// convención en backend/routes/orders.js y AdminDashboard.jsx — si se cambia
-// acá hay que cambiarla en los tres lados.
-function combineVariantRowKey(colorName, toneName) {
-  if (colorName && toneName) return `${colorName} / ${toneName}`
-  return colorName || toneName || '_'
-}
 
 const REVIEWS_API = import.meta.env.VITE_API_URL || ''
 
@@ -91,7 +86,6 @@ export default function ProductDetail() {
   const hasDefaultColorOption = hasPublicAxisFallback(product?.variantRules, 'color')
   const ruleSelection = { color: selectedColor?.name, size: selectedSize?.label, tone: selectedTone?.name }
   const selectedPriceRule = resolvePublicVariantRule(product?.variantRules, ruleSelection, 'price')
-  const selectedStockRule = resolvePublicVariantRule(product?.variantRules, ruleSelection, 'stock')
   const selectedImageRule = resolvePublicVariantRule(product?.variantRules, ruleSelection, 'image')
   const selectedDetailsRule = resolvePublicVariantRule(product?.variantRules, ruleSelection, 'productData')
   const variantData = selectedDetailsRule?.productData || {}
@@ -120,25 +114,13 @@ export default function ProductDetail() {
         ? Number(selectedColor.price)
         : product?.price
 
-  // Si el producto carga stock por combinación exacta (variantStock no
-  // vacío), la disponibilidad depende del color/tono/medida elegidos; si no,
-  // sigue siendo el stock único de siempre.
-  const hasRuleStock = (product?.variantRules || []).some(rule => rule.stock != null)
-  const hasVariantStock = Object.keys(product?.variantStock || {}).length > 0
+  // La tienda ya no consulta stock: lo único que puede impedir la compra es que
+  // la combinación de color/tono/medida elegida no exista como variante.
   const hasValidVariantSelection = !product?.variantRules?.length || hasMatchingPublicRule(product.variantRules, ruleSelection)
-  const variantRowKey = combineVariantRowKey(selectedColor?.name, selectedTone?.name)
-  const availableStock = !hasValidVariantSelection
-    ? 0
-    : hasRuleStock
-    ? Number(selectedStockRule?.stock ?? 0)
-    : hasVariantStock
-    ? Number(product.variantStock[variantRowKey]?.[selectedSize?.label ?? '_'] ?? 0)
-    : (product?.stock ?? 0)
-  const variantInStock = availableStock > 0
-  // El plazo de "a pedido" aplica a la combinación elegida, no al producto en
-  // general: si hay variantes, lo que importa es si ESA combinación (availableStock)
-  // tiene stock, no el stock agregado del producto.
-  const isAPedido = !variantInStock && Boolean(product?.aPedido)
+  // La disponibilidad es por producto, no por variante: a 3 días de reposición
+  // no vale la pena reconstruir una matriz que nadie va a poder mantener.
+  const stockInmediato = Boolean(product?.stockInmediato)
+  const diasEntrega = Number(product?.diasEntrega) || 3
 
   const publicVariantChoices = {
     color: (product?.colors || []).map(option => option.name).filter(Boolean),
@@ -206,9 +188,12 @@ export default function ProductDetail() {
     setImgError(false)
   }, [product?.id])
 
+  // Sin stock que consultar no hay tope real de cantidad. El tope de arriba es
+  // sólo para atajar un tipeo (nadie compra 300 plafones por la web sin
+  // llamar antes), y se resetea al cambiar de producto.
   useEffect(() => {
-    setQty((q) => Math.max(1, Math.min(q, availableStock || 1)))
-  }, [availableStock])
+    setQty(1)
+  }, [product?.id])
 
   // Cambiar de color/tono/medida muestra la foto de esa combinación primero;
   // si el usuario había elegido una miniatura de la galería, se vuelve a la
@@ -254,7 +239,7 @@ export default function ProductDetail() {
   }
 
   function handleAdd() {
-    if (!hasValidVariantSelection || (!variantInStock && !isAPedido) || added) return
+    if (!hasValidVariantSelection || added) return
     for (let i = 0; i < qty; i++) {
       addItem({
         id:       product.id,
@@ -265,8 +250,10 @@ export default function ProductDetail() {
         color:    selectedColor?.name,
         size:     selectedSize?.label,
         tone:     selectedTone?.name,
-        aPedido:  isAPedido,
-        diasEntregaPedido: isAPedido ? product.diasEntregaPedido : null,
+        // Sólo para mostrar el plazo en el carrito y el checkout: POST
+        // /api/orders lo vuelve a resolver contra la DB, igual que el precio.
+        stockInmediato,
+        diasEntrega,
       })
     }
     setAdded(true)
@@ -297,9 +284,11 @@ export default function ProductDetail() {
       url: `${seoCfg.siteUrl}/products/${product.id}`,
       priceCurrency: 'ARS',
       price: selectedPrice,
-      availability: variantInStock
+      // Todo lo publicado se vende. BackOrder es el valor correcto para lo que
+      // se consigue del proveedor: sigue siendo comprable, con más demora.
+      availability: stockInmediato
         ? 'https://schema.org/InStock'
-        : 'https://schema.org/OutOfStock',
+        : 'https://schema.org/BackOrder',
       seller: { '@type': 'Organization', name: seoCfg.business.name },
     },
   }
@@ -423,31 +412,6 @@ export default function ProductDetail() {
                   }}>
                     {displayCategory}
                   </span>
-                  {variantInStock ? (
-                    <span style={{
-                      padding: '4px 10px', borderRadius: 4,
-                      fontSize: 11, letterSpacing: '.12em', textTransform: 'uppercase',
-                      fontWeight: 600, backgroundColor: '#E4F5E9', color: '#166534',
-                    }}>
-                      En stock
-                    </span>
-                  ) : isAPedido ? (
-                    <span style={{
-                      padding: '4px 10px', borderRadius: 4,
-                      fontSize: 11, letterSpacing: '.12em', textTransform: 'uppercase',
-                      fontWeight: 600, backgroundColor: '#FDF0DC', color: '#8A5A00',
-                    }}>
-                      A pedido
-                    </span>
-                  ) : (
-                    <span style={{
-                      padding: '4px 10px', borderRadius: 4,
-                      fontSize: 11, letterSpacing: '.12em', textTransform: 'uppercase',
-                      fontWeight: 600, backgroundColor: '#FFE4E4', color: '#CC0000',
-                    }}>
-                      Sin stock
-                    </span>
-                  )}
                 </div>
 
                 <button
@@ -504,15 +468,6 @@ export default function ProductDetail() {
               }}>
                 {fmt(selectedPrice)}
               </p>
-
-              {isAPedido && (
-                <p style={{
-                  fontSize: 13.5, color: '#8A5A00', backgroundColor: '#FDF0DC',
-                  padding: '12px 14px', borderRadius: 10, margin: 0,
-                }}>
-                  Este producto no está en stock inmediato. Lo conseguimos especialmente para vos y llega en aproximadamente {product.diasEntregaPedido} días hábiles.
-                </p>
-              )}
 
               {/* Selector de color */}
               {(product.colors?.length > 0 || hasDefaultColorOption) && (
@@ -674,7 +629,7 @@ export default function ProductDetail() {
               <div style={{ height: 1, backgroundColor: 'var(--color-border)' }} />
 
               {/* Quantity selector */}
-              {variantInStock && (
+              {hasValidVariantSelection && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
                   <span style={{
                     fontSize: 14, fontWeight: 500,
@@ -711,16 +666,16 @@ export default function ProductDetail() {
                       {qty}
                     </span>
                     <button
-                      onClick={() => setQty((q) => Math.min(availableStock, q + 1))}
-                      disabled={qty >= availableStock}
+                      onClick={() => setQty((q) => Math.min(MAX_QTY_POR_ITEM, q + 1))}
+                      disabled={qty >= MAX_QTY_POR_ITEM}
                       style={{
                         width: 44, height: 44, display: 'flex', alignItems: 'center',
                         justifyContent: 'center', fontSize: 20, fontWeight: 300,
-                        background: 'none', border: 'none', cursor: qty >= availableStock ? 'not-allowed' : 'pointer',
-                        color: qty >= availableStock ? 'var(--color-border)' : 'var(--color-text-muted)',
+                        background: 'none', border: 'none', cursor: qty >= MAX_QTY_POR_ITEM ? 'not-allowed' : 'pointer',
+                        color: qty >= MAX_QTY_POR_ITEM ? 'var(--color-border)' : 'var(--color-text-muted)',
                         transition: 'background .15s',
                       }}
-                      onMouseEnter={(e) => { if (qty < availableStock) e.currentTarget.style.backgroundColor = 'var(--color-surface-2)' }}
+                      onMouseEnter={(e) => { if (qty < MAX_QTY_POR_ITEM) e.currentTarget.style.backgroundColor = 'var(--color-surface-2)' }}
                       onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
                       aria-label="Aumentar cantidad"
                     >
@@ -737,30 +692,28 @@ export default function ProductDetail() {
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 <button
                   onClick={handleAdd}
-                  disabled={(!variantInStock && !isAPedido) || added}
+                  disabled={!hasValidVariantSelection || added}
                   style={{
                     width: '100%', padding: '15px 0',
                     fontSize: 14, fontWeight: 600, letterSpacing: '.04em',
-                    borderRadius: 10, border: 'none', cursor: (variantInStock || isAPedido) && !added ? 'pointer' : 'not-allowed',
+                    borderRadius: 10, border: 'none', cursor: hasValidVariantSelection && !added ? 'pointer' : 'not-allowed',
                     display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
                     transition: 'background .2s, opacity .2s',
                     ...(added
                       ? { backgroundColor: '#166534', color: '#fff' }
-                      : (variantInStock || isAPedido)
+                      : hasValidVariantSelection
                         ? { backgroundColor: 'var(--color-primary)', color: '#fff' }
                         : { backgroundColor: 'var(--color-border)', color: 'var(--color-text-muted)' }),
                   }}
-                  onMouseEnter={(e) => { if ((variantInStock || isAPedido) && !added) e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)' }}
-                  onMouseLeave={(e) => { if ((variantInStock || isAPedido) && !added) e.currentTarget.style.backgroundColor = 'var(--color-primary)' }}
+                  onMouseEnter={(e) => { if (hasValidVariantSelection && !added) e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)' }}
+                  onMouseLeave={(e) => { if (hasValidVariantSelection && !added) e.currentTarget.style.backgroundColor = 'var(--color-primary)' }}
                 >
                   {added ? (
                     <><CheckIcon /> Agregado al carrito</>
-                  ) : variantInStock ? (
+                  ) : hasValidVariantSelection ? (
                     <><CartIcon /> Agregar al carrito</>
-                  ) : isAPedido ? (
-                    <><CartIcon /> Agregar al carrito · a pedido</>
                   ) : (
-                    'Sin stock'
+                    'Elegí una combinación disponible'
                   )}
                 </button>
 
@@ -791,7 +744,6 @@ export default function ProductDetail() {
                 </a>
               </div>
 
-              {!variantInStock && !isAPedido && <StockAlertForm product={product} />}
 
               {/* Info chips */}
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
@@ -928,81 +880,6 @@ function WhatsAppIcon() {
       <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z" />
       <path d="M11.99 2C6.477 2 2 6.477 2 11.99c0 1.77.463 3.435 1.275 4.884L2 22l5.274-1.256A9.934 9.934 0 0011.99 21.98C17.503 21.98 22 17.503 22 11.99 22 6.477 17.503 2 11.99 2zm0 18.18a8.183 8.183 0 01-4.17-1.142l-.299-.177-3.097.738.768-3.015-.196-.31A8.194 8.194 0 013.79 11.99c0-4.524 3.683-8.207 8.2-8.207 4.524 0 8.207 3.683 8.207 8.207s-3.683 8.19-8.207 8.19z" />
     </svg>
-  )
-}
-
-const STOCK_ALERTS_API = import.meta.env.VITE_API_URL || ''
-
-function StockAlertForm({ product }) {
-  const { user } = useAuth()
-  const [email, setEmail]     = useState(user?.email || '')
-  const [sent, setSent]       = useState(false)
-  const [error, setError]     = useState(null)
-  const [loading, setLoading] = useState(false)
-
-  async function handleSubmit(e) {
-    e.preventDefault()
-    setError(null)
-    setLoading(true)
-    try {
-      const res = await fetch(`${STOCK_ALERTS_API}/api/stock-alerts`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ productId: product.id, email }),
-      })
-      if (!res.ok) throw new Error('No pudimos guardar tu aviso. Probá de nuevo.')
-      setSent(true)
-    } catch (err) {
-      setError(err.message)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  if (sent) {
-    return (
-      <p style={{
-        fontSize: 13.5, color: '#166534', backgroundColor: '#E4F5E9',
-        padding: '12px 14px', borderRadius: 10,
-      }}>
-        ¡Listo! Te avisaremos por email cuando vuelva a estar disponible.
-      </p>
-    )
-  }
-
-  return (
-    <div>
-      <form onSubmit={handleSubmit} style={{ display: 'flex', gap: 8 }}>
-        <input
-          type="email"
-          required
-          placeholder="Tu email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          style={{
-            flex: 1, padding: '11px 14px', borderRadius: 8,
-            border: '1.5px solid var(--color-border)', outline: 'none',
-            fontSize: 13.5, color: 'var(--color-text)', backgroundColor: 'var(--color-surface-2)',
-          }}
-        />
-        <button
-          type="submit"
-          disabled={loading}
-          style={{
-            padding: '0 18px', borderRadius: 8, border: 'none',
-            fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap',
-            backgroundColor: 'var(--color-text)', color: '#fff',
-            cursor: loading ? 'not-allowed' : 'pointer',
-          }}
-        >
-          {loading ? 'Enviando…' : 'Avisame'}
-        </button>
-      </form>
-      {error && (
-        <p style={{ fontSize: 12, color: 'var(--color-primary)', margin: '6px 0 0' }}>{error}</p>
-      )}
-    </div>
   )
 }
 

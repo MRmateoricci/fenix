@@ -135,8 +135,8 @@ async function main() {
          codigo, name, category, subcategory, product_type, description_larga,
          precio_venta, image_url, hover_image_url,
          color_temp, ip_rating, watts, material,
-         stock, source, published
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'manual',true)
+         stock, stock_inmediato, source, published
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$14 > 0,'manual',true)
        ON CONFLICT (codigo) DO NOTHING`,
       [
         p.codigo, p.name, p.category, p.subcategory, p.product_type ?? null,

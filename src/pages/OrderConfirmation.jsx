@@ -160,7 +160,7 @@ export default function OrderConfirmation() {
             {isReserved && `Te esperamos el ${order.pickup_date ? new Date(order.pickup_date).toLocaleDateString('es-AR', { day: '2-digit', month: 'long' }) : 'día elegido'} en el local para pagar y retirar tu pedido.`}
             {isSuccess && !isReserved && 'Te contactaremos a la brevedad para coordinar la entrega.'}
             {isPending  && 'Tu pago está siendo procesado. Te avisaremos cuando se confirme.'}
-            {isFailed && order?.status === 'expired' && 'No llegamos a confirmar el pago/retiro a tiempo — el stock ya se liberó. Si todavía te interesa, hacé el pedido de nuevo.'}
+            {isFailed && order?.status === 'expired' && 'No llegamos a confirmar el pago/retiro a tiempo y el pedido venció. Si todavía te interesa, hacelo de nuevo.'}
             {isFailed && order?.status !== 'expired' && 'Podés intentarlo de nuevo o contactarnos por WhatsApp.'}
           </p>
         </div>

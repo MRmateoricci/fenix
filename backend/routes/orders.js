@@ -3,9 +3,12 @@ import { pool } from '../db/pool.js'
 import { createPreference } from '../services/mercadopago.js'
 import { requireAdmin } from '../middleware/requireAdmin.js'
 import { attachUserIfPresent, requireAuth } from '../middleware/requireAuth.js'
-import { reserveStock, releaseOrderStock, InsufficientStockError } from '../services/stockReservation.js'
+// stockReservation.js quedó fuera de servicio: la tienda ya no lleva stock (ver
+// products.stock_inmediato en schema.sql). Reserva y liberación se apagaron
+// juntas a propósito — si se reactiva una sin la otra, el stock se descuadra
+// solo en cada pedido cancelado.
 import { estimateDeliveryDate } from '../services/correoArgentino.js'
-import { SHIPPING_SERVICES, qualifiesForFreeShipping } from '../config/shipping.js'
+import { SHIPPING_SERVICES, normalizeShippingService, qualifiesForFreeShipping } from '../config/shipping.js'
 import { quoteShipping } from '../services/shippingQuotes.js'
 import { sendOrderConfirmationNotifications } from '../services/orderNotifications.js'
 import { PaymentReconciliationError, reconcileMercadoPagoReturn } from '../services/mercadopagoPayments.js'
@@ -36,10 +39,6 @@ const router = Router()
 // minutos (MP no avisa cuando el cliente simplemente abandona el checkout).
 const PENDING_PAYMENT_EXPIRY_MINUTES = 45
 
-// Estados que liberan el stock reservado de un pedido (ver stockReservation.js
-// — releaseOrderStock es idempotente, así que da igual si más de uno de estos
-// caminos termina llamándolo para el mismo pedido).
-export const RELEASES_STOCK = ['cancelled', 'payment_failed', 'expired']
 export const CUSTOMER_ORDER_STATUSES = ['reserved', 'paid', 'preparing', 'shipped', 'delivered']
 
 export async function verifyInvoiceARecipient(
@@ -100,7 +99,7 @@ export function buildRetryCheckoutData(order) {
     invoiceVatConditionId: order?.invoice_vat_condition_id == null ? '' : String(order.invoice_vat_condition_id),
     deliveryType: order?.delivery_type || 'delivery',
     paymentMethod: order?.payment_method || 'mercadopago',
-    shippingService: order?.shipping_service || 'clasico',
+    shippingService: normalizeShippingService(order?.shipping_service),
     pickupDate: dateInputValue(order?.pickup_date),
     direccion: order?.address || '',
     piso: order?.address_extra || '',
@@ -261,7 +260,7 @@ router.post('/', attachUserIfPresent, async (req, res) => {
     const deliveryType  = customer?.deliveryType
     const pickupDate    = customer?.pickupDate
     const paymentMethod = customer?.paymentMethod || 'mercadopago'
-    const shippingService = String(customer?.shippingService || 'clasico').toLowerCase()
+    const shippingService = String(customer?.shippingService || SHIPPING_SERVICES[0]).toLowerCase()
     let customerEmail   = normalizeEmail(customer?.email)
     let orderUserId     = req.userId || null
 
@@ -340,15 +339,18 @@ router.post('/', attachUserIfPresent, async (req, res) => {
       customerEmail = users[0].email
     }
 
-    // Precio y stock disponible se recalculan contra la DB — nunca se confía
+    // Precio y plazo de entrega se recalculan contra la DB — nunca se confía
     // en lo que manda el cliente (podría mandar cualquier item.price).
     const productIds = items.map((i) => i.id)
     const { rows: dbProducts } = await pool.query(
       `SELECT products.id, precio_venta, precio_iva, precio_venta_usd, precio_iva_usd, price_currency,
               color_options, size_options, tone_options, variant_stock,
               COALESCE((SELECT usd_ars_rate FROM store_settings WHERE id=1),1510) AS usd_ars_rate,
-              a_pedido,
-              COALESCE(dias_entrega_pedido, (SELECT dias_entrega_pedido_default FROM store_settings WHERE id=1), 7) AS dias_entrega_pedido,
+              stock_inmediato,
+              CASE WHEN stock_inmediato
+                THEN COALESCE((SELECT dias_despacho_inmediato FROM store_settings WHERE id=1), 1)
+                ELSE COALESCE(dias_entrega_pedido, (SELECT dias_entrega_pedido_default FROM store_settings WHERE id=1), 3)
+              END AS dias_entrega,
               COALESCE((SELECT jsonb_agg(to_jsonb(vr)) FROM product_variant_rules vr
                         WHERE vr.product_id=products.id), '[]'::jsonb) AS variant_rules
        FROM products WHERE id = ANY($1::uuid[])`,
@@ -397,8 +399,13 @@ router.post('/', attachUserIfPresent, async (req, res) => {
         colorKey: variantPath ? variantPath.colorKey : null,
         sizeKey:  variantPath ? variantPath.sizeKey : null,
         variantRuleId: variantPath?.variantRuleId || null,
-        aPedido: false,
-        diasEntregaPedido: null,
+        // Se conservan los nombres `aPedido`/`diasEntregaPedido`: los pedidos
+        // históricos ya los tienen serializados en orders.items y los mails y
+        // el seguimiento los leen de ahí. Lo que cambió es de dónde salen —
+        // antes marcaban la excepción de stock insuficiente, ahora significan
+        // "este producto no estaba en el local, se repone del proveedor".
+        aPedido: !dbProduct.stock_inmediato,
+        diasEntregaPedido: Number(dbProduct.dias_entrega) || 3,
       })
     }
     const productsTotal = itemsSnapshot.reduce((sum, i) => sum + i.subtotal, 0)
@@ -418,10 +425,13 @@ router.post('/', attachUserIfPresent, async (req, res) => {
     }
 
     // Envío: costo por zona + estimación de entrega (Correo Argentino + margen
-    // propio de stock). Llamado fuera de la transacción de DB — es red, no
-    // debe sostener locks de Postgres.
+    // de preparación del pedido). Llamado fuera de la transacción de DB — es
+    // red, no debe sostener locks de Postgres.
     let shippingCost = 0
+    // Ventana de entrega: se guardan los dos extremos. La tienda dejó de
+    // prometer un día exacto (ver config/shipping.js).
     let estimatedDeliveryDate = null
+    let estimatedDeliveryMaxDate = null
     if (deliveryType === 'delivery') {
       const quote = await quoteShipping({
         postalCode: customer.codigoPostal,
@@ -432,8 +442,15 @@ router.post('/', attachUserIfPresent, async (req, res) => {
       }
       const freeShipping = qualifiesForFreeShipping({ subtotal: productsTotal })
       shippingCost = freeShipping ? 0 : quote.cost
-      const estimate = await estimateDeliveryDate(customer.codigoPostal)
-      estimatedDeliveryDate = estimate.estimatedDate
+      // Margen de preparación: el mayor plazo del carrito, nunca la suma — los
+      // items se despachan juntos, así que manda el que más tarda en estar.
+      const handlingBusinessDays = Math.max(
+        0,
+        ...itemsSnapshot.map((i) => Number(i.diasEntregaPedido) || 0),
+      )
+      const estimate = await estimateDeliveryDate(customer.codigoPostal, handlingBusinessDays)
+      estimatedDeliveryDate    = estimate.minDate
+      estimatedDeliveryMaxDate = estimate.maxDate
     }
 
     const total = productsTotal - discountAmount + shippingCost
@@ -456,20 +473,12 @@ router.post('/', attachUserIfPresent, async (req, res) => {
     let order
     try {
       await client.query('BEGIN')
-      await reserveStock(client, itemsSnapshot)
-      // reserveStock marca item.aPedido = true cuando ese item específico tuvo
-      // que usar la excepción de stock insuficiente — acá solo completamos el
-      // plazo a mostrar, ya resuelto (producto o default de tienda) en el SELECT
-      // de dbProducts de más arriba.
-      for (const item of itemsSnapshot) {
-        if (item.aPedido) item.diasEntregaPedido = Number(productMap.get(item.id)?.dias_entrega_pedido) || 7
-      }
 
       const { rows } = await client.query(
         `INSERT INTO orders
            (order_number, status, customer_name, customer_email, customer_phone,
             delivery_type, address, city, postal_code, total_amount, shipping_cost, shipping_service,
-            payment_method, pickup_date, estimated_delivery_date, reservation_expires_at,
+            payment_method, pickup_date, estimated_delivery_date, estimated_delivery_max_date, reservation_expires_at,
             items, user_id, customer_dni, address_extra, province, billing_same_as_shipping,
             billing_address, billing_address_extra, billing_city, billing_postal_code, billing_province,
             coupon_code, discount_amount, invoice_recipient_name, invoice_doc_type,
@@ -477,7 +486,7 @@ router.post('/', attachUserIfPresent, async (req, res) => {
             pickup_person_name, pickup_person_last_name)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,
                  $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29,
-                 $30, $31, $32, $33, NOW(), $34, $35, $36)
+                 $30, $31, $32, $33, $34, NOW(), $35, $36, $37)
          RETURNING *`,
         [
           orderNumber, initialStatus,
@@ -494,6 +503,7 @@ router.post('/', attachUserIfPresent, async (req, res) => {
           paymentMethod,
           deliveryType === 'pickup' ? pickupDate : null,
           estimatedDeliveryDate,
+          estimatedDeliveryMaxDate,
           reservationExpiresAt,
           JSON.stringify(itemsSnapshot),
           orderUserId,
@@ -521,9 +531,6 @@ router.post('/', attachUserIfPresent, async (req, res) => {
       await client.query('COMMIT')
     } catch (err) {
       await client.query('ROLLBACK')
-      if (err instanceof InsufficientStockError) {
-        return res.status(409).json({ error: err.message })
-      }
       throw err
     } finally {
       client.release()
@@ -542,7 +549,6 @@ router.post('/', attachUserIfPresent, async (req, res) => {
            WHERE id = $1`,
           [order.id]
         )
-        await releaseOrderStock(order.id)
         throw err
       }
 
@@ -900,9 +906,6 @@ router.patch('/:id/status', requireAdmin, async (req, res) => {
     )
     if (!rows.length) return res.status(404).json({ error: 'Pedido no encontrado' })
 
-    if (RELEASES_STOCK.includes(status)) {
-      await releaseOrderStock(req.params.id)
-    }
     if (status === 'delivered') {
       await sendReviewInvitationForOrder(req.params.id)
     }

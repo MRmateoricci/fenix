@@ -7,6 +7,7 @@ import { getShippingForCP, SHIPPING_SERVICES } from '../config/shipping'
 import mercadoPagoLogo from '../assets/mercado-pago-horizontal.svg'
 import { POLICIES } from './Policy'
 import { applyInvoiceMode, documentKindForNumber } from '../utils/checkoutInvoice'
+import { diasHabiles, plazoMaximo, rangoEntregaTexto } from '../utils/plazoEntrega'
 
 const API_BASE = import.meta.env.VITE_API_URL || ''
 const CHECKOUT_PAYMENT_DRAFT_KEY = 'fenix_checkout_payment_draft'
@@ -30,6 +31,19 @@ const fmt = (n) =>
 
 const fmtDate = (iso) =>
   new Date(iso).toLocaleDateString('es-AR', { day: '2-digit', month: 'long', year: 'numeric' })
+
+// Con un solo servicio no hace falta nombrarlo. Con más de uno se usa la
+// etiqueta ("Clásico"), nunca el id crudo que guarda la base ("clasico").
+const servicioEnvioTexto = (id) => {
+  if (SHIPPING_SERVICES.length < 2) return ''
+  const label = SHIPPING_SERVICES.find((service) => service.id === id)?.label
+  return label ? ` ${label}` : ''
+}
+
+// La estimación es una ventana, no un día: el correo tarda distinto según la
+// localidad dentro de la zona del CP (ver backend/config/shipping.js).
+const fmtVentanaEntrega = (estimate) =>
+  rangoEntregaTexto(estimate?.estimatedDeliveryMinDate, estimate?.estimatedDeliveryMaxDate)
 
 function tomorrowISO() {
   const d = new Date()
@@ -179,6 +193,11 @@ export default function Checkout() {
 
   const [deliveryEstimate, setDeliveryEstimate] = useState(null)
   const [deliveryEstimateLoading, setDeliveryEstimateLoading] = useState(false)
+
+  // Días hábiles de preparación del carrito: el mayor de sus items, porque se
+  // despacha todo junto. Se recalcula cuando cambia el carrito y vuelve a pedir
+  // la estimación, para que la fecha mostrada nunca quede de un carrito viejo.
+  const handlingDays = useMemo(() => plazoMaximo(items), [items])
 
   // El checkout viaja a otro dominio para pagar. Guardamos cada cambio, no
   // solamente el instante de la redirección, para que dirección, receptor
@@ -395,8 +414,8 @@ export default function Checkout() {
     setCouponError(null)
   }
 
-  // Estimación de entrega (Correo Argentino + margen de stock) — solo tiene
-  // sentido pedirla cuando la zona ya resolvió a un costo concreto.
+  // Estimación de entrega (Correo Argentino + preparación del pedido) — solo
+  // tiene sentido pedirla cuando la zona ya resolvió a un costo concreto.
   useEffect(() => {
     if (formData.deliveryType !== 'delivery') {
       setDeliveryEstimate(null)
@@ -419,6 +438,9 @@ export default function Checkout() {
           postalCode: cp,
           service: formData.shippingService,
           subtotal: String(totalPrice),
+          // Vista previa nada más: POST /api/orders vuelve a resolver el plazo
+          // contra la DB, igual que hace con los precios.
+          handlingDays: String(handlingDays),
         })
         const res = await fetch(`${API_BASE}/api/shipping/estimate?${params}`, {
           signal: controller.signal,
@@ -435,7 +457,7 @@ export default function Checkout() {
       clearTimeout(t)
       controller.abort()
     }
-  }, [formData.deliveryType, formData.codigoPostal, formData.shippingService, totalPrice])
+  }, [formData.deliveryType, formData.codigoPostal, formData.shippingService, totalPrice, handlingDays])
 
   function setField(key, value) {
     const normalizedValue = key === 'invoiceDocNumber'
@@ -898,6 +920,9 @@ export default function Checkout() {
                   </Field>
                 </div>
 
+                {/* Elegir entre una sola opción no es elegir: el selector aparece
+                    solo si vuelve a haber más de un servicio. */}
+                {SHIPPING_SERVICES.length > 1 && (
                 <div>
                   <label style={{
                     display: 'block', fontSize: '0.68rem', fontWeight: 600,
@@ -929,6 +954,7 @@ export default function Checkout() {
                     })}
                   </div>
                 </div>
+                )}
 
                 {/* Costo de envío calculado */}
                 {formData.codigoPostal.trim().length >= 4 && shippingZone && (
@@ -944,7 +970,7 @@ export default function Checkout() {
                   }}>
                     <div>
                       <p style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text)', margin: 0 }}>
-                        {shippingZone.label} · {SHIPPING_SERVICES.find(({ id }) => id === formData.shippingService)?.label}
+                        {shippingZone.label}{SHIPPING_SERVICES.length > 1 ? ` · ${SHIPPING_SERVICES.find(({ id }) => id === formData.shippingService)?.label}` : ''}
                       </p>
                       <p style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)', margin: '2px 0 0' }}>
                         {shippingZone.description}
@@ -972,9 +998,9 @@ export default function Checkout() {
                 {shippingZone && shippingZone.price !== null && (
                   <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
                     {deliveryEstimateLoading
-                      ? 'Calculando fecha estimada de entrega...'
+                      ? 'Calculando la fecha de entrega...'
                       : deliveryEstimateMatches
-                        ? `Entrega estimada: ${fmtDate(deliveryEstimate.estimatedDeliveryDate)} (incluye margen por disponibilidad de stock)`
+                        ? `Llega ${fmtVentanaEntrega(deliveryEstimate)} (incluye el tiempo de preparación del pedido)`
                         : null}
                   </p>
                 )}
@@ -1016,7 +1042,7 @@ export default function Checkout() {
                 <p style={{ fontSize: '0.875rem', fontWeight: 500, color: 'var(--color-text)' }}>
                   {formData.deliveryType === 'pickup'
                     ? 'Retiro en local — 473 entre 14C y 15, City Bell'
-                    : `Envío ${formData.shippingService} a ${formData.direccion}, ${formData.ciudad} (CP ${formData.codigoPostal})`}
+                    : `Envío${servicioEnvioTexto(formData.shippingService)} a ${formData.direccion}, ${formData.ciudad} (CP ${formData.codigoPostal})`}
                 </p>
                 <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: '0.125rem' }}>
                   {formData.nombre} {formData.apellido} · {formData.telefono}
@@ -1029,7 +1055,7 @@ export default function Checkout() {
                 )}
                 {formData.deliveryType === 'delivery' && deliveryEstimateMatches && (
                   <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: '0.125rem' }}>
-                    Entrega estimada: {fmtDate(deliveryEstimate.estimatedDeliveryDate)}
+                    Llega {fmtVentanaEntrega(deliveryEstimate)}
                   </p>
                 )}
               </div>
@@ -1055,7 +1081,7 @@ export default function Checkout() {
 
             <BillingAddress formData={formData} errors={errors} setField={setField} />
 
-            <APedidoCheckoutNotice items={items} />
+            <PreparacionCheckoutNotice items={items} deliveryType={formData.deliveryType} />
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginBottom: '2rem' }}>
               <GhostBtn onClick={() => setStep(2)} disabled={submitting}>
@@ -1248,13 +1274,24 @@ function SinglePageCheckout({
 
         {formData.deliveryType === 'delivery' && (
           <div className="fnx-shipping-methods">
-            <h3>Métodos de envío</h3>
+            <h3>{SHIPPING_SERVICES.length > 1 ? 'Métodos de envío' : 'Envío'}</h3>
             {formData.codigoPostal.trim().length < 4 ? (
               <div className="fnx-shipping-placeholder">Ingresá tu dirección de envío para ver los métodos disponibles.</div>
             ) : (
               <>
                 {SHIPPING_SERVICES.map((service) => {
                   const optionQuote = getShippingForCP(formData.codigoPostal, service.id)
+                  const contenido = (
+                    <>
+                      <span><b>{service.label}</b>{optionQuote?.description && <small>{optionQuote.description}</small>}</span>
+                      <strong>{optionQuote?.price == null ? 'A confirmar' : optionQuote.price === 0 ? 'Gratis' : fmt(optionQuote.price)}</strong>
+                    </>
+                  )
+                  // El costo se sigue mostrando; lo que desaparece es el gesto de
+                  // elegir, que con un único servicio sólo confunde.
+                  if (SHIPPING_SERVICES.length === 1) {
+                    return <div key={service.id} className="fnx-shipping-single">{contenido}</div>
+                  }
                   return (
                     <button
                       type="button"
@@ -1262,16 +1299,15 @@ function SinglePageCheckout({
                       className={formData.shippingService === service.id ? 'is-active' : ''}
                       onClick={() => setField('shippingService', service.id)}
                     >
-                      <span><b>{service.label}</b>{optionQuote?.description && <small>{optionQuote.description}</small>}</span>
-                      <strong>{optionQuote?.price == null ? 'A confirmar' : optionQuote.price === 0 ? 'Gratis' : fmt(optionQuote.price)}</strong>
+                      {contenido}
                     </button>
                   )
                 })}
                 <p className="fnx-delivery-estimate">
                   {deliveryEstimateLoading
-                    ? 'Calculando fecha estimada...'
+                    ? 'Calculando la fecha de entrega...'
                     : deliveryEstimateMatches
-                      ? `Entrega estimada: ${fmtDate(deliveryEstimate.estimatedDeliveryDate)}`
+                      ? `Llega ${fmtVentanaEntrega(deliveryEstimate)}`
                       : ''}
                 </p>
               </>
@@ -2107,23 +2143,29 @@ function CheckSmall() {
   )
 }
 
-// Aviso visible antes de pagar — el cliente tiene que saber el plazo de items
-// a pedido ANTES de ir a Mercado Pago, no después. El plazo mostrado es el
-// mayor entre los items a pedido, no una suma (cada uno llega por su cuenta).
-// Puramente informativo: no se suma al tiempo de envío ni se calcula una fecha combinada.
-function APedidoCheckoutNotice({ items }) {
-  const dias = items.filter((i) => i.aPedido).map((i) => Number(i.diasEntregaPedido) || 0)
-  if (!dias.length) return null
-  const maxDias = Math.max(...dias)
+// El plazo de preparación aparece en un solo lugar de toda la tienda: acá, y
+// sólo en retiro en local. Con envío no hace falta — "Entrega estimada" ya
+// combina preparación + correo en una fecha concreta, y repetir el plazo suelto
+// al lado sería decir dos veces lo mismo con números distintos.
+//
+// El resto del sitio (ficha, tarjetas, carrito) no muestra plazos a propósito:
+// antes de conocer el domicilio cualquier número es incompleto, y adelantarlo
+// espanta compras que igual iban a llegar a tiempo.
+//
+// El plazo es el mayor del carrito, nunca la suma: todo se despacha junto.
+function PreparacionCheckoutNotice({ items, deliveryType }) {
+  if (deliveryType !== 'pickup') return null
+  const maxDias = plazoMaximo(items)
+  if (!maxDias) return null
   return (
     <div style={{
       display: 'flex', alignItems: 'flex-start', gap: 10,
       padding: '14px 16px', borderRadius: 10, marginBottom: '1.5rem',
-      backgroundColor: 'rgba(224,138,30,0.1)', border: '1px solid rgba(224,138,30,0.35)',
+      backgroundColor: 'var(--color-surface-2)', border: '1px solid var(--color-border)',
     }}>
       <ClockIcon />
-      <p style={{ margin: 0, fontSize: '0.8125rem', color: '#8A5A00', lineHeight: 1.5 }}>
-        Tu pedido incluye productos a pedido. El plazo de entrega es de hasta <strong>{maxDias} días hábiles</strong>.
+      <p style={{ margin: 0, fontSize: '0.8125rem', color: 'var(--color-text-muted)', lineHeight: 1.5 }}>
+        Te avisamos cuando esté listo para retirar: lo preparamos en hasta <strong>{diasHabiles(maxDias)}</strong>.
       </p>
     </div>
   )
@@ -2132,7 +2174,7 @@ function APedidoCheckoutNotice({ items }) {
 function ClockIcon() {
   return (
     <svg
-      style={{ flexShrink: 0, marginTop: '0.125rem', color: '#8A5A00' }}
+      style={{ flexShrink: 0, marginTop: '0.125rem', color: 'var(--color-text-muted)' }}
       width="16" height="16" viewBox="0 0 24 24" fill="none"
       stroke="currentColor" strokeWidth="1.8"
     >

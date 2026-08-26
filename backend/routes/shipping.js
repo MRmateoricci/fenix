@@ -48,8 +48,11 @@ router.get('/estimate', async (req, res) => {
 
     const freeShipping = qualifiesForFreeShipping({ subtotal })
 
-    const { carrierBusinessDays, bufferBusinessDays, totalBusinessDays, estimatedDate } =
-      await estimateDeliveryDate(postalCode)
+    // El margen de preparación lo manda el Checkout con el mayor plazo del
+    // carrito. Es sólo para la vista previa: POST /api/orders lo vuelve a
+    // calcular contra products.stock_inmediato y nunca contra este valor.
+    const handlingDays = req.query.handlingDays == null ? undefined : Number(req.query.handlingDays)
+    const estimate = await estimateDeliveryDate(postalCode, handlingDays)
 
     res.json({
       zone: {
@@ -62,10 +65,13 @@ router.get('/estimate', async (req, res) => {
       postalCode: quote.postalCode,
       service: quote.service,
       source: quote.source,
-      carrierBusinessDays,
-      bufferBusinessDays,
-      totalBusinessDays,
-      estimatedDeliveryDate: estimatedDate,
+      // Ventana de entrega, no una fecha: el tránsito varía según la localidad
+      // dentro de la zona del CP (ver config/shipping.js).
+      handlingBusinessDays: estimate.handlingBusinessDays,
+      minBusinessDays: estimate.minBusinessDays,
+      maxBusinessDays: estimate.maxBusinessDays,
+      estimatedDeliveryMinDate: estimate.minDate,
+      estimatedDeliveryMaxDate: estimate.maxDate,
     })
   } catch (err) {
     console.error('[GET /api/shipping/estimate]', err)

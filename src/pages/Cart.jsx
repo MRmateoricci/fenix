@@ -114,8 +114,6 @@ export default function Cart() {
 
           {/* ── Items list ─────────────────────────────────────────────── */}
           <div>
-            <APedidoNotice items={items} />
-
             {/* Column headers */}
             <div style={{
               display: 'grid', gridTemplateColumns: '1fr auto',
@@ -220,23 +218,6 @@ export default function Cart() {
   )
 }
 
-// Aviso breve cuando el carrito incluye items a pedido — el plazo mostrado es
-// el mayor entre esos items, no una suma (cada uno llega por su cuenta).
-function APedidoNotice({ items }) {
-  const dias = items.filter((i) => i.aPedido).map((i) => Number(i.diasEntregaPedido) || 0)
-  if (!dias.length) return null
-  const maxDias = Math.max(...dias)
-  return (
-    <div style={{
-      marginBottom: 20, padding: '12px 16px', borderRadius: 3,
-      background: T.amberBg, color: T.amber,
-      fontFamily: "'Inter', system-ui, sans-serif", fontSize: 13, lineHeight: 1.5,
-    }}>
-      Tu pedido incluye productos a pedido. El plazo de entrega es de hasta {maxDias} días hábiles.
-    </div>
-  )
-}
-
 // ─── Cart Item Row ─────────────────────────────────────────────────────────────
 function CartItem({ item, onRemove, onQtyChange }) {
   return (
@@ -291,14 +272,6 @@ function CartItem({ item, onRemove, onQtyChange }) {
           }}>
             {fmt(item.price)} c/u
           </p>
-          {item.aPedido && (
-            <p style={{
-              fontFamily: "'Inter', system-ui, sans-serif",
-              fontSize: 11.5, color: T.amber, margin: '4px 0 0',
-            }}>
-              A pedido · llega en ~{item.diasEntregaPedido} días hábiles
-            </p>
-          )}
         </div>
 
         {/* Quantity + remove */}

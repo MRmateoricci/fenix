@@ -1,3 +1,18 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// FUERA DE SERVICIO — nadie llama a este módulo.
+//
+// La tienda dejó de llevar stock: el mismo inventario físico se vende en el
+// mostrador y online sin POS que los sincronice, así que los números quedaban
+// viejos en días. Hoy la disponibilidad es una bandera por producto
+// (products.stock_inmediato) y lo único que cambia para el cliente es el plazo
+// de entrega. El módulo se conserva —junto con las columnas stock,
+// variant_stock y product_variant_rules.stock— por si más adelante se vuelve a
+// llevar stock de un subconjunto del catálogo.
+//
+// Si se reactiva: reserveStock y releaseOrderStock se prenden JUNTAS. Con sólo
+// una de las dos, cada pedido cancelado descuadra el stock de forma permanente
+// (o nunca se descuenta, o se repone algo que jamás se descontó).
+// ─────────────────────────────────────────────────────────────────────────────
 import { pool } from '../db/pool.js'
 
 export class InsufficientStockError extends Error {
