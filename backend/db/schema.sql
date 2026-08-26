@@ -848,3 +848,53 @@ ALTER TABLE store_settings ADD COLUMN IF NOT EXISTS dias_despacho_inmediato INTE
 -- inventada con esa precisión es justamente la que genera el reclamo.
 -- Los pedidos anteriores tienen NULL acá y se siguen mostrando con su fecha única.
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS estimated_delivery_max_date DATE;
+
+-- Una fila por importación de lista de precios confirmada. `products.price_updated_at`
+-- no responde la pregunta que se hace el admin: solo se mueve en los productos
+-- cuyo precio efectivamente cambió, así que una lista que el proveedor mandó sin
+-- aumentos queda invisible y al mes siguiente no hay forma de saber si se subió.
+-- Acá se registra la carga aunque no haya cambiado un solo precio.
+CREATE TABLE IF NOT EXISTS supplier_price_imports (
+  id              UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+  supplier        VARCHAR(80)  NOT NULL,
+  file_names      JSONB        NOT NULL DEFAULT '[]',
+  total_rows      INTEGER      NOT NULL DEFAULT 0,
+  created_count   INTEGER      NOT NULL DEFAULT 0,
+  updated_count   INTEGER      NOT NULL DEFAULT 0,
+  unchanged_count INTEGER      NOT NULL DEFAULT 0,
+  skipped_count   INTEGER      NOT NULL DEFAULT 0,
+  -- Filas que quedaron esperando que se eligiera una variante: sin esto una
+  -- importación incompleta figura en el historial como si hubiera terminado.
+  pending_variant_count INTEGER NOT NULL DEFAULT 0,
+  -- Cotización con la que se convirtieron los precios de ese proveedor si su
+  -- lista venía en USD. Sin ella no se puede reconstruir de dónde salió un importe.
+  exchange_rate   NUMERIC(14,4),
+  created_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_supplier_price_imports_supplier
+  ON supplier_price_imports(supplier, created_at DESC);
+
+-- Precio derivado de otra variante del mismo producto. Existe para las variantes
+-- que el negocio agrega a mano y el proveedor no lista: sin esto quedan con el
+-- precio del día que se crearon y, después de un par de aumentos, una medida
+-- grande termina más barata que una chica. `price_source_percent` es el
+-- porcentaje sobre la variante seguida (0 = mismo precio, 15 = 15% más caro).
+ALTER TABLE product_variant_rules
+  ADD COLUMN IF NOT EXISTS price_source_rule_id UUID
+  REFERENCES product_variant_rules(id) ON DELETE SET NULL;
+ALTER TABLE product_variant_rules
+  ADD COLUMN IF NOT EXISTS price_source_percent NUMERIC(7,2) NOT NULL DEFAULT 0;
+
+-- Una variante no puede seguirse a sí misma. Las cadenas (A sigue a B que sigue
+-- a C) se rechazan en la aplicación: obligar a que el origen tenga precio propio
+-- descarta los ciclos y deja la resolución en una sola pasada.
+ALTER TABLE product_variant_rules
+  DROP CONSTRAINT IF EXISTS product_variant_rules_price_source_distinct;
+ALTER TABLE product_variant_rules
+  ADD CONSTRAINT product_variant_rules_price_source_distinct
+  CHECK (price_source_rule_id IS NULL OR price_source_rule_id <> id);
+
+CREATE INDEX IF NOT EXISTS idx_product_variant_rules_price_source
+  ON product_variant_rules(price_source_rule_id)
+  WHERE price_source_rule_id IS NOT NULL;

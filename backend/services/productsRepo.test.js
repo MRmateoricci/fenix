@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { createSupplierPriceDrafts, previewSupplierPriceDrafts } from './productsRepo.js'
+import { createSupplierPriceDrafts, previewSupplierPriceDrafts, recordSupplierPriceImports } from './productsRepo.js'
 
 test('la vista previa detalla creaciones, cambios, vinculaciones, repetidos e inválidos sin escribir', async () => {
   const client = {
@@ -25,6 +25,7 @@ test('la vista previa detalla creaciones, cambios, vinculaciones, repetidos e in
           color_options: [], size_options: [],
         }] }
       }
+      if (/FROM products WHERE supplier = \$1/.test(sql)) return { rows: [] }
       throw new Error(`Consulta inesperada: ${sql}`)
     },
   }
@@ -217,4 +218,451 @@ test('una lista masiva actualiza el precio de una variante unida sin recrear su 
   assert.equal(productInsertAttempted, false)
   assert.equal(colors.find(color => color.name === 'Negro').price, 250)
   assert.equal(colors.find(color => color.name === 'Blanco').price, 120)
+})
+
+// Cliente mínimo para los casos de renombre: sin asociaciones guardadas ni
+// coincidencia exacta de código, todo depende de los candidatos del proveedor.
+function renameClient(supplierProducts) {
+  return {
+    async query(sql) {
+      if (/FROM supplier_product_mappings mapping/.test(sql)) return { rows: [] }
+      if (/FROM products WHERE codigo = ANY/.test(sql)) return { rows: [] }
+      if (/FROM products WHERE supplier = \$1/.test(sql)) return { rows: supplierProducts }
+      throw new Error(`Consulta inesperada: ${sql}`)
+    },
+  }
+}
+
+const renameFile = (rows) => ({
+  fileName: 'LISTA.xlsx', supplier: 'ALCIDES', currency: 'ARS', totalRows: rows.length,
+  skipped: 0, invalidRows: [], rows,
+})
+
+test('un código renombrado solo en la puntuación propone el producto original antes de crear un duplicado', async () => {
+  const client = renameClient([
+    { id: 'p-1', codigo: 'ALC40', nombre: 'Farol colgante', descripcion: 'Farol colgante', image_url: null, published: true },
+    { id: 'p-2', codigo: 'ALC99', nombre: 'Otra cosa', descripcion: 'Otra cosa', image_url: null, published: true },
+  ])
+
+  const result = await previewSupplierPriceDrafts(client, [renameFile([
+    { codigo: 'AL-C40', descripcion: 'Farol colgante', precio_costo: 100, precio_venta: 150, precio_iva: 181.5 },
+  ])], 1510)
+
+  const [item] = result.files[0].items
+  assert.equal(item.status, 'create')
+  assert.equal(item.suggestions[0].id, 'p-1')
+  assert.equal(item.suggestions[0].renamed, true)
+  assert.equal(item.suggestions[0].similarity, 100)
+})
+
+test('dos productos que colapsan al mismo código normalizado no se proponen como renombre', async () => {
+  const client = renameClient([
+    { id: 'p-1', codigo: 'ALC40', nombre: 'Farol', descripcion: 'Farol', image_url: null, published: true },
+    { id: 'p-2', codigo: 'AL C40', nombre: 'Farol viejo', descripcion: 'Farol viejo', image_url: null, published: true },
+  ])
+
+  const result = await previewSupplierPriceDrafts(client, [renameFile([
+    { codigo: 'AL-C40', descripcion: 'Farol', precio_costo: 100, precio_venta: 150, precio_iva: 181.5 },
+  ])], 1510)
+
+  // Siguen ofreciendose como candidatos a mano: lo que no puede pasar es que uno
+  // se presente como "es este seguro" cuando el otro es igual de parecido.
+  const [item] = result.files[0].items
+  assert.equal(item.status, 'create')
+  assert.equal(item.suggestions.length, 2)
+  assert.equal(item.suggestions.some(product => product.renamed), false)
+})
+
+test('un producto que ya recibe otra fila de la misma lista no se propone para un alta', async () => {
+  const client = {
+    async query(sql) {
+      if (/FROM supplier_product_mappings mapping/.test(sql)) return { rows: [] }
+      if (/FROM products WHERE codigo = ANY/.test(sql)) return { rows: [{
+        id: 'p-1', codigo: 'ALC40', supplier: 'ALCIDES', product_name: 'Farol colgante',
+        precio_costo: 100, precio_venta: 150, precio_iva: 181.5,
+        precio_costo_usd: null, precio_venta_usd: null, precio_iva_usd: null,
+        color_options: [], size_options: [],
+      }] }
+      if (/FROM products WHERE supplier = \$1/.test(sql)) return { rows: [
+        { id: 'p-1', codigo: 'ALC40', nombre: 'Farol colgante', descripcion: 'Farol colgante', image_url: null, published: true },
+      ] }
+      throw new Error(`Consulta inesperada: ${sql}`)
+    },
+  }
+
+  const result = await previewSupplierPriceDrafts(client, [renameFile([
+    { codigo: 'ALC40', descripcion: 'Farol colgante', precio_costo: 100, precio_venta: 160, precio_iva: 193.6 },
+    { codigo: 'AL-C40', descripcion: 'Farol colgante', precio_costo: 100, precio_venta: 150, precio_iva: 181.5 },
+  ])], 1510)
+
+  const [exact, alta] = result.files[0].items
+  assert.equal(exact.status, 'update')
+  assert.equal(exact.targetProductId, 'p-1')
+  assert.equal(alta.status, 'create')
+  assert.equal(alta.suggestions, undefined)
+})
+
+test('un alta sin ningún parecido en el proveedor no arrastra sugerencias', async () => {
+  const client = renameClient([
+    { id: 'p-1', codigo: 'ZZ900', nombre: 'Cable subterráneo', descripcion: 'Cable subterráneo', image_url: null, published: true },
+  ])
+
+  const result = await previewSupplierPriceDrafts(client, [renameFile([
+    { codigo: 'AL-C40', descripcion: 'Farol colgante', precio_costo: 100, precio_venta: 150, precio_iva: 181.5 },
+  ])], 1510)
+
+  assert.equal(result.files[0].items[0].suggestions, undefined)
+})
+
+test('la asociación guardada queda marcada para poder deshacerse desde la vista previa', async () => {
+  const client = {
+    async query(sql) {
+      if (/FROM supplier_product_mappings mapping/.test(sql)) return { rows: [{
+        source_code_key: 'AL-C40', product_id: 'p-1', color_name: null, size_label: null,
+        tone_name: null, variant_rule_id: null, product_code: 'ALC40', product_name: 'Farol colgante',
+        precio_costo: 100, precio_venta: 140, precio_iva: 169.4,
+        precio_costo_usd: null, precio_venta_usd: null, precio_iva_usd: null,
+        color_options: [], size_options: [],
+      }] }
+      if (/FROM products WHERE supplier = \$1/.test(sql)) return { rows: [] }
+      throw new Error(`Consulta inesperada: ${sql}`)
+    },
+  }
+
+  const result = await previewSupplierPriceDrafts(client, [renameFile([
+    { codigo: 'AL-C40', descripcion: 'Farol colgante', precio_costo: 100, precio_venta: 150, precio_iva: 181.5 },
+  ])], 1510)
+
+  const [item] = result.files[0].items
+  assert.equal(item.status, 'update')
+  assert.equal(item.matchType, 'saved')
+  assert.equal(item.targetCode, 'ALC40')
+})
+
+const groupedRules = [
+  { id: 'rule-15w', color: null, size: '15W', tone: null, precioVenta: 1000, precioIva: 1210 },
+  { id: 'rule-20w', color: null, size: '20W', tone: null, precioVenta: 1300, precioIva: 1573 },
+]
+
+test('un codigo que apunta a un producto agrupado sin variante asignada espera la eleccion y no se aplica', async () => {
+  const client = {
+    async query(sql) {
+      if (/FROM supplier_product_mappings mapping/.test(sql)) return { rows: [{
+        source_code_key: 'ALC40', product_id: 'p-1', color_name: null, size_label: null,
+        tone_name: null, variant_rule_id: null, product_code: 'ALC40', product_name: 'Lampara',
+        precio_costo: 800, precio_venta: 1000, precio_iva: 1210,
+        precio_costo_usd: null, precio_venta_usd: null, precio_iva_usd: null,
+        color_options: [], size_options: [], variant_rules: groupedRules,
+      }] }
+      if (/FROM products WHERE supplier = \$1/.test(sql)) return { rows: [] }
+      throw new Error(`Consulta inesperada: ${sql}`)
+    },
+  }
+
+  const result = await previewSupplierPriceDrafts(client, [renameFile([
+    { codigo: 'ALC40', descripcion: 'Lampara', precio_costo: 900, precio_venta: 1100, precio_iva: 1331 },
+  ])], 1510)
+
+  const [item] = result.files[0].items
+  assert.equal(item.status, 'variant')
+  assert.equal(result.updated, 0)
+  assert.equal(result.pendingVariant, 1)
+  assert.deepEqual(item.groupedTarget.rules.map(rule => rule.label), ['15W', '20W'])
+  assert.match(item.reason, /2 variantes/)
+})
+
+test('un codigo ya asignado a una variante concreta se actualiza normalmente', async () => {
+  const client = {
+    async query(sql) {
+      if (/FROM supplier_product_mappings mapping/.test(sql)) return { rows: [{
+        source_code_key: 'ALC40-20W', product_id: 'p-1', color_name: null, size_label: '20W',
+        tone_name: null, variant_rule_id: 'rule-20w', product_code: 'ALC40', product_name: 'Lampara',
+        precio_costo: 800, precio_venta: 1000, precio_iva: 1210,
+        precio_costo_usd: null, precio_venta_usd: null, precio_iva_usd: null,
+        rule_precio_costo: 1000, rule_precio_venta: 1300, rule_precio_iva: 1573,
+        rule_precio_costo_usd: null, rule_precio_venta_usd: null, rule_precio_iva_usd: null,
+        color_options: [], size_options: [], variant_rules: groupedRules,
+      }] }
+      if (/FROM products WHERE supplier = \$1/.test(sql)) return { rows: [] }
+      throw new Error(`Consulta inesperada: ${sql}`)
+    },
+  }
+
+  const result = await previewSupplierPriceDrafts(client, [renameFile([
+    { codigo: 'ALC40-20W', descripcion: 'Lampara 20W', precio_costo: 1100, precio_venta: 1400, precio_iva: 1694 },
+  ])], 1510)
+
+  const [item] = result.files[0].items
+  assert.equal(item.status, 'update')
+  assert.equal(item.groupedTarget, undefined)
+  assert.equal(result.pendingVariant, 0)
+  assert.equal(item.changes.find(change => change.field === 'precioVenta').previous, 1300)
+})
+
+test('un producto de una sola variante se sigue actualizando por la ficha, que el trigger sincroniza', async () => {
+  const client = {
+    async query(sql) {
+      if (/FROM supplier_product_mappings mapping/.test(sql)) return { rows: [{
+        source_code_key: 'SIMPLE', product_id: 'p-2', color_name: null, size_label: null,
+        tone_name: null, variant_rule_id: null, product_code: 'SIMPLE', product_name: 'Producto simple',
+        precio_costo: 800, precio_venta: 1000, precio_iva: 1210,
+        precio_costo_usd: null, precio_venta_usd: null, precio_iva_usd: null,
+        color_options: [], size_options: [],
+        variant_rules: [{ id: 'rule-base', color: null, size: null, tone: null, precioVenta: 1000, precioIva: 1210 }],
+      }] }
+      if (/FROM products WHERE supplier = \$1/.test(sql)) return { rows: [] }
+      throw new Error(`Consulta inesperada: ${sql}`)
+    },
+  }
+
+  const result = await previewSupplierPriceDrafts(client, [renameFile([
+    { codigo: 'SIMPLE', descripcion: 'Producto simple', precio_costo: 900, precio_venta: 1100, precio_iva: 1331 },
+  ])], 1510)
+
+  assert.equal(result.files[0].items[0].status, 'update')
+  assert.equal(result.pendingVariant, 0)
+})
+
+test('la fila que espera variante no se escribe al confirmar la importacion', async () => {
+  const executed = []
+  const client = {
+    async query(sql, params) {
+      executed.push(sql)
+      if (/FROM supplier_product_mappings mapping/.test(sql)) return { rows: [{
+        source_code_key: 'ALC40', product_id: 'p-1', color_name: null, size_label: null,
+        tone_name: null, variant_rule_id: null, product_code: 'ALC40', product_name: 'Lampara',
+        precio_costo: 800, precio_venta: 1000, precio_iva: 1210,
+        precio_costo_usd: null, precio_venta_usd: null, precio_iva_usd: null,
+        color_options: [], size_options: [], variant_rules: groupedRules,
+      }] }
+      if (/FROM products WHERE supplier = \$1/.test(sql)) return { rows: [] }
+      if (/SELECT source_code_key, product_id/.test(sql)) return { rows: [{ source_code_key: 'ALC40', product_id: 'p-1' }] }
+      if (/INSERT INTO products/.test(sql)) return { rows: [] }
+      throw new Error(`Consulta inesperada: ${sql}`)
+    },
+  }
+
+  const files = [renameFile([
+    { codigo: 'ALC40', descripcion: 'Lampara', precio_costo: 900, precio_venta: 1100, precio_iva: 1331 },
+  ])]
+  const preview = await previewSupplierPriceDrafts(client, files, 1510)
+  const result = await createSupplierPriceDrafts(client, files, 1510, preview)
+
+  assert.equal(result.created, 0)
+  assert.equal(result.updated, 0)
+  assert.equal(executed.some(sql => /UPDATE products/.test(sql)), false)
+  assert.equal(executed.some(sql => /UPDATE product_variant_rules/.test(sql)), false)
+})
+
+test('un producto que otro archivo del mismo proveedor ya actualiza no se sugiere como destino de un alta', async () => {
+  const client = {
+    async query(sql) {
+      if (/FROM supplier_product_mappings mapping/.test(sql)) return { rows: [] }
+      if (/FROM products WHERE codigo = ANY/.test(sql)) return { rows: [{
+        id: 'p-1', codigo: 'ALC40', supplier: 'ALCIDES', product_name: 'Farol colgante',
+        precio_costo: 100, precio_venta: 150, precio_iva: 181.5,
+        precio_costo_usd: null, precio_venta_usd: null, precio_iva_usd: null,
+        color_options: [], size_options: [], variant_rules: [],
+      }] }
+      if (/FROM products WHERE supplier = \$1/.test(sql)) return { rows: [
+        { id: 'p-1', codigo: 'ALC40', nombre: 'Farol colgante', descripcion: 'Farol colgante', published: true },
+      ] }
+      throw new Error(`Consulta inesperada: ${sql}`)
+    },
+  }
+
+  // El codigo exacto llega en el primer archivo y el renombrado en el segundo.
+  const result = await previewSupplierPriceDrafts(client, [
+    renameFile([{ codigo: 'ALC40', descripcion: 'Farol colgante', precio_costo: 100, precio_venta: 160, precio_iva: 193.6 }]),
+    { ...renameFile([{ codigo: 'AL-C40', descripcion: 'Farol colgante', precio_costo: 100, precio_venta: 150, precio_iva: 181.5 }]), fileName: 'LISTA-2.xlsx' },
+  ], 1510)
+
+  assert.equal(result.files[0].items[0].status, 'update')
+  assert.equal(result.files[1].items[0].status, 'create')
+  assert.equal(result.files[1].items[0].suggestions, undefined)
+})
+
+test('el comprobante posterior nombra las filas que quedaron esperando variante', async () => {
+  const client = {
+    async query(sql) {
+      if (/FROM supplier_product_mappings mapping/.test(sql)) return { rows: [{
+        source_code_key: 'ALC40', product_id: 'p-1', color_name: null, size_label: null,
+        tone_name: null, variant_rule_id: null, product_code: 'ALC40', product_name: 'Lampara',
+        precio_costo: 800, precio_venta: 1000, precio_iva: 1210,
+        precio_costo_usd: null, precio_venta_usd: null, precio_iva_usd: null,
+        color_options: [], size_options: [], variant_rules: groupedRules,
+      }] }
+      if (/FROM products WHERE supplier = \$1/.test(sql)) return { rows: [] }
+      if (/SELECT source_code_key, product_id/.test(sql)) return { rows: [{ source_code_key: 'ALC40', product_id: 'p-1' }] }
+      if (/INSERT INTO products/.test(sql)) return { rows: [] }
+      throw new Error(`Consulta inesperada: ${sql}`)
+    },
+  }
+
+  const files = [renameFile([
+    { codigo: 'ALC40', descripcion: 'Lampara', precio_costo: 900, precio_venta: 1100, precio_iva: 1331 },
+  ])]
+  const preview = await previewSupplierPriceDrafts(client, files, 1510)
+  const result = await createSupplierPriceDrafts(client, files, 1510, preview)
+
+  assert.equal(result.pendingVariant, 1)
+  assert.equal(result.files[0].pendingVariant, 1)
+  // La vista previa ya la contaba como omitida: el comprobante da el mismo total.
+  assert.equal(result.skipped, preview.skipped)
+})
+
+// ── Historial de cargas de lista ─────────────────────────────────────────────
+
+function recordingClient() {
+  const calls = []
+  return {
+    calls,
+    async query(sql, params) {
+      calls.push({ sql, params })
+      if (/INSERT INTO supplier_price_imports/.test(sql)) {
+        return { rows: [{ supplier: 'ALCIDES', created_at: '2026-08-26T12:00:00Z' }] }
+      }
+      throw new Error(`Consulta inesperada: ${sql}`)
+    },
+  }
+}
+
+test('una carga que no cambió ningún precio igual queda registrada', async () => {
+  const client = recordingClient()
+  await recordSupplierPriceImports(client, [
+    { fileName: 'LISTA.xlsx', supplier: 'ALCIDES', totalRows: 108, created: 0, updated: 0, unchanged: 108, skipped: 108, pendingVariant: 0 },
+  ], 1510)
+
+  assert.equal(client.calls.length, 1)
+  const entradas = JSON.parse(client.calls[0].params[0])
+  assert.equal(entradas.length, 1)
+  assert.equal(entradas[0].supplier, 'ALCIDES')
+  assert.equal(entradas[0].total_rows, 108)
+  assert.equal(entradas[0].unchanged_count, 108)
+  assert.equal(entradas[0].created_count, 0)
+  assert.equal(client.calls[0].params[1], 1510)
+})
+
+test('varios archivos del mismo proveedor se registran como una sola carga', async () => {
+  const client = recordingClient()
+  await recordSupplierPriceImports(client, [
+    { fileName: 'PARTE-1.xlsx', supplier: 'ALCIDES', totalRows: 50, created: 2, updated: 10, unchanged: 38, skipped: 38, pendingVariant: 1 },
+    { fileName: 'PARTE-2.xlsx', supplier: 'ALCIDES', totalRows: 30, created: 1, updated: 5, unchanged: 24, skipped: 24, pendingVariant: 2 },
+  ], 1510)
+
+  const entradas = JSON.parse(client.calls[0].params[0])
+  assert.equal(entradas.length, 1)
+  assert.deepEqual(entradas[0].file_names, ['PARTE-1.xlsx', 'PARTE-2.xlsx'])
+  assert.equal(entradas[0].total_rows, 80)
+  assert.equal(entradas[0].updated_count, 15)
+  assert.equal(entradas[0].created_count, 3)
+  assert.equal(entradas[0].pending_variant_count, 3)
+})
+
+test('archivos de proveedores distintos generan una carga por proveedor', async () => {
+  const client = recordingClient()
+  await recordSupplierPriceImports(client, [
+    { fileName: 'A.xlsx', supplier: 'ALCIDES', totalRows: 10, created: 1, updated: 2, unchanged: 7, skipped: 7, pendingVariant: 0 },
+    { fileName: 'K.xlsx', supplier: 'KIAN', totalRows: 20, created: 0, updated: 4, unchanged: 16, skipped: 16, pendingVariant: 0 },
+  ], 1510)
+
+  const entradas = JSON.parse(client.calls[0].params[0])
+  assert.deepEqual(entradas.map(entrada => entrada.supplier), ['ALCIDES', 'KIAN'])
+  assert.equal(entradas[1].total_rows, 20)
+})
+
+test('sin archivos no se escribe ninguna fila de historial', async () => {
+  const client = recordingClient()
+  const result = await recordSupplierPriceImports(client, [], 1510)
+  assert.deepEqual(result, [])
+  assert.equal(client.calls.length, 0)
+})
+
+// ── Aviso de variantes que la lista no actualiza ─────────────────────────────
+
+// El caso real: BRE-7041..7044 vienen en el excel, BRE-7045 lo agregó el negocio.
+const breRules = [
+  { id: 'r-7044', color: null, size: '8 pulg', tone: null, precioVenta: 13234, precioIva: 16013.14, codigo: 'BRE-7044', supplierCode: 'BRE-7044', derived: false, updatedAt: '2026-07-12T00:00:00Z' },
+  { id: 'r-7045', color: null, size: '9 pulg', tone: null, precioVenta: 13234, precioIva: 16013.14, codigo: 'BRE-7045', supplierCode: null, derived: false, updatedAt: '2026-07-12T00:00:00Z' },
+]
+
+function breClient(rules) {
+  return {
+    async query(sql) {
+      if (/FROM supplier_product_mappings mapping/.test(sql)) return { rows: [{
+        source_code_key: 'BRE-7044', product_id: 'p-bre', color_name: null, size_label: '8 pulg',
+        tone_name: null, variant_rule_id: 'r-7044', product_code: 'BRE-04-GRP', product_name: 'Brida oblicua',
+        precio_costo: 9339.17, precio_venta: 13234, precio_iva: 16013.14,
+        precio_costo_usd: null, precio_venta_usd: null, precio_iva_usd: null,
+        rule_precio_costo: 9339.17, rule_precio_venta: 13234, rule_precio_iva: 16013.14,
+        rule_precio_costo_usd: null, rule_precio_venta_usd: null, rule_precio_iva_usd: null,
+        color_options: [], size_options: [], variant_rules: rules,
+      }] }
+      if (/FROM products WHERE supplier = \$1/.test(sql)) return { rows: [] }
+      throw new Error(`Consulta inesperada: ${sql}`)
+    },
+  }
+}
+
+const breFile = () => renameFile([
+  { codigo: 'BRE-7044', descripcion: 'Brida 8 pulg', precio_costo: 11207, precio_venta: 15880, precio_iva: 19214.8 },
+])
+
+test('la variante hecha a mano que no viene en la lista se avisa antes de confirmar', async () => {
+  const result = await previewSupplierPriceDrafts(breClient(breRules), [breFile()], 1510)
+
+  assert.equal(result.files[0].items[0].status, 'update')
+  assert.equal(result.staleVariantCount, 1)
+  const [producto] = result.staleVariants
+  assert.equal(producto.productCode, 'BRE-04-GRP')
+  assert.equal(producto.variants.length, 1)
+  assert.equal(producto.variants[0].codigo, 'BRE-7045')
+  assert.equal(producto.variants[0].hechaAMano, true)
+  assert.equal(producto.variants[0].precioIva, 16013.14)
+})
+
+test('si esa variante sigue el precio de otra deja de avisarse: se actualiza sola', async () => {
+  const rules = breRules.map(rule => rule.id === 'r-7045' ? { ...rule, derived: true } : rule)
+  const result = await previewSupplierPriceDrafts(breClient(rules), [breFile()], 1510)
+
+  assert.equal(result.staleVariantCount, 0)
+  assert.deepEqual(result.staleVariants, [])
+})
+
+test('una variante con código de proveedor que no vino en el archivo se avisa como tal', async () => {
+  const rules = breRules.map(rule => rule.id === 'r-7045'
+    ? { ...rule, supplierCode: 'BRE-7045', codigo: 'BRE-7045' }
+    : rule)
+  const result = await previewSupplierPriceDrafts(breClient(rules), [breFile()], 1510)
+
+  assert.equal(result.staleVariantCount, 1)
+  assert.equal(result.staleVariants[0].variants[0].hechaAMano, false)
+})
+
+test('la variante que sí vino en la lista no figura como pendiente', async () => {
+  const result = await previewSupplierPriceDrafts(breClient(breRules), [breFile()], 1510)
+  const ids = result.staleVariants.flatMap(item => item.variants.map(variant => variant.id))
+  assert.equal(ids.includes('r-7044'), false)
+})
+
+test('un producto de una sola variante no reporta nada: el trigger la sincroniza', async () => {
+  const client = {
+    async query(sql) {
+      if (/FROM supplier_product_mappings mapping/.test(sql)) return { rows: [{
+        source_code_key: 'SIMPLE', product_id: 'p-2', color_name: null, size_label: null,
+        tone_name: null, variant_rule_id: null, product_code: 'SIMPLE', product_name: 'Producto simple',
+        precio_costo: 800, precio_venta: 1000, precio_iva: 1210,
+        precio_costo_usd: null, precio_venta_usd: null, precio_iva_usd: null,
+        color_options: [], size_options: [],
+        variant_rules: [{ id: 'r-base', color: null, size: null, tone: null, precioVenta: 1000, precioIva: 1210, codigo: 'SIMPLE', supplierCode: 'SIMPLE', derived: false, updatedAt: null }],
+      }] }
+      if (/FROM products WHERE supplier = \$1/.test(sql)) return { rows: [] }
+      throw new Error(`Consulta inesperada: ${sql}`)
+    },
+  }
+  const result = await previewSupplierPriceDrafts(client, [renameFile([
+    { codigo: 'SIMPLE', descripcion: 'Producto simple', precio_costo: 900, precio_venta: 1100, precio_iva: 1331 },
+  ])], 1510)
+
+  assert.equal(result.staleVariantCount, 0)
 })

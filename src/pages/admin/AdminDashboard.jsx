@@ -804,13 +804,47 @@ function draftFromInventoryRow(inv) {
     sizes:       inv.size_options || [],
     tones:       inv.tone_options || [],
     variantStock: inv.variant_stock || {},
-    variantRules: inv.variant_rules || [],
+    variantRules: conPriceSourceIndex(inv.variant_rules || []),
     published:   Boolean(inv.published),
     isNew:       Boolean(inv.is_new),
     bestSeller:  Boolean(inv.best_seller),
     stockInmediato: Boolean(inv.stock_inmediato),
     diasEntregaPedido: inv.dias_entrega_pedido ?? '',
   }
+}
+
+// El backend guarda a quién sigue cada variante por id; el editor trabaja con el
+// índice de la fila, porque una variante recién agregada todavía no tiene id.
+function conPriceSourceIndex(rules) {
+  const indicePorId = new Map(rules.map((rule, index) => [rule.id, index]))
+  return rules.map(rule => ({
+    ...rule,
+    priceSourceIndex: rule.priceSourceRuleId != null && indicePorId.has(rule.priceSourceRuleId)
+      ? indicePorId.get(rule.priceSourceRuleId)
+      : null,
+    priceSourcePercent: rule.priceSourcePercent == null ? 0 : Number(rule.priceSourcePercent),
+  }))
+}
+
+// Al borrar una fila los índices se corren: sin reasignarlos, una variante que
+// seguía a la tercera pasaría a seguir a otra distinta sin aviso.
+function remapPriceSourceIndexes(rules, removedIndex) {
+  return rules.map(rule => {
+    const source = rule.priceSourceIndex
+    if (source == null) return rule
+    if (source === removedIndex) return { ...rule, priceSourceIndex: null, priceSourcePercent: 0 }
+    return { ...rule, priceSourceIndex: source > removedIndex ? source - 1 : source }
+  })
+}
+
+// Precio que va a quedar guardado para una variante que sigue a otra. Se calcula
+// también acá para que el admin lo vea antes de guardar, no después de importar.
+function precioDerivado(valorOrigen, percent) {
+  const base = Number(valorOrigen)
+  if (valorOrigen === '' || valorOrigen == null || !Number.isFinite(base)) return ''
+  const factor = 1 + (Number(percent) || 0) / 100
+  if (!Number.isFinite(factor) || factor <= 0) return ''
+  return Math.round(base * factor * 100) / 100
 }
 
 function toUnifiedProductPayload(data) {
@@ -1031,13 +1065,17 @@ function ProductModal({ product, onSave, onClose, onVariantsChanged, publishOnSa
       id: `manual-${Date.now()}`, supplierCodes: [], color: '', colorHex: '#CCCCCC', size: '', sizeValue: '', sizeUnit: '', tone: '', toneHex: '#CCCCCC',
       productData: { ...inheritingVariantProductData(product || current), codigo: '' }, image: '',
       precio_costo: '', precio_venta: '', precio_iva: '', stock: 0,
+      priceSourceIndex: null, priceSourcePercent: 0,
     }],
   }))
   const removeGroupedRule = index => setForm(current => ({
     ...current,
     variantRules: current.variantRules.length <= 1
       ? current.variantRules
-      : current.variantRules.filter((_, ruleIndex) => ruleIndex !== index),
+      : remapPriceSourceIndexes(
+        current.variantRules.filter((_, ruleIndex) => ruleIndex !== index),
+        index
+      ),
   }))
   const variantStockTotal = Object.values(form.variantStock)
     .flatMap(row => Object.values(row || {}))
@@ -1595,6 +1633,18 @@ function ProductModal({ product, onSave, onClose, onVariantsChanged, publishOnSa
                               />}
                           <small style={{ color: index === 0 || specificity === 3 ? C.green : C.muted, fontSize: 9, fontWeight: 600 }}>{index === 0 ? 'Variante base' : specificity === 3 ? 'Exacta' : `Fallback · ${specificity}/3`}</small>
                           <button type="button" onClick={() => setVariantDetailsIndex(index)} style={{ border: 'none', background: 'none', padding: 0, color: '#2563EB', cursor: 'pointer', textAlign: 'left', fontSize: 9.5 }}>Editar detalles</button>
+                          {!hasSupplierCode && (
+                            <PriceFollowField
+                              rules={form.variantRules}
+                              index={index}
+                              onChange={(sourceIndex, percent) => setForm(current => ({
+                                ...current,
+                                variantRules: current.variantRules.map((item, ruleIndex) => ruleIndex === index
+                                  ? { ...item, priceSourceIndex: sourceIndex, priceSourcePercent: sourceIndex == null ? 0 : percent }
+                                  : item),
+                              }))}
+                            />
+                          )}
                         </span>
                       </span>
                       <span style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) 64px', gap: 5 }}>
@@ -1622,9 +1672,26 @@ function ProductModal({ product, onSave, onClose, onVariantsChanged, publishOnSa
                           variantRules: current.variantRules.map((item, ruleIndex) => ruleIndex === index ? { ...item, tone: tone.name, toneHex: tone.hex } : item),
                         }))}
                       />
-                      <input type="number" min="0" value={rule.precio_venta} onChange={event => setGroupedRule(index, 'precio_venta', event.target.value)} aria-label="Precio de venta" style={{ ...inp, height: 32, padding: '5px 7px', fontSize: 10.5 }} />
-                      <input type="number" min="0" value={priceWithIva(rule.precio_iva, rule.precio_venta)} onChange={event => setGroupedRule(index, 'precio_iva', event.target.value)} aria-label="Precio con IVA" style={{ ...inp, height: 32, padding: '5px 7px', fontSize: 10.5 }} />
-                      <input type="number" min="0" value={rule.precio_costo} onChange={event => setGroupedRule(index, 'precio_costo', event.target.value)} aria-label="Precio de costo" style={{ ...inp, height: 32, padding: '5px 7px', fontSize: 10.5 }} />
+                      {(() => {
+                        // Una variante que sigue a otra muestra el precio ya calculado y
+                        // no se edita: el número lo manda la variante de origen.
+                        const origen = rule.priceSourceIndex == null ? null : form.variantRules[rule.priceSourceIndex]
+                        const derivado = campo => precioDerivado(
+                          campo === 'precio_iva' ? priceWithIva(origen?.precio_iva, origen?.precio_venta) : origen?.[campo],
+                          rule.priceSourcePercent
+                        )
+                        const estiloDerivado = { ...inp, height: 32, padding: '5px 7px', fontSize: 10.5, background: C.paper, color: C.text3, cursor: 'not-allowed' }
+                        const campoPrecio = (campo, valorPropio, etiqueta) => origen
+                          ? <input type="number" readOnly value={derivado(campo)} aria-label={`${etiqueta} (sigue a otra variante)`} title={`Lo define ${String(origen.supplierCodes?.[0] || origen.productData?.codigo || 'la variante seguida')}`} style={estiloDerivado} />
+                          : <input type="number" min="0" value={valorPropio} onChange={event => setGroupedRule(index, campo, event.target.value)} aria-label={etiqueta} style={{ ...inp, height: 32, padding: '5px 7px', fontSize: 10.5 }} />
+                        return (
+                          <>
+                            {campoPrecio('precio_venta', rule.precio_venta, 'Precio de venta')}
+                            {campoPrecio('precio_iva', priceWithIva(rule.precio_iva, rule.precio_venta), 'Precio con IVA')}
+                            {campoPrecio('precio_costo', rule.precio_costo, 'Precio de costo')}
+                          </>
+                        )
+                      })()}
                       <input type="number" min="0" step="1" value={rule.stock} onChange={event => setGroupedRule(index, 'stock', event.target.value)} aria-label="Stock" style={{ ...inp, height: 32, padding: '5px 7px', fontSize: 10.5 }} />
                       {hasSupplierCode && form.variantRules.length > 1
                         ? <button type="button" onClick={() => setDetachCandidate(rule)} disabled={saving || detaching} title="Sacar del grupo y crear un producto individual" style={{ ...outlineBtn, height: 27, padding: '3px 6px', color: C.red, borderColor: '#FCA5A5', fontSize: 9.5 }}>Separar</button>
@@ -2946,6 +3013,21 @@ const fmtDate = (iso) =>
     hour: '2-digit', minute: '2-digit',
   })
 
+// "Hace cuánto" se responde de un vistazo; una fecha suelta obliga a restar.
+// Pasado el mes la fecha vuelve a ser más informativa que el conteo de días.
+function fmtDesdeCarga(iso) {
+  const fecha = new Date(iso)
+  if (Number.isNaN(fecha.getTime())) return null
+  // Días de calendario, no períodos de 24 h: una carga de ayer a las 23 h es
+  // "ayer" desde que arranca el día, no recién a las 23 h de hoy.
+  const aMedianoche = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
+  const dias = Math.round((aMedianoche(new Date()) - aMedianoche(fecha)) / 86400000)
+  if (dias <= 0) return 'hoy'
+  if (dias === 1) return 'ayer'
+  if (dias < 30) return `hace ${dias} días`
+  return fecha.toLocaleDateString('es-AR', { day: '2-digit', month: 'short', year: 'numeric' })
+}
+
 function StatusBadge({ status }) {
   const s = STATUS_STYLE[status] || { bg: '#F3F4F6', color: C.text3 }
   return (
@@ -4154,6 +4236,86 @@ const FOLDER_IMAGES_BATCH_SIZE = 10
 const FOLDER_IMAGES_MAX_FILE_BYTES = 20 * 1024 * 1024
 
 // ── ImportUploadCard ─────────────────────────────────────────────────────────
+// Resumen de la última carga de lista de un proveedor. Contesta la pregunta que
+// no se puede responder mirando los productos: si una lista sin aumentos se subió
+// o no, porque en ese caso ningún `price_updated_at` se movió.
+function LastImportNote({ supplier, settings, align = 'left' }) {
+  if (!supplier) return null
+  const setting = settings.find(item => item.supplier === supplier)
+  const base = { fontSize: 10, lineHeight: 1.4, marginTop: 4, textAlign: align }
+  if (!setting?.lastImport) {
+    return <div style={{ ...base, color: C.muted }}>Sin cargas registradas todavía.</div>
+  }
+  const { at, created, updated, unchanged, pendingVariant } = setting.lastImport
+  const cambios = [
+    updated ? `${updated} actualizados` : null,
+    created ? `${created} nuevos` : null,
+    !updated && !created && unchanged ? 'sin cambios de precio' : null,
+  ].filter(Boolean).join(' · ')
+  return (
+    <div style={{ ...base, color: C.text3 }}>
+      Última carga <strong style={{ color: C.ink }}>{fmtDesdeCarga(at)}</strong>
+      {cambios ? ` · ${cambios}` : ''}
+      {pendingVariant ? (
+        <span style={{ color: '#9A3412' }}> · {pendingVariant} quedaron esperando variante</span>
+      ) : ''}
+    </div>
+  )
+}
+
+// Control de "esta variante sigue el precio de aquella". Aparece solo en las
+// variantes sin código de proveedor: son las que el negocio agrega a mano y que
+// ninguna lista de precios va a actualizar nunca.
+function PriceFollowField({ rules, index, onChange }) {
+  const rule = rules[index]
+  // Solo se puede seguir a una variante con precio propio: prohibir cadenas
+  // descarta los ciclos y deja el recálculo en una sola pasada.
+  const opciones = rules
+    .map((item, itemIndex) => ({ item, itemIndex }))
+    .filter(({ item, itemIndex }) => itemIndex !== index && item.priceSourceIndex == null)
+  const siguiendo = rule.priceSourceIndex != null
+  // Si otras variantes ya siguen a esta, no puede pasar a seguir a una tercera:
+  // sería una cadena, y la resolución exige que el origen tenga precio propio.
+  const esOrigenDeOtras = rules.some((item, itemIndex) => itemIndex !== index && item.priceSourceIndex === index)
+  if (esOrigenDeOtras) {
+    return <small style={{ fontSize: 9, color: C.muted }}>Otras variantes siguen su precio</small>
+  }
+  if (!opciones.length) return null
+
+  const etiqueta = ({ item, itemIndex }) =>
+    String(item.supplierCodes?.[0] || item.productData?.codigo || '').trim() || `Variante ${itemIndex + 1}`
+
+  return (
+    <span style={{ display: 'grid', gap: 3 }}>
+      <select
+        value={siguiendo ? String(rule.priceSourceIndex) : ''}
+        onChange={event => onChange(event.target.value === '' ? null : Number(event.target.value), rule.priceSourcePercent)}
+        aria-label={`Origen del precio de la variante ${index + 1}`}
+        title="El proveedor no manda esta variante. Si sigue a otra, se actualiza sola con cada lista de precios."
+        style={{ ...inp, minWidth: 0, height: 24, padding: '2px 4px', fontSize: 9.5 }}
+      >
+        <option value="">Precio propio</option>
+        {opciones.map(opcion => (
+          <option key={opcion.itemIndex} value={opcion.itemIndex}>Sigue a {etiqueta(opcion)}</option>
+        ))}
+      </select>
+      {siguiendo && (
+        <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+          <input
+            inputMode="decimal"
+            value={rule.priceSourcePercent ?? 0}
+            onChange={event => onChange(rule.priceSourceIndex, event.target.value)}
+            aria-label={`Porcentaje sobre la variante seguida, variante ${index + 1}`}
+            title="0 = mismo precio. 15 = 15% más caro. Se admiten negativos."
+            style={{ ...inp, minWidth: 0, width: 46, height: 22, padding: '2px 4px', fontSize: 9.5 }}
+          />
+          <small style={{ fontSize: 9, color: C.muted }}>% sobre esa</small>
+        </span>
+      )}
+    </span>
+  )
+}
+
 function ImportUploadCard({
   label, hint, disabled, onFile, onFiles, accept = '.xls,.xlsx', busyLabel = 'Importando...',
   children = null, multiple = false, allowDirectory = false,
@@ -5547,7 +5709,99 @@ function SupplierToolbar({ supplierNames, settings, inventory, selectedSupplier,
           {savingCurrency === currency ? '...' : currency}
         </button>
       ))}
+      {selectedName && <SupplierImportHistory supplier={selectedName} settings={settings} />}
       {message && <span style={{ fontSize: 10.5, color: message.includes('pasaron') ? C.green : C.red }}>{message}</span>}
+    </div>
+  )
+}
+
+// El resumen de la última carga viaja con supplierSettings; el detalle completo
+// se pide recién al abrirlo, que es cuando la pregunta es "¿cuál de todas subí?".
+function SupplierImportHistory({ supplier, settings }) {
+  const { fetchSupplierImports } = useAdmin()
+  const contenedor = useRef(null)
+  const [open, setOpen] = useState(false)
+  const [imports, setImports] = useState(null)
+  const [error, setError] = useState('')
+
+  const setting = settings.find(item => item.supplier === supplier)
+  const ultimaCarga = setting?.lastImport?.at || null
+
+  useEffect(() => { setOpen(false); setImports(null); setError('') }, [supplier])
+  // Una importación nueva deja el detalle viejo: se descarta para que al reabrirlo
+  // aparezca la carga que se acaba de hacer.
+  useEffect(() => { setImports(null) }, [ultimaCarga])
+
+  useEffect(() => {
+    if (!open) return undefined
+    const alClickear = (event) => {
+      if (!contenedor.current?.contains(event.target)) setOpen(false)
+    }
+    const alTeclear = (event) => { if (event.key === 'Escape') setOpen(false) }
+    document.addEventListener('mousedown', alClickear)
+    document.addEventListener('keydown', alTeclear)
+    return () => {
+      document.removeEventListener('mousedown', alClickear)
+      document.removeEventListener('keydown', alTeclear)
+    }
+  }, [open])
+
+  useEffect(() => {
+    if (!open || imports) return undefined
+    let vigente = true
+    fetchSupplierImports(supplier)
+      .then(data => { if (vigente) setImports(data) })
+      .catch(err => { if (vigente) setError(err.message || 'No se pudo cargar el historial') })
+    return () => { vigente = false }
+  }, [open, imports, supplier, fetchSupplierImports])
+
+  const desde = ultimaCarga ? fmtDesdeCarga(ultimaCarga) : null
+
+  return (
+    <div ref={contenedor} style={{ position: 'relative' }}>
+      <button
+        type="button"
+        onClick={() => setOpen(current => !current)}
+        title={`Cargas de lista de precios de ${supplier}`}
+        style={{ ...outlineBtn, padding: '6px 9px', fontSize: 10.5, color: C.text3 }}
+      >
+        Precios: {desde || 'sin cargas'}
+      </button>
+      {open && (
+        <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, zIndex: 40, width: 340, maxHeight: 300, overflowY: 'auto', background: C.white, border: `1px solid ${C.border}`, borderRadius: 8, boxShadow: '0 12px 30px rgba(0,0,0,.14)' }}>
+          <div style={{ padding: '9px 11px', borderBottom: `1px solid ${C.hairline}`, fontSize: 11, fontWeight: 600, color: C.ink }}>
+            Cargas de lista · {supplier}
+          </div>
+          {error && <div style={{ padding: '10px 11px', fontSize: 10.5, color: C.red }}>{error}</div>}
+          {!error && !imports && <div style={{ padding: '10px 11px', fontSize: 10.5, color: C.muted }}>Cargando...</div>}
+          {!error && imports?.length === 0 && (
+            <div style={{ padding: '10px 11px', fontSize: 10.5, color: C.muted }}>
+              Todavía no se subió ninguna lista de este proveedor.
+            </div>
+          )}
+          {!error && imports?.map(item => (
+            <div key={item.id} style={{ padding: '9px 11px', borderBottom: `1px solid ${C.hairline}`, fontSize: 10.5, color: C.text2 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                <strong style={{ color: C.ink }}>{fmtDate(item.at)}</strong>
+                <span style={{ color: C.muted }}>{item.totalRows} filas</span>
+              </div>
+              <div style={{ marginTop: 3, color: C.muted }}>
+                {[
+                  item.updated ? `${item.updated} actualizados` : null,
+                  item.created ? `${item.created} nuevos` : null,
+                  item.unchanged ? `${item.unchanged} sin cambios` : null,
+                ].filter(Boolean).join(' · ') || 'No cambió ningún precio'}
+                {item.pendingVariant ? (
+                  <span style={{ color: '#9A3412' }}> · {item.pendingVariant} esperando variante</span>
+                ) : ''}
+              </div>
+              <div style={{ marginTop: 2, color: C.text3, wordBreak: 'break-word' }}>
+                {item.fileNames.join(', ') || 'Sin nombre de archivo'}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -6990,14 +7244,201 @@ const BULK_PRICE_STATUS = {
   unchanged: { label: 'Sin cambios', color: '#0369A1', background: '#E0F2FE' },
   skipped: { label: 'Omitir', color: C.text3, background: '#F3F4F6' },
   duplicate: { label: 'Repetido', color: '#4338CA', background: '#EEF2FF' },
+  variant: { label: 'Elegí la variante', color: '#9A3412', background: '#FFEDD5' },
   invalid: { label: 'Inválido', color: C.red, background: C.redLight },
 }
 
-function BulkPriceReviewModal({ preview, saving = false, readOnly = false, error = '', onConfirm, onCurrencyOverride, onClose }) {
+// Variantes que la importación no va a tocar. No son filas del Excel, así que no
+// entran en la tabla de abajo: van acá arriba, donde se decide si confirmar.
+function StaleVariantsNotice({ staleVariants, count, aplicado = false }) {
+  const [abierto, setAbierto] = useState(false)
+  if (!count) return null
+  const aMano = staleVariants.reduce(
+    (total, item) => total + item.variants.filter(variant => variant.hechaAMano).length, 0
+  )
+  return (
+    <div style={{ marginTop: 10, padding: '8px 10px', borderRadius: 7, background: '#FEF3C7', color: '#92400E', fontSize: 11.5 }}>
+      {count === 1 ? '1 variante' : `${count} variantes`} de los productos de esta lista
+      {aplicado ? ' no se actualizaron' : ' no se van a actualizar'}
+      {aMano ? ` (${aMano === 1 ? '1 hecha a mano' : `${aMano} hechas a mano`})` : ''}.
+      {' '}Quedan con el precio que tienen hoy. Si alguna tendría que seguir a otra variante,
+      configurala en la ficha del producto con <strong>Sigue a</strong> y se actualiza sola de acá en adelante.
+      <button
+        type="button"
+        onClick={() => setAbierto(actual => !actual)}
+        style={{ display: 'block', marginTop: 5, border: 'none', background: 'none', padding: 0, color: '#92400E', fontSize: 10.5, textDecoration: 'underline', cursor: 'pointer' }}
+      >
+        {abierto ? 'Ocultar el detalle' : 'Ver cuáles'}
+      </button>
+      {abierto && (
+        <div style={{ marginTop: 7, display: 'grid', gap: 7, maxHeight: 220, overflowY: 'auto' }}>
+          {staleVariants.map(item => (
+            <div key={item.productId} style={{ background: C.white, borderRadius: 6, padding: '7px 9px' }}>
+              <strong style={{ color: C.ink, fontSize: 10.5 }}>{item.productCode}</strong>
+              <span style={{ color: C.muted, fontSize: 10.5 }}> · {item.productName}</span>
+              <div style={{ display: 'grid', gap: 2, marginTop: 4 }}>
+                {item.variants.map(variant => (
+                  <div key={variant.id} style={{ fontSize: 10, color: C.text2 }}>
+                    <strong>{variant.codigo || variant.label}</strong>
+                    {variant.codigo && variant.label !== variant.codigo ? ` · ${variant.label}` : ''}
+                    {variant.precioIva != null ? ` · sigue en ${fmt(variant.precioIva)}` : ''}
+                    {variant.updatedAt ? ` desde el ${new Date(variant.updatedAt).toLocaleDateString('es-AR')}` : ''}
+                    {variant.hechaAMano
+                      ? <span style={{ color: '#92400E' }}> · sin código de proveedor</span>
+                      : <span style={{ color: C.muted }}> · no vino en esta lista</span>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Celda "Producto destino" de la vista previa de precios. Es el único momento en
+// que se pueden corregir las dos formas en que un código deja de apuntar bien:
+// el proveedor lo renombró (sale como alta y duplicaría el producto) o apunta a
+// un producto agrupado sin decir a qué variante corresponde.
+function PriceTargetCell({ row, supplier, canMap, busy, onMap }) {
+  const { searchProducts } = useAdmin()
+  const [picking, setPicking] = useState(false)
+  const [query, setQuery] = useState('')
+  const [results, setResults] = useState([])
+  const [searching, setSearching] = useState(false)
+
+  useEffect(() => {
+    if (!picking || query.trim().length < 2) { setResults([]); return undefined }
+    setSearching(true)
+    let vigente = true
+    const timeout = setTimeout(async () => {
+      const encontrados = await searchProducts(query, { supplier })
+      if (!vigente) return
+      setResults(encontrados)
+      setSearching(false)
+    }, 300)
+    return () => { vigente = false; clearTimeout(timeout) }
+  }, [picking, query, supplier, searchProducts])
+
+  const closePicker = () => { setPicking(false); setQuery(''); setResults([]) }
+  const choose = (productId) => { closePicker(); onMap(row.codigo, productId) }
+
+  const linkBtn = {
+    border: 'none', background: 'none', padding: 0, marginTop: 5,
+    color: C.text3, fontSize: 10, textDecoration: 'underline', cursor: 'pointer',
+  }
+  const candidateBtn = (highlighted) => ({
+    display: 'block', width: '100%', textAlign: 'left', cursor: 'pointer',
+    padding: '5px 7px', borderRadius: 6, fontSize: 10.5, lineHeight: 1.35,
+    border: `1px solid ${highlighted ? C.green : C.border}`,
+    background: highlighted ? C.greenLight : C.white,
+    color: highlighted ? C.green : C.text2,
+  })
+
+  if (row.status !== 'create') {
+    if (!row.targetCode) return <span style={{ color: C.muted }}>—</span>
+    return (
+      <>
+        <strong style={{ display: 'block', color: C.ink }}>{row.targetCode}</strong>
+        <span style={{ display: 'block', marginTop: 3, color: C.muted }}>
+          {row.targetName}{row.variant ? ` · ${row.variant}` : ''}
+        </span>
+        {canMap && busy && <div style={{ marginTop: 5, fontSize: 10, color: C.muted }}>Guardando...</div>}
+        {canMap && !busy && !!row.groupedTarget && (
+          <div style={{ display: 'grid', gap: 3, marginTop: 6 }}>
+            {row.groupedTarget.rules.map(rule => (
+              <button
+                type="button"
+                key={rule.id}
+                onClick={() => onMap(row.codigo, row.targetProductId, rule.id)}
+                title={`${row.codigo} pasa a actualizar el precio de esta variante en cada lista futura`}
+                style={candidateBtn(false)}
+              >
+                <strong>{rule.label}</strong>
+                <span style={{ display: 'block', color: C.muted }}>
+                  {rule.precioIva != null ? fmt(rule.precioIva) : rule.precioVenta != null ? fmt(rule.precioVenta) : 'Sin precio'}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+        {canMap && !busy && !row.groupedTarget && row.matchType === 'saved' && (
+          <button type="button" onClick={() => onMap(row.codigo, null)} style={linkBtn}>
+            Quitar la asociación guardada
+          </button>
+        )}
+      </>
+    )
+  }
+
+  return (
+    <>
+      <span style={{ color: C.muted }}>Producto nuevo sin publicar</span>
+      {canMap && busy && <div style={{ marginTop: 5, fontSize: 10, color: C.muted }}>Asociando...</div>}
+      {canMap && !busy && !picking && (
+        <>
+          {!!row.suggestions?.length && (
+            <div style={{ display: 'grid', gap: 3, marginTop: 6 }}>
+              {row.suggestions.map(product => (
+                <button
+                  type="button"
+                  key={product.id}
+                  onClick={() => choose(product.id)}
+                  title={`Los precios de ${row.codigo} van a ${product.codigo} en vez de crear un producto nuevo`}
+                  style={candidateBtn(product.renamed)}
+                >
+                  <strong>{product.renamed ? `¿Es ${product.codigo}?` : product.codigo}</strong>
+                  <span style={{ display: 'block', color: product.renamed ? C.green : C.muted, opacity: product.renamed ? .85 : 1 }}>
+                    {product.nombre}{product.renamed ? '' : ` · ${product.similarity}%`}
+                    {product.published === false ? ' · borrador' : ''}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+          <button type="button" onClick={() => setPicking(true)} style={linkBtn}>
+            {row.suggestions?.length ? 'Buscar otro producto' : 'Asociar a un producto existente'}
+          </button>
+        </>
+      )}
+      {canMap && !busy && picking && (
+        <div style={{ marginTop: 6 }}>
+          <input
+            autoFocus
+            value={query}
+            onChange={event => setQuery(event.target.value)}
+            placeholder="Código o nombre..."
+            aria-label={`Buscar el producto al que corresponde ${row.codigo}`}
+            style={{ ...inp, padding: '5px 7px', fontSize: 11 }}
+          />
+          {searching && <span style={{ fontSize: 10, color: C.muted }}>Buscando...</span>}
+          {!searching && !!results.length && (
+            <div style={{ display: 'grid', gap: 3, marginTop: 5, maxHeight: 150, overflowY: 'auto' }}>
+              {results.map(product => (
+                <button type="button" key={product.id} onClick={() => choose(product.id)} style={candidateBtn(false)}>
+                  <strong>{product.codigo}</strong>
+                  <span style={{ display: 'block', color: C.muted }}>{product.name || product.descripcion || 'Sin descripción'}</span>
+                </button>
+              ))}
+            </div>
+          )}
+          {!searching && query.trim().length >= 2 && !results.length && (
+            <span style={{ fontSize: 10, color: C.muted }}>Sin resultados en {supplier}.</span>
+          )}
+          <button type="button" onClick={closePicker} style={linkBtn}>Cancelar</button>
+        </div>
+      )}
+    </>
+  )
+}
+
+function BulkPriceReviewModal({ preview, supplier = '', saving = false, readOnly = false, error = '', onConfirm, onCurrencyOverride, onMapCode, onClose }) {
   const initialFilter = preview.updated ? 'update' : preview.created ? 'create' : preview.unchanged ? 'unchanged' : 'all'
   const [filter, setFilter] = useState(initialFilter)
   const [search, setSearch] = useState('')
   const [savingCurrencyKey, setSavingCurrencyKey] = useState(null)
+  const [savingMappingKey, setSavingMappingKey] = useState(null)
   const [overrideError, setOverrideError] = useState('')
   const rows = useMemo(() => (preview.files || []).flatMap(file =>
     (file.items || []).map((item, index) => ({
@@ -7015,6 +7456,7 @@ function BulkPriceReviewModal({ preview, saving = false, readOnly = false, error
     return [row.codigo, row.descripcion, row.targetCode, row.targetName, row.supplier, row.reason]
       .some(value => String(value || '').toLocaleLowerCase('es-AR').includes(normalizedSearch))
   })
+  const renameCandidates = rows.filter(row => row.status === 'create' && row.suggestions?.length).length
   const statusCounts = rows.reduce((counts, row) => {
     counts[row.status] = (counts[row.status] || 0) + 1
     return counts
@@ -7024,6 +7466,19 @@ function BulkPriceReviewModal({ preview, saving = false, readOnly = false, error
     return currency === 'USD' ? fmtUsd(value) : fmt(value)
   }
   const canOverrideCurrency = !readOnly && typeof onCurrencyOverride === 'function'
+  const canMapCodes = !readOnly && typeof onMapCode === 'function' && Boolean(supplier)
+  async function handleMapCode(row, productId, variantRuleId = null) {
+    if (savingMappingKey) return
+    setOverrideError('')
+    setSavingMappingKey(row.rowKey)
+    try {
+      await onMapCode(row.codigo, productId, variantRuleId)
+    } catch (err) {
+      setOverrideError(err.message || 'No se pudo asociar el código con el producto')
+    } finally {
+      setSavingMappingKey(null)
+    }
+  }
   async function handleCurrencyOverride(row, currency) {
     if (savingCurrencyKey) return
     setOverrideError('')
@@ -7056,10 +7511,33 @@ function BulkPriceReviewModal({ preview, saving = false, readOnly = false, error
             <span style={pill('#F3F4F6', C.text3)}>{preview.totalRows} filas leídas</span>
             <span style={pill(C.greenLight, C.green)}>{preview.created || 0} a crear</span>
             <span style={pill(C.amberLight, C.amberDark)}>{preview.updated || 0} a actualizar</span>
+            {!!preview.pendingVariant && <span style={pill('#FFEDD5', '#9A3412')}>{preview.pendingVariant} esperando variante</span>}
             {!!preview.unchanged && <span style={pill('#E0F2FE', '#0369A1')}>{preview.unchanged} sin cambios</span>}
             <span style={pill('#F3F4F6', C.text3)}>{preview.skipped || 0} omitidas</span>
             <span style={{ marginLeft: 'auto', color: C.muted, fontSize: 11 }}>Cotización: US$ 1 = {fmt(preview.exchangeRate)}</span>
           </div>
+          {!!preview.pendingVariant && (
+            <div style={{ marginTop: 10, padding: '8px 10px', borderRadius: 7, background: '#FFEDD5', color: '#9A3412', fontSize: 11.5 }}>
+              {preview.pendingVariant === 1
+                ? '1 código apunta a un producto agrupado sin decir a qué variante corresponde.'
+                : `${preview.pendingVariant} códigos apuntan a productos agrupados sin decir a qué variante corresponden.`}
+              {' '}Filtrá por <strong>Falta elegir variante</strong> y elegí a cuál va cada uno. Hasta entonces no se actualizan:
+              escribir ese precio en la ficha general dejaría la tarjeta mostrando un importe que el checkout no cobra.
+            </div>
+          )}
+          <StaleVariantsNotice
+            staleVariants={preview.staleVariants || []}
+            count={preview.staleVariantCount || 0}
+            aplicado={readOnly}
+          />
+          {!!renameCandidates && (
+            <div style={{ marginTop: 10, padding: '8px 10px', borderRadius: 7, background: C.amberLight, color: C.amberDark, fontSize: 11.5 }}>
+              {renameCandidates === 1
+                ? '1 alta se parece a un producto que ya tenés cargado.'
+                : `${renameCandidates} altas se parecen a productos que ya tenés cargados.`}
+              {' '}Filtrá por <strong>Creaciones</strong> y asociá las que sean el mismo artículo con otro código: si las creás quedan duplicadas y el producto original se queda con el precio viejo.
+            </div>
+          )}
           {!!preview.failedFiles?.length && (
             <div style={{ marginTop: 10, padding: '8px 10px', borderRadius: 7, background: C.redLight, color: C.red, fontSize: 11.5 }}>
               {preview.failedFiles.map(file => <div key={file.fileName}><strong>{file.fileName}:</strong> {file.error}</div>)}
@@ -7070,6 +7548,7 @@ function BulkPriceReviewModal({ preview, saving = false, readOnly = false, error
               ['all', 'Todos', rows.length],
               ['update', 'Actualizaciones', statusCounts.update || 0],
               ['create', 'Creaciones', statusCounts.create || 0],
+              ['variant', 'Falta elegir variante', statusCounts.variant || 0],
               ['unchanged', 'Sin cambios', statusCounts.unchanged || 0],
               ['skipped', 'Omitidos', statusCounts.skipped || 0],
               ['duplicate', 'Repetidos', statusCounts.duplicate || 0],
@@ -7133,7 +7612,13 @@ function BulkPriceReviewModal({ preview, saving = false, readOnly = false, error
                       )}
                     </td>
                     <td style={{ padding: 10, maxWidth: 230 }}>
-                      {row.targetCode ? <><strong style={{ display: 'block', color: C.ink }}>{row.targetCode}</strong><span style={{ display: 'block', marginTop: 3, color: C.muted }}>{row.targetName}{row.variant ? ` · ${row.variant}` : ''}</span></> : <span style={{ color: C.muted }}>{row.status === 'create' ? 'Producto nuevo sin publicar' : '—'}</span>}
+                      <PriceTargetCell
+                        row={row}
+                        supplier={supplier || row.supplier}
+                        canMap={canMapCodes && !['invalid', 'duplicate'].includes(row.status) && Boolean(row.codigo)}
+                        busy={savingMappingKey === row.rowKey}
+                        onMap={(codigo, productId, variantRuleId) => handleMapCode(row, productId, variantRuleId)}
+                      />
                     </td>
                     <td style={{ padding: 10, minWidth: 260 }}>
                       {(row.changes || []).length ? (row.changes || []).map(change => (
@@ -7144,7 +7629,16 @@ function BulkPriceReviewModal({ preview, saving = false, readOnly = false, error
                       )) : <span style={{ color: C.muted }}>—</span>}
                     </td>
                     <td style={{ padding: 10, color: row.status === 'invalid' ? C.red : C.text3, maxWidth: 250 }}>
-                      {row.reason || (row.status === 'update' ? `${changed.length} ${changed.length === 1 ? 'campo cambia' : 'campos cambian'}` : row.status === 'create' ? 'Se creará como borrador.' : '—')}
+                      {row.reason || (
+                        row.status === 'update' ? `${changed.length} ${changed.length === 1 ? 'campo cambia' : 'campos cambian'}`
+                          : row.status === 'create' ? (
+                            row.suggestions?.some(product => product.renamed)
+                              ? 'El proveedor pudo haber renombrado este código. Revisá el candidato antes de crear un duplicado.'
+                              : row.suggestions?.length
+                                ? 'Se creará como borrador. Hay productos parecidos por si es un código renombrado.'
+                                : 'Se creará como borrador.'
+                          ) : '—'
+                      )}
                     </td>
                   </tr>
                 )
@@ -7431,6 +7925,7 @@ function UnifiedProductsTab() {
     currencySettings, updateCurrencySettings, updateDeliverySettings,
     supplierSettings, updateSupplierCurrency,
     setPriceCodeCurrency, clearPriceCodeCurrency,
+    setPriceCodeMapping, clearPriceCodeMapping,
     fetchInventory, fetchInventoryItem, createInventoryItem, updateInventoryItem, updateProductCurrency, deleteInventoryItem, fetchCatalog,
     fetchInventorySelectionIds, applyInventoryBatch,
     previewProductMerge, mergeInventoryProducts,
@@ -7605,6 +8100,16 @@ function UnifiedProductsTab() {
     if (!pricePreview) return
     if (currency) await setPriceCodeCurrency(pricePreview.supplier, codigo, currency)
     else await clearPriceCodeCurrency(pricePreview.supplier, codigo)
+    const data = await previewPriceFiles(pricePreview.files, pricePreview.supplier)
+    setPricePreview(current => (current ? { ...current, data } : current))
+  }
+
+  // Asociar o desasociar recalcula la vista previa entera: la fila deja de ser
+  // un alta y pasa a mostrar el diferencial de precios contra el producto real.
+  async function handlePriceCodeMapping(codigo, productId, variantRuleId = null) {
+    if (!pricePreview) return
+    if (productId) await setPriceCodeMapping(pricePreview.supplier, codigo, productId, variantRuleId)
+    else await clearPriceCodeMapping(pricePreview.supplier, codigo)
     const data = await previewPriceFiles(pricePreview.files, pricePreview.supplier)
     setPricePreview(current => (current ? { ...current, data } : current))
   }
@@ -8035,6 +8540,7 @@ function UnifiedProductsTab() {
               <option key={supplier} value={supplier}>{supplier}</option>
             ))}
           </select>
+          <LastImportNote supplier={priceSupplier} settings={supplierSettings} />
         </ImportUploadCard>
         <ImportUploadCard
           label="Catálogo con imágenes"
@@ -8142,6 +8648,8 @@ function UnifiedProductsTab() {
           error={pricePreviewError}
           onConfirm={handlePriceFilesConfirm}
           onCurrencyOverride={handlePriceCodeCurrency}
+          onMapCode={handlePriceCodeMapping}
+          supplier={pricePreview.supplier}
           onClose={() => { if (!importLoading) { setPricePreview(null); setPricePreviewError('') } }}
         />
       )}
@@ -8177,6 +8685,7 @@ function UnifiedProductsTab() {
             {importResult.totalRows !== undefined && <span style={pill('#F3F4F6', C.text3)}>{importResult.totalRows} filas leídas</span>}
             {importResult.created !== undefined && <span style={pill(C.greenLight, C.green)}>{importResult.created} creados</span>}
             {importResult.updated !== undefined && <span style={pill(importResult.fileType === 'catalog-images' ? C.white : C.amberLight, importResult.fileType === 'catalog-images' ? C.dark : C.amberDark)}>{importResult.updated} actualizados</span>}
+            {!!importResult.pendingVariant && <span style={pill('#FFEDD5', '#9A3412')}>{importResult.pendingVariant} esperando variante</span>}
             {!!importResult.unchanged && <span style={pill('#E0F2FE', '#0369A1')}>{importResult.unchanged} sin cambios</span>}
             {importResult.imagesSaved !== undefined && <span style={pill(importResult.fileType === 'catalog-images' ? C.white : '#EEF2FF', importResult.fileType === 'catalog-images' ? C.dark : '#4338CA')}>{importResult.imagesSaved} imágenes guardadas</span>}
             {!!importResult.merged && <span style={pill(C.dark, C.white)}>{importResult.merged} productos unidos</span>}
@@ -8191,6 +8700,7 @@ function UnifiedProductsTab() {
                   <strong>{file.fileName}</strong> → {file.supplier} · {file.currency} · {file.created} creados
                   {file.updated ? ` · ${file.updated} actualizados` : ''}
                   {file.unchanged ? ` · ${file.unchanged} sin cambios` : ''}
+                  {file.pendingVariant ? ` · ${file.pendingVariant} esperando variante` : ''}
                   {file.existingCount ? ` · ${file.existingCount} ya existían` : ''}
                   {file.duplicateRows ? ` · ${file.duplicateRows} repetidos` : ''}
                   {file.invalidRows ? ` · ${file.invalidRows} filas inválidas` : ''}

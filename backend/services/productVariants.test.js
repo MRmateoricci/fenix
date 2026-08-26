@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  applyDerivedVariantPrices,
   findRuleAmbiguity,
   mergeRuleValues,
   normalizeVariantProductData,
@@ -89,4 +90,100 @@ test('detecta dos reglas superpuestas con igual precisión', () => {
     { size_label: '4 mm²' },
     { size_label: '6 mm²' },
   ]), null)
+})
+
+// ── Precio derivado de otra variante ─────────────────────────────────────────
+
+function derivedClient(rules) {
+  const updates = []
+  return {
+    updates,
+    async query(sql, params) {
+      if (/SELECT id, price_source_rule_id/.test(sql)) return { rows: rules }
+      if (/UPDATE product_variant_rules/.test(sql)) {
+        updates.push({ id: params[6], costo: params[0], venta: params[1], iva: params[2] })
+        return { rowCount: 1 }
+      }
+      throw new Error(`Consulta inesperada: ${sql}`)
+    },
+  }
+}
+
+test('una variante que sigue a otra con 0% copia su precio exacto', async () => {
+  const client = derivedClient([
+    { id: 'origen', price_source_rule_id: null, price_source_percent: 0, precio_costo: 9339.17, precio_venta: 13234, precio_iva: 16013.14, precio_costo_usd: null, precio_venta_usd: null, precio_iva_usd: null },
+    { id: 'sigue', price_source_rule_id: 'origen', price_source_percent: 0, precio_costo: 1, precio_venta: 1, precio_iva: 1, precio_costo_usd: null, precio_venta_usd: null, precio_iva_usd: null },
+  ])
+  const cambiadas = await applyDerivedVariantPrices(client, 'p-1')
+
+  assert.equal(cambiadas, 1)
+  assert.equal(client.updates.length, 1)
+  assert.equal(client.updates[0].id, 'sigue')
+  assert.equal(client.updates[0].venta, 13234)
+  assert.equal(client.updates[0].iva, 16013.14)
+  assert.equal(client.updates[0].costo, 9339.17)
+})
+
+test('el porcentaje se aplica a costo, venta e IVA por igual', async () => {
+  const client = derivedClient([
+    { id: 'origen', price_source_rule_id: null, price_source_percent: 0, precio_costo: 100, precio_venta: 200, precio_iva: 242, precio_costo_usd: null, precio_venta_usd: null, precio_iva_usd: null },
+    { id: 'sigue', price_source_rule_id: 'origen', price_source_percent: 15, precio_costo: null, precio_venta: null, precio_iva: null, precio_costo_usd: null, precio_venta_usd: null, precio_iva_usd: null },
+  ])
+  await applyDerivedVariantPrices(client, 'p-1')
+
+  assert.equal(client.updates[0].costo, 115)
+  assert.equal(client.updates[0].venta, 230)
+  assert.equal(client.updates[0].iva, 278.3)
+})
+
+test('un porcentaje negativo abarata la variante seguida', async () => {
+  const client = derivedClient([
+    { id: 'origen', price_source_rule_id: null, price_source_percent: 0, precio_costo: null, precio_venta: 1000, precio_iva: 1210, precio_costo_usd: null, precio_venta_usd: null, precio_iva_usd: null },
+    { id: 'sigue', price_source_rule_id: 'origen', price_source_percent: -10, precio_costo: null, precio_venta: 0, precio_iva: 0, precio_costo_usd: null, precio_venta_usd: null, precio_iva_usd: null },
+  ])
+  await applyDerivedVariantPrices(client, 'p-1')
+
+  assert.equal(client.updates[0].venta, 900)
+  assert.equal(client.updates[0].iva, 1089)
+  assert.equal(client.updates[0].costo, null)
+})
+
+test('si el precio derivado ya coincide no se escribe nada', async () => {
+  const client = derivedClient([
+    { id: 'origen', price_source_rule_id: null, price_source_percent: 0, precio_costo: 100, precio_venta: 200, precio_iva: 242, precio_costo_usd: null, precio_venta_usd: null, precio_iva_usd: null },
+    { id: 'sigue', price_source_rule_id: 'origen', price_source_percent: 0, precio_costo: 100, precio_venta: 200, precio_iva: 242, precio_costo_usd: null, precio_venta_usd: null, precio_iva_usd: null },
+  ])
+  const cambiadas = await applyDerivedVariantPrices(client, 'p-1')
+
+  assert.equal(cambiadas, 0)
+  assert.equal(client.updates.length, 0)
+})
+
+test('una variante que sigue a otra que a su vez es derivada no se recalcula', async () => {
+  const client = derivedClient([
+    { id: 'raiz', price_source_rule_id: null, price_source_percent: 0, precio_costo: null, precio_venta: 100, precio_iva: 121, precio_costo_usd: null, precio_venta_usd: null, precio_iva_usd: null },
+    { id: 'media', price_source_rule_id: 'raiz', price_source_percent: 10, precio_costo: null, precio_venta: 0, precio_iva: 0, precio_costo_usd: null, precio_venta_usd: null, precio_iva_usd: null },
+    { id: 'hoja', price_source_rule_id: 'media', price_source_percent: 10, precio_costo: null, precio_venta: 0, precio_iva: 0, precio_costo_usd: null, precio_venta_usd: null, precio_iva_usd: null },
+  ])
+  await applyDerivedVariantPrices(client, 'p-1')
+
+  assert.deepEqual(client.updates.map(update => update.id), ['media'])
+})
+
+test('un origen que ya no está en el producto deja la variante como estaba', async () => {
+  const client = derivedClient([
+    { id: 'sigue', price_source_rule_id: 'borrada', price_source_percent: 0, precio_costo: null, precio_venta: 500, precio_iva: 605, precio_costo_usd: null, precio_venta_usd: null, precio_iva_usd: null },
+  ])
+  const cambiadas = await applyDerivedVariantPrices(client, 'p-1')
+
+  assert.equal(cambiadas, 0)
+  assert.equal(client.updates.length, 0)
+})
+
+test('sin variantes derivadas no se consulta ni se escribe de más', async () => {
+  const client = derivedClient([
+    { id: 'a', price_source_rule_id: null, price_source_percent: 0, precio_costo: null, precio_venta: 100, precio_iva: 121, precio_costo_usd: null, precio_venta_usd: null, precio_iva_usd: null },
+  ])
+  assert.equal(await applyDerivedVariantPrices(client, 'p-1'), 0)
+  assert.equal(client.updates.length, 0)
 })

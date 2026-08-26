@@ -37,6 +37,7 @@ import {
   matchPriceRows,
   applyPriceUpdates,
   previewSupplierPriceDrafts,
+  recordSupplierPriceImports,
   createSupplierPriceDrafts,
   applySaleDecrement,
   applyPurchaseIncrement,
@@ -51,6 +52,7 @@ import {
   mergeProducts,
   normalizeVariantProductData,
   recomputeGroupedProduct,
+  applyDerivedVariantPrices,
 } from '../services/productVariants.js'
 
 const router = Router()
@@ -511,11 +513,24 @@ router.get('/supplier-settings', async (_req, res) => {
                      THEN 'USD' ELSE 'ARS' END
               ) AS currency,
               (setting.currency IS NOT NULL) AS configured,
-              setting.updated_at
+              setting.updated_at,
+              last_import.created_at AS last_import_at,
+              last_import.created_count AS last_import_created,
+              last_import.updated_count AS last_import_updated,
+              last_import.unchanged_count AS last_import_unchanged,
+              last_import.pending_variant_count AS last_import_pending_variant
        FROM products product
        LEFT JOIN supplier_price_settings setting ON setting.supplier = product.supplier
+       LEFT JOIN (
+         SELECT DISTINCT ON (supplier)
+                supplier, created_at, created_count, updated_count, unchanged_count, pending_variant_count
+         FROM supplier_price_imports
+         ORDER BY supplier, created_at DESC
+       ) last_import ON last_import.supplier = product.supplier
        WHERE product.supplier IS NOT NULL AND BTRIM(product.supplier) <> ''
-       GROUP BY product.supplier, setting.currency, setting.updated_at
+       GROUP BY product.supplier, setting.currency, setting.updated_at,
+                last_import.created_at, last_import.created_count, last_import.updated_count,
+                last_import.unchanged_count, last_import.pending_variant_count
        ORDER BY product.supplier`
     )
     res.json({ suppliers: rows.map(row => ({
@@ -524,6 +539,13 @@ router.get('/supplier-settings', async (_req, res) => {
       configured: row.configured,
       productCount: Number(row.product_count),
       updatedAt: row.updated_at || null,
+      lastImport: row.last_import_at ? {
+        at: row.last_import_at,
+        created: Number(row.last_import_created),
+        updated: Number(row.last_import_updated),
+        unchanged: Number(row.last_import_unchanged),
+        pendingVariant: Number(row.last_import_pending_variant),
+      } : null,
     })) })
   } catch (err) {
     console.error('[GET /api/products/supplier-settings]', err)
@@ -676,6 +698,133 @@ router.delete('/supplier-settings/:supplier/codes/:codigo', async (req, res) => 
   }
 })
 
+// Historial de cargas de lista de un proveedor. Responde la pregunta concreta
+// de "esta lista que me mandaron, ¿ya la subí?", que no se puede contestar
+// mirando los productos cuando la carga no cambió ningún precio.
+router.get('/supplier-settings/:supplier/imports', async (req, res) => {
+  const supplier = normalizePriceSupplier(req.params.supplier)
+  if (!supplier) return res.status(400).json({ error: 'Proveedor inválido' })
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, file_names, total_rows, created_count, updated_count,
+              unchanged_count, skipped_count, pending_variant_count, exchange_rate, created_at
+       FROM supplier_price_imports
+       WHERE supplier = $1
+       ORDER BY created_at DESC
+       LIMIT 30`,
+      [supplier]
+    )
+    res.json({
+      supplier,
+      imports: rows.map(row => ({
+        id: row.id,
+        fileNames: Array.isArray(row.file_names) ? row.file_names : [],
+        totalRows: Number(row.total_rows),
+        created: Number(row.created_count),
+        updated: Number(row.updated_count),
+        unchanged: Number(row.unchanged_count),
+        skipped: Number(row.skipped_count),
+        pendingVariant: Number(row.pending_variant_count),
+        exchangeRate: row.exchange_rate == null ? null : Number(row.exchange_rate),
+        at: row.created_at,
+      })),
+    })
+  } catch (err) {
+    console.error('[GET /api/products/supplier-settings/:supplier/imports]', err)
+    res.status(500).json({ error: 'No se pudo cargar el historial de cargas' })
+  }
+})
+
+// Asociación manual de un código de lista con un producto ya existente. Es la
+// salida para cuando el proveedor renombra un código: sin esto la fila se
+// importa como alta y deja un duplicado sin foto junto al producto original.
+// Queda guardada, así que el renombre se revisa una sola vez.
+router.put('/supplier-settings/:supplier/mappings/:codigo', async (req, res) => {
+  const supplier = normalizePriceSupplier(req.params.supplier)
+  const codigo = normalizeCodigo(req.params.codigo)
+  const productId = String(req.body.productId || '')
+  // Opcional: cuando el destino es un producto agrupado, el precio de este
+  // código pertenece a una variante concreta y no a la ficha general.
+  const rawVariantRuleId = String(req.body.variantRuleId ?? '').trim()
+  const variantRuleId = rawVariantRuleId || null
+  if (!supplier || !codigo || codigo.length > 200 || !UUID_PATTERN.test(productId)) {
+    return res.status(400).json({ error: 'Proveedor, código o producto inválidos' })
+  }
+  if (variantRuleId !== null && !UUID_PATTERN.test(variantRuleId)) {
+    return res.status(400).json({ error: 'La variante elegida no es válida' })
+  }
+  try {
+    const target = await pool.query(
+      `SELECT id, codigo, supplier, COALESCE(NULLIF(name, ''), NULLIF(descripcion, ''), codigo) AS nombre
+       FROM products WHERE id = $1`,
+      [productId]
+    )
+    if (!target.rows.length) return res.status(404).json({ error: 'El producto elegido ya no existe' })
+
+    // La variante tiene que pertenecer al producto elegido: si no, el precio
+    // terminaría en otro artículo sin que nada lo delate.
+    let variantRule = null
+    if (variantRuleId) {
+      const rule = await pool.query(
+        'SELECT id, color_name, color_hex, size_label, tone_name FROM product_variant_rules WHERE id = $1 AND product_id = $2',
+        [variantRuleId, productId]
+      )
+      if (!rule.rows.length) return res.status(404).json({ error: 'La variante elegida no pertenece a ese producto' })
+      variantRule = rule.rows[0]
+    }
+
+    // Los atributos de la variante se copian al mapping para que la vista previa
+    // pueda mostrar a qué combinación va el precio sin volver a leer la regla.
+    const { rows } = await pool.query(
+      `INSERT INTO supplier_product_mappings (
+         supplier, source_code, source_code_key, product_id,
+         color_name, color_hex, size_label, tone_name, variant_rule_id
+       )
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+       ON CONFLICT (supplier, source_code_key) DO UPDATE SET
+         source_code = EXCLUDED.source_code, product_id = EXCLUDED.product_id,
+         color_name = EXCLUDED.color_name, color_hex = EXCLUDED.color_hex,
+         size_label = EXCLUDED.size_label, tone_name = EXCLUDED.tone_name,
+         variant_rule_id = EXCLUDED.variant_rule_id, updated_at = NOW()
+       RETURNING source_code, product_id, variant_rule_id, updated_at`,
+      [supplier, codigo, priceCodeKey(codigo), productId,
+        variantRule?.color_name || null, variantRule?.color_hex || null,
+        variantRule?.size_label || null, variantRule?.tone_name || null, variantRuleId]
+    )
+    res.json({
+      supplier,
+      codigo: rows[0].source_code,
+      productId: rows[0].product_id,
+      variantRuleId: rows[0].variant_rule_id,
+      targetCode: target.rows[0].codigo,
+      targetName: target.rows[0].nombre,
+      updatedAt: rows[0].updated_at,
+    })
+  } catch (err) {
+    if (err.code === '23503') {
+      return res.status(409).json({ error: 'El producto o la variante dejaron de existir. Volvé a generar la vista previa' })
+    }
+    console.error('[PUT /api/products/supplier-settings/:supplier/mappings/:codigo]', err)
+    res.status(500).json({ error: 'No se pudo asociar el código con el producto' })
+  }
+})
+
+router.delete('/supplier-settings/:supplier/mappings/:codigo', async (req, res) => {
+  const supplier = normalizePriceSupplier(req.params.supplier)
+  const codigo = normalizeCodigo(req.params.codigo)
+  if (!supplier || !codigo) return res.status(400).json({ error: 'Proveedor o código inválidos' })
+  try {
+    await pool.query(
+      'DELETE FROM supplier_product_mappings WHERE supplier = $1 AND source_code_key = $2',
+      [supplier, priceCodeKey(codigo)]
+    )
+    res.status(204).end()
+  } catch (err) {
+    console.error('[DELETE /api/products/supplier-settings/:supplier/mappings/:codigo]', err)
+    res.status(500).json({ error: 'No se pudo quitar la asociación del código' })
+  }
+})
+
 router.get('/:id', async (req, res) => {
   try {
     const { rows } = await pool.query(
@@ -688,6 +837,8 @@ router.get('/:id', async (req, res) => {
                   'precio_costo_usd', vr.precio_costo_usd, 'precio_venta_usd', vr.precio_venta_usd,
                   'precio_iva_usd', vr.precio_iva_usd, 'price_currency', vr.price_currency,
                   'stock', vr.stock,
+                  'priceSourceRuleId', vr.price_source_rule_id,
+                  'priceSourcePercent', vr.price_source_percent,
                   'supplierCodes', COALESCE((SELECT jsonb_agg(m.source_code ORDER BY m.source_code)
                     FROM supplier_product_mappings m WHERE m.variant_rule_id=vr.id), '[]'::jsonb)
                 ) ORDER BY vr.created_at)
@@ -725,6 +876,12 @@ router.patch('/:id/variant-rules', async (req, res) => {
     precio_venta: toNumber(rule.precio_venta),
     precio_iva: toNumber(rule.precio_iva),
     stock: rule.stock == null || rule.stock === '' ? null : Number(rule.stock),
+    // Variante cuyo precio sigue al de otra del mismo producto. Se guarda el
+    // índice de la fila enviada porque una variante nueva todavía no tiene id.
+    price_source_index: Number.isInteger(rule.priceSourceIndex) ? rule.priceSourceIndex : null,
+    price_source_percent: rule.priceSourcePercent == null || rule.priceSourcePercent === ''
+      ? 0
+      : Number(rule.priceSourcePercent),
     supplier_codes: [...new Set((Array.isArray(rule.supplierCodes) ? rule.supplierCodes : [])
       .map(code => String(code || '').trim()).filter(Boolean))],
   }))
@@ -738,6 +895,30 @@ router.patch('/:id/variant-rules', async (req, res) => {
   }
   if (findRuleAmbiguity(normalized)) {
     return res.status(409).json({ error: 'Hay filas que representan la misma variante. Asignales distinto color, tono o medida' })
+  }
+  for (let index = 0; index < normalized.length; index++) {
+    const rule = normalized[index]
+    if (rule.price_source_index == null) {
+      rule.price_source_percent = 0
+      continue
+    }
+    if (rule.price_source_index === index || !normalized[rule.price_source_index]) {
+      return res.status(400).json({ error: 'Una variante no puede seguir su propio precio' })
+    }
+    // Una variante con código de proveedor recibe precio de la lista. Si además
+    // siguiera a otra, la derivación pisaría ese precio en cada importación y el
+    // dato real del proveedor se perdería sin que nada lo indique.
+    if (rule.supplier_codes.length) {
+      return res.status(400).json({ error: 'Una variante con código de proveedor recibe su precio de la lista y no puede seguir a otra' })
+    }
+    // Cadenas prohibidas: obligar a que el origen tenga precio propio descarta
+    // los ciclos y deja el recálculo en una sola pasada.
+    if (normalized[rule.price_source_index].price_source_index != null) {
+      return res.status(400).json({ error: 'La variante que se sigue tiene que tener precio propio, no seguir a otra' })
+    }
+    if (!Number.isFinite(rule.price_source_percent) || rule.price_source_percent <= -100 || rule.price_source_percent > 1000) {
+      return res.status(400).json({ error: 'El porcentaje sobre la variante seguida no es válido' })
+    }
   }
   const submittedCodeKeys = normalized.flatMap(rule => rule.supplier_codes.map(supplierCodeKey))
   if (normalized.some(rule => rule.supplier_codes.length > 1)) {
@@ -814,6 +995,17 @@ router.patch('/:id/variant-rules', async (req, res) => {
       }
       savedRules.push({ ...rule, id: savedRuleId })
     }
+    // El seguimiento se persiste en una segunda pasada: una variante nueva recién
+    // acá tiene id, así que antes no se podía apuntar a ella.
+    for (let index = 0; index < savedRules.length; index++) {
+      const rule = savedRules[index]
+      const sourceId = rule.price_source_index == null ? null : savedRules[rule.price_source_index]?.id || null
+      await client.query(
+        `UPDATE product_variant_rules SET price_source_rule_id=$1, price_source_percent=$2, updated_at=NOW()
+         WHERE id=$3 AND product_id=$4`,
+        [sourceId, sourceId ? rule.price_source_percent : 0, rule.id, req.params.id]
+      )
+    }
     for (const rule of savedRules) {
       const mappingIds = rule.supplier_codes.map(code => mappingByCode.get(supplierCodeKey(code))?.id).filter(Boolean)
       if (!mappingIds.length) continue
@@ -846,6 +1038,9 @@ router.patch('/:id/variant-rules', async (req, res) => {
       'UPDATE products SET color_options=$1::jsonb,size_options=$2::jsonb,tone_options=$3::jsonb WHERE id=$4',
       [JSON.stringify(colors), JSON.stringify(sizes), JSON.stringify(tones), req.params.id]
     )
+    // Editar a mano el precio de una variante seguida arrastra a las que la siguen,
+    // igual que cuando el cambio viene de una lista de precios.
+    await applyDerivedVariantPrices(client, req.params.id)
     const updatedProduct = await recomputeGroupedProduct(client, req.params.id)
     await client.query('COMMIT')
     res.json({ product: updatedProduct, updated: normalized.length })
@@ -1502,6 +1697,9 @@ router.post('/import/prices/bulk', upload.array('files', 100), async (req, res) 
     )
     const preview = await previewSupplierPriceDrafts(client, parsedFiles, usdArsRate)
     const result = await createSupplierPriceDrafts(client, parsedFiles, usdArsRate, preview)
+    // Dentro de la misma transacción: una carga aplicada sin registrar sería peor
+    // que no tener historial, porque el historial diría que nunca se subió.
+    await recordSupplierPriceImports(client, result.files, usdArsRate)
     await client.query('COMMIT')
     res.json({
       fileType: 'bulk-prices',
@@ -1511,6 +1709,8 @@ router.post('/import/prices/bulk', upload.array('files', 100), async (req, res) 
       exchangeRate: usdArsRate,
       failedFiles,
       ...result,
+      staleVariants: preview.staleVariants || [],
+      staleVariantCount: preview.staleVariantCount || 0,
       files: result.files.map((file, index) => ({
         ...file,
         items: preview.files[index]?.items || [],

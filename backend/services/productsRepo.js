@@ -140,6 +140,130 @@ function pricePreviewChanges(previous, row) {
   }))
 }
 
+// Variantes del producto destino. La vista previa las necesita para distinguir
+// un producto simple de uno agrupado: escribir un precio suelto en la ficha de
+// un agrupado rompe el "desde $X" (que recomputeGroupedProduct mantiene como el
+// minimo de las variantes) y deja la tarjeta mostrando un precio que el checkout
+// no cobra, porque el checkout resuelve por regla de variante.
+const TARGET_VARIANT_RULES_SQL = (alias) => `COALESCE((
+  SELECT jsonb_agg(jsonb_build_object(
+    'id', vr.id, 'color', vr.color_name, 'size', vr.size_label, 'tone', vr.tone_name,
+    'precioVenta', vr.precio_venta, 'precioIva', vr.precio_iva,
+    'codigo', vr.product_data->>'codigo',
+    'updatedAt', vr.updated_at,
+    'derived', vr.price_source_rule_id IS NOT NULL,
+    'supplierCode', (
+      SELECT m.source_code FROM supplier_product_mappings m
+      WHERE m.variant_rule_id = vr.id LIMIT 1
+    )
+  ) ORDER BY vr.created_at)
+  FROM product_variant_rules vr WHERE vr.product_id = ${alias}.id
+), '[]'::jsonb)`
+
+// Variantes del producto que esta importacion NO va a tocar. Las que siguen el
+// precio de otra quedan afuera: se recalculan solas cuando cambia su origen.
+// Sin este aviso una variante hecha a mano se queda con el precio del dia que se
+// creo y, despues de un par de aumentos, una medida grande sale mas barata que
+// una chica sin que nada lo delate.
+// Un producto de una sola variante se actualiza por la ficha y el trigger
+// products_sync_single_base_variant copia el precio a esa unica regla: cuenta
+// como cubierta aunque la fila no apunte a ella.
+function registrarDestino(touchedTargets, coveredRuleIds, { productId, productCode, productName, target, variantRuleId }) {
+  if (!touchedTargets.has(productId)) {
+    touchedTargets.set(productId, { productId, productCode, productName, target })
+  }
+  const rules = Array.isArray(target?.variant_rules) ? target.variant_rules : []
+  if (variantRuleId) coveredRuleIds.add(variantRuleId)
+  else if (rules.length === 1) coveredRuleIds.add(rules[0].id)
+}
+
+function staleVariantsOf(target, coveredRuleIds) {
+  const rules = Array.isArray(target?.variant_rules) ? target.variant_rules : []
+  return rules
+    .filter(rule => !coveredRuleIds.has(rule.id) && !rule.derived)
+    .map(rule => ({
+      id: rule.id,
+      label: [rule.color, rule.size, rule.tone].filter(Boolean).join(' / ') || 'Sin atributos',
+      codigo: rule.supplierCode || rule.codigo || null,
+      // Sin codigo de proveedor es una variante que agrego el negocio: el
+      // proveedor no la puede mandar nunca, no es que falto en este archivo.
+      hechaAMano: !rule.supplierCode,
+      precioIva: rule.precioIva == null ? null : Number(rule.precioIva),
+      precioVenta: rule.precioVenta == null ? null : Number(rule.precioVenta),
+      updatedAt: rule.updatedAt || null,
+    }))
+}
+
+// Un producto con una sola variante se mantiene solo: el trigger
+// products_sync_single_base_variant copia el precio de la ficha a esa variante.
+// El problema aparece de dos variantes en adelante, donde no hay a cual aplicarlo.
+function groupedTargetInfo(target, variantRuleId) {
+  const rules = Array.isArray(target?.variant_rules) ? target.variant_rules : []
+  if (variantRuleId || rules.length < 2) return null
+  return {
+    ruleCount: rules.length,
+    rules: rules.map(rule => ({
+      id: rule.id,
+      label: [rule.color, rule.size, rule.tone].filter(Boolean).join(' / ') || 'Sin atributos',
+      precioVenta: rule.precioVenta == null ? null : Number(rule.precioVenta),
+      precioIva: rule.precioIva == null ? null : Number(rule.precioIva),
+    })),
+  }
+}
+
+function groupedReason(grouped, targetCode) {
+  return `${targetCode} tiene ${grouped.ruleCount} variantes y este código no está asignado a ninguna. `
+    + 'Elegí a cuál corresponde: el precio se guarda en esa variante y la asociación queda para las próximas listas.'
+}
+
+// Cuando un proveedor renombra un codigo (ALC40 pasa a AL-C40) la lista deja de
+// coincidir con nada y la fila se lee como alta. Confirmada a ciegas, nace un
+// producto borrador sin foto y el viejo queda publicado con el precio congelado.
+// Estas sugerencias existen para que esa fila se pueda asociar en el momento.
+const RENAME_SUGGESTION_LIMIT = 5
+const RENAME_SUGGESTION_MIN_SIMILARITY = 45
+// Rankear cada alta contra todo el catalogo del proveedor cuesta
+// altas x productos. En una carga inicial de miles de filas eso bloquea el
+// request, y es justo el caso donde no hay nada que renombrar todavia.
+const RENAME_SUGGESTION_MAX_COMPARISONS = 1500000
+
+async function attachRenameSuggestions(client, supplier, items, takenIds) {
+  const createItems = items.filter(item => item.status === 'create' && item.codigo)
+  if (!createItems.length) return
+
+  const { rows: candidates } = await client.query(
+    `SELECT id, codigo, COALESCE(NULLIF(name, ''), NULLIF(descripcion, ''), codigo) AS nombre,
+            descripcion, published
+     FROM products WHERE supplier = $1`,
+    [supplier]
+  )
+  const available = candidates.filter(product => !takenIds.has(product.id))
+  if (!available.length) return
+
+  // Los renombres reales suelen ser solo puntuacion: ALC40 y AL-C40 colapsan al
+  // mismo texto al quitar guiones y espacios. Si dos productos colapsan al mismo
+  // texto la pista es ambigua y se descarta, para no proponer el equivocado.
+  const byNormalizedCode = new Map()
+  for (const product of available) {
+    const key = similarityText(product.codigo)
+    if (!key) continue
+    byNormalizedCode.set(key, byNormalizedCode.has(key) ? null : product)
+  }
+
+  const rankBySimilarity = createItems.length * available.length <= RENAME_SUGGESTION_MAX_COMPARISONS
+  for (const item of createItems) {
+    const renamedProduct = byNormalizedCode.get(similarityText(item.codigo)) || null
+    const ranked = rankBySimilarity
+      ? closestProducts({ codigo: item.codigo, descripcion: item.descripcion }, available, RENAME_SUGGESTION_LIMIT, renamedProduct?.id)
+        .filter(product => product.similarity >= RENAME_SUGGESTION_MIN_SIMILARITY)
+      : []
+    const suggestions = renamedProduct
+      ? [{ ...renamedProduct, similarity: 100, renamed: true }, ...ranked]
+      : ranked
+    if (suggestions.length) item.suggestions = suggestions.slice(0, RENAME_SUGGESTION_LIMIT)
+  }
+}
+
 // Analiza exactamente las mismas decisiones que aplicará la carga masiva, pero
 // sin escribir. El detalle se usa tanto en la confirmación previa como en el
 // comprobante posterior de la importación.
@@ -150,6 +274,12 @@ export async function previewSupplierPriceDrafts(client, files, usdArsRate) {
   let updated = 0
   let unchanged = 0
   let skipped = 0
+  let pendingVariant = 0
+  const suggestionBatches = []
+  // Productos que esta importacion realmente toca, con las reglas que cubre.
+  // Se juntan entre todos los archivos: un producto puede recibir filas de mas de uno.
+  const touchedTargets = new Map()
+  const coveredRuleIds = new Set()
 
   for (const file of files) {
     const uniqueRows = []
@@ -182,7 +312,8 @@ export async function previewSupplierPriceDrafts(client, files, usdArsRate) {
                 rule.precio_iva AS rule_precio_iva,
                 rule.precio_costo_usd AS rule_precio_costo_usd,
                 rule.precio_venta_usd AS rule_precio_venta_usd,
-                rule.precio_iva_usd AS rule_precio_iva_usd
+                rule.precio_iva_usd AS rule_precio_iva_usd,
+                ${TARGET_VARIANT_RULES_SQL('product')} AS variant_rules
          FROM supplier_product_mappings mapping
          JOIN products product ON product.id = mapping.product_id
          LEFT JOIN product_variant_rules rule ON rule.id = mapping.variant_rule_id
@@ -199,7 +330,8 @@ export async function previewSupplierPriceDrafts(client, files, usdArsRate) {
                 COALESCE(NULLIF(name, ''), NULLIF(descripcion, ''), codigo) AS product_name,
                 precio_costo, precio_venta, precio_iva,
                 precio_costo_usd, precio_venta_usd, precio_iva_usd,
-                color_options, size_options
+                color_options, size_options,
+                ${TARGET_VARIANT_RULES_SQL('products')} AS variant_rules
          FROM products WHERE codigo = ANY($1::varchar[])`,
         [unmappedCodes]
       )
@@ -214,8 +346,9 @@ export async function previewSupplierPriceDrafts(client, files, usdArsRate) {
         const variant = [mapping.color_name, mapping.size_label, mapping.tone_name].filter(Boolean).join(' / ')
         const changes = pricePreviewChanges(mappedCurrentPrices(mapping, currency, usdArsRate), row)
         const hasChanges = changes.some(change => change.changed)
+        const grouped = hasChanges ? groupedTargetInfo(mapping, mapping.variant_rule_id) : null
         items.push({
-          status: hasChanges ? 'update' : 'unchanged',
+          status: grouped ? 'variant' : hasChanges ? 'update' : 'unchanged',
           codigo: row.codigo,
           descripcion: row.descripcion,
           targetProductId: mapping.product_id,
@@ -223,28 +356,56 @@ export async function previewSupplierPriceDrafts(client, files, usdArsRate) {
           targetName: mapping.product_name,
           variant: variant || null,
           currency,
+          matchType: 'saved',
           changes,
-          ...(!hasChanges ? { reason: 'Los precios ya coinciden. No se realizará ningún cambio.' } : {}),
+          ...(grouped ? { groupedTarget: grouped, reason: groupedReason(grouped, mapping.product_code) } : {}),
+          ...(!grouped && !hasChanges ? { reason: 'Los precios ya coinciden. No se realizará ningún cambio.' } : {}),
         })
-        if (hasChanges) updated++
-        else { unchanged++; skipped++ }
+        if (grouped) { pendingVariant++; skipped++ }
+        else {
+          registrarDestino(touchedTargets, coveredRuleIds, {
+            productId: mapping.product_id,
+            productCode: mapping.product_code,
+            productName: mapping.product_name,
+            target: mapping,
+            variantRuleId: mapping.variant_rule_id,
+          })
+          if (hasChanges) updated++
+          else { unchanged++; skipped++ }
+        }
         continue
       }
 
       const existing = existingByCode.get(row.codigo)
       if (existing) {
         const previousSupplier = String(existing.supplier || '').trim()
+        const grouped = groupedTargetInfo(existing, null)
         items.push({
-          status: 'update', codigo: row.codigo, descripcion: row.descripcion,
+          status: grouped ? 'variant' : 'update',
+          codigo: row.codigo, descripcion: row.descripcion,
           targetProductId: existing.id,
           targetCode: existing.codigo, targetName: existing.product_name,
           currency,
-          reason: previousSupplier && previousSupplier !== file.supplier
-            ? `Se asociará a ${file.supplier} (actualmente figura como ${previousSupplier}).`
-            : `Se creará la asociación con ${file.supplier}.`,
+          matchType: 'code',
+          ...(grouped ? { groupedTarget: grouped } : {}),
+          reason: grouped
+            ? groupedReason(grouped, existing.codigo)
+            : previousSupplier && previousSupplier !== file.supplier
+              ? `Se asociará a ${file.supplier} (actualmente figura como ${previousSupplier}).`
+              : `Se creará la asociación con ${file.supplier}.`,
           changes: pricePreviewChanges(mappedCurrentPrices(existing, currency, usdArsRate), row),
         })
-        updated++
+        if (grouped) { pendingVariant++; skipped++ }
+        else {
+          registrarDestino(touchedTargets, coveredRuleIds, {
+            productId: existing.id,
+            productCode: existing.codigo,
+            productName: existing.product_name,
+            target: existing,
+            variantRuleId: null,
+          })
+          updated++
+        }
       } else {
         items.push({
           status: 'create', codigo: row.codigo, descripcion: row.descripcion,
@@ -253,6 +414,8 @@ export async function previewSupplierPriceDrafts(client, files, usdArsRate) {
         created++
       }
     }
+
+    suggestionBatches.push({ supplier: file.supplier, items })
 
     items.push(...duplicateItems)
     skipped += duplicateItems.length
@@ -283,7 +446,33 @@ export async function previewSupplierPriceDrafts(client, files, usdArsRate) {
     })
   }
 
-  return { created, updated, unchanged, skipped, files: fileResults }
+  // Un producto que ya recibe una fila de cualquiera de los archivos no puede ser
+  // ademas el destino de un alta: dos codigos distintos terminarian pisandose el
+  // precio en cada importacion, y el ultimo en procesarse ganaria en silencio.
+  const takenIds = new Set(
+    suggestionBatches.flatMap(batch => batch.items).map(item => item.targetProductId).filter(Boolean)
+  )
+  for (const batch of suggestionBatches) {
+    await attachRenameSuggestions(client, batch.supplier, batch.items, takenIds)
+  }
+
+  const staleVariants = []
+  for (const info of touchedTargets.values()) {
+    const variants = staleVariantsOf(info.target, coveredRuleIds)
+    if (!variants.length) continue
+    staleVariants.push({
+      productId: info.productId,
+      productCode: info.productCode,
+      productName: info.productName,
+      variants,
+    })
+  }
+  const staleVariantCount = staleVariants.reduce((total, item) => total + item.variants.length, 0)
+
+  return {
+    created, updated, unchanged, skipped, pendingVariant,
+    staleVariants, staleVariantCount, files: fileResults,
+  }
 }
 
 export async function createSupplierPriceDrafts(client, files, usdArsRate, preview = null) {
@@ -293,6 +482,7 @@ export async function createSupplierPriceDrafts(client, files, usdArsRate, previ
   let updated = 0
   let unchanged = 0
   let skipped = 0
+  let pendingVariant = 0
 
   for (let fileIndex = 0; fileIndex < files.length; fileIndex++) {
     const file = files[fileIndex]
@@ -407,8 +597,13 @@ export async function createSupplierPriceDrafts(client, files, usdArsRate, previ
       existingCodes.push(...batch.filter(row => !insertedCodes.has(row.codigo)).map(row => row.codigo))
     }
 
+    // Las filas que esperan que se elija una variante quedaron fuera de la escritura
+    // (no entran en rowsToUpdate ni en unmappedRows). El comprobante tiene que
+    // nombrarlas igual, o la importacion parece completa cuando no lo esta.
+    const filePendingVariant = (previewItems || []).filter(item => item.status === 'variant').length
+    pendingVariant += filePendingVariant
     const unchangedRows = preview?.files?.[fileIndex]?.unchanged || 0
-    const fileSkipped = Number(file.skipped || 0) + duplicateRows + existingCodes.length + unchangedRows
+    const fileSkipped = Number(file.skipped || 0) + duplicateRows + existingCodes.length + unchangedRows + filePendingVariant
     created += fileCreated
     updated += fileUpdated
     unchanged += unchangedRows
@@ -421,6 +616,7 @@ export async function createSupplierPriceDrafts(client, files, usdArsRate, previ
       created: fileCreated,
       updated: fileUpdated,
       unchanged: unchangedRows,
+      pendingVariant: filePendingVariant,
       skipped: fileSkipped,
       invalidRows: Number(file.skipped || 0),
       duplicateRows,
@@ -429,7 +625,57 @@ export async function createSupplierPriceDrafts(client, files, usdArsRate, previ
     })
   }
 
-  return { created, updated, unchanged, skipped, files: fileResults }
+  return { created, updated, unchanged, skipped, pendingVariant, files: fileResults }
+}
+
+// Deja constancia de la carga aunque no haya cambiado ningun precio: esa es
+// justamente la que no se puede reconstruir despues mirando los productos.
+// Se agrupa por proveedor porque una misma tanda puede traer varios archivos.
+export async function recordSupplierPriceImports(client, files, usdArsRate) {
+  const bySupplier = new Map()
+  for (const file of files) {
+    if (!file.supplier) continue
+    const entry = bySupplier.get(file.supplier) || {
+      supplier: file.supplier, fileNames: [], totalRows: 0,
+      created: 0, updated: 0, unchanged: 0, skipped: 0, pendingVariant: 0,
+    }
+    entry.fileNames.push(file.fileName)
+    entry.totalRows += Number(file.totalRows || 0)
+    entry.created += Number(file.created || 0)
+    entry.updated += Number(file.updated || 0)
+    entry.unchanged += Number(file.unchanged || 0)
+    entry.skipped += Number(file.skipped || 0)
+    entry.pendingVariant += Number(file.pendingVariant || 0)
+    bySupplier.set(file.supplier, entry)
+  }
+  if (!bySupplier.size) return []
+
+  const { rows } = await client.query(
+    `INSERT INTO supplier_price_imports (
+       supplier, file_names, total_rows, created_count, updated_count,
+       unchanged_count, skipped_count, pending_variant_count, exchange_rate
+     )
+     SELECT entry.supplier, entry.file_names, entry.total_rows, entry.created_count,
+            entry.updated_count, entry.unchanged_count, entry.skipped_count,
+            entry.pending_variant_count, $2
+     FROM jsonb_to_recordset($1::jsonb) AS entry(
+       supplier text, file_names jsonb, total_rows integer, created_count integer,
+       updated_count integer, unchanged_count integer, skipped_count integer,
+       pending_variant_count integer
+     )
+     RETURNING supplier, created_at`,
+    [JSON.stringify([...bySupplier.values()].map(entry => ({
+      supplier: entry.supplier,
+      file_names: entry.fileNames,
+      total_rows: entry.totalRows,
+      created_count: entry.created,
+      updated_count: entry.updated,
+      unchanged_count: entry.unchanged,
+      skipped_count: entry.skipped,
+      pending_variant_count: entry.pendingVariant,
+    }))), usdArsRate]
+  )
+  return rows
 }
 
 // La lista de precios se revisa antes de tocar la base. Este paso busca primero

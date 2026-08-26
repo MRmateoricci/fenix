@@ -515,6 +515,42 @@ export function AdminProvider({ children }) {
     }
   }, [])
 
+  // Historial de cargas de lista de un proveedor. Se pide bajo demanda: el
+  // resumen de la última carga ya viene en fetchSupplierSettings.
+  const fetchSupplierImports = useCallback(async (supplier) => {
+    const res = await fetch(`${API_BASE}/api/products/supplier-settings/${encodeURIComponent(supplier)}/imports`, {
+      headers: { 'x-admin-token': ADMIN_PASSWORD },
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error || 'No se pudo cargar el historial de cargas')
+    return data.imports || []
+  }, [])
+
+  // Asocia un código de la lista del proveedor con un producto ya cargado. Se
+  // usa cuando el proveedor renombra un código y la vista previa lo lee como
+  // alta; la asociación queda guardada y las listas siguientes ya lo reconocen.
+  const setPriceCodeMapping = useCallback(async (supplier, codigo, productId, variantRuleId = null) => {
+    const res = await fetch(`${API_BASE}/api/products/supplier-settings/${encodeURIComponent(supplier)}/mappings/${encodeURIComponent(codigo)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'x-admin-token': ADMIN_PASSWORD },
+      body: JSON.stringify({ productId, variantRuleId }),
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error || 'No se pudo asociar el código con el producto')
+    return data
+  }, [])
+
+  const clearPriceCodeMapping = useCallback(async (supplier, codigo) => {
+    const res = await fetch(`${API_BASE}/api/products/supplier-settings/${encodeURIComponent(supplier)}/mappings/${encodeURIComponent(codigo)}`, {
+      method: 'DELETE',
+      headers: { 'x-admin-token': ADMIN_PASSWORD },
+    })
+    if (!res.ok && res.status !== 204) {
+      const data = await res.json().catch(() => ({}))
+      throw new Error(data.error || 'No se pudo quitar la asociación del código')
+    }
+  }, [])
+
   // ── fetchSubcategories/fetchProductTypes + create/delete ─────────────────
   // Subcategorías (nivel 2) y tipos/clasificación (nivel 3) que el admin agrega
   // a mano, además del árbol "de fábrica" (src/data/categoryTree.js). La
@@ -1038,6 +1074,7 @@ export function AdminProvider({ children }) {
       importResult, importLoading, importError,
       currencySettings, fetchCurrencySettings, updateCurrencySettings, updateDeliverySettings,
       supplierSettings, fetchSupplierSettings, updateSupplierCurrency,
+      setPriceCodeMapping, clearPriceCodeMapping, fetchSupplierImports,
       setPriceCodeCurrency, clearPriceCodeCurrency,
       subcategories, fetchSubcategories, createSubcategory, updateSubcategory, deleteSubcategory,
       productTypes, fetchProductTypes, createProductType, updateProductType, deleteProductType,

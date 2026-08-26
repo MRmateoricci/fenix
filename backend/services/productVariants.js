@@ -203,6 +203,59 @@ function appendOption(options, key, value, extra = {}) {
   return current
 }
 
+// Recalcula las variantes cuyo precio sigue al de otra. Se corre entera cada vez
+// en vez de propagar desde la que cambio: es una sola consulta, no depende del
+// orden en que se actualizaron las fuentes y no puede quedar a medias.
+// Devuelve cuantas filas efectivamente cambiaron de precio.
+export async function applyDerivedVariantPrices(client, productId) {
+  const { rows: rules } = await client.query(
+    `SELECT id, price_source_rule_id, price_source_percent,
+            precio_costo, precio_venta, precio_iva,
+            precio_costo_usd, precio_venta_usd, precio_iva_usd
+     FROM product_variant_rules WHERE product_id = $1`,
+    [productId]
+  )
+  const derived = rules.filter(rule => rule.price_source_rule_id)
+  if (!derived.length) return 0
+
+  const byId = new Map(rules.map(rule => [rule.id, rule]))
+  const PRICE_FIELDS = [
+    'precio_costo', 'precio_venta', 'precio_iva',
+    'precio_costo_usd', 'precio_venta_usd', 'precio_iva_usd',
+  ]
+  let changed = 0
+
+  for (const rule of derived) {
+    const source = byId.get(rule.price_source_rule_id)
+    // El origen puede haber quedado fuera del producto o ser a su vez derivado:
+    // en los dos casos se deja la variante como esta en vez de inventar un precio.
+    if (!source || source.id === rule.id || source.price_source_rule_id) continue
+    const factor = 1 + (numberOrNull(rule.price_source_percent) || 0) / 100
+    if (!Number.isFinite(factor) || factor <= 0) continue
+
+    const next = {}
+    let difiere = false
+    for (const field of PRICE_FIELDS) {
+      const base = numberOrNull(source[field])
+      next[field] = base == null ? null : Math.round(base * factor * 100) / 100
+      if (next[field] !== numberOrNull(rule[field])) difiere = true
+    }
+    if (!difiere) continue
+
+    await client.query(
+      `UPDATE product_variant_rules
+       SET precio_costo=$1, precio_venta=$2, precio_iva=$3,
+           precio_costo_usd=$4, precio_venta_usd=$5, precio_iva_usd=$6,
+           updated_at=NOW()
+       WHERE id=$7`,
+      [next.precio_costo, next.precio_venta, next.precio_iva,
+        next.precio_costo_usd, next.precio_venta_usd, next.precio_iva_usd, rule.id]
+    )
+    changed++
+  }
+  return changed
+}
+
 export async function recomputeGroupedProduct(client, productId) {
   const [{ rows: products }, { rows: rules }] = await Promise.all([
     client.query('SELECT * FROM products WHERE id = $1', [productId]),
@@ -592,6 +645,7 @@ export async function updateVariantRulePrice(client, ruleId, values) {
       values.currency, values.usdArsRate, ruleId]
   )
   if (!rows.length) return 0
+  await applyDerivedVariantPrices(client, rows[0].product_id)
   await recomputeGroupedProduct(client, rows[0].product_id)
   return 1
 }

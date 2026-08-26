@@ -151,6 +151,27 @@ Fuentes de precio soportadas: `catalog`, `price_list`, `sale`, `purchase`, `manu
 `supplier_product_mappings` guarda las asociaciones código-proveedor ↔ producto ya
 confirmadas, así una relación se revisa una sola vez.
 
+Desde la vista previa se puede corregir a qué apunta cada código, sin salir de la
+importación:
+
+- Un código que el proveedor renombró (`ALC40` → `AL-C40`) sale como alta. La
+  vista previa propone el producto original y con un clic queda asociado.
+- Un código que apunta a un producto agrupado sin decir a qué variante
+  corresponde no se aplica: aparece como **Falta elegir variante** hasta que se
+  elija una.
+
+Las dos decisiones quedan guardadas en `supplier_product_mappings`
+(`product_id` y `variant_rule_id`), así la lista siguiente ya las reconoce.
+
+Las variantes que la lista no toca se avisan **antes** de confirmar, con el
+detalle de cuáles y desde cuándo tienen ese precio. Una variante puede declarar
+que **sigue el precio de otra** del mismo producto (`price_source_rule_id` +
+`price_source_percent`): esas se recalculan solas y no aparecen en el aviso.
+
+`supplier_price_imports` registra cada carga confirmada, con sus archivos y
+contadores. El resumen de la última viaja en `GET /api/products/supplier-settings`
+y el historial completo en `GET /api/products/supplier-settings/:supplier/imports`.
+
 ### Envíos
 
 **Ventana de entrega, no una fecha (2026-08-26).** El checkout dice "Llega entre
@@ -412,6 +433,84 @@ Links: envío → `/policies/shipping` (página real). Cuotas → `/faq#medios-d
 ---
 
 ## Bitácora
+
+### 2026-08-26 · Variantes que el proveedor no lista: precio derivado y aviso
+
+Un producto agrupado puede tener variantes que el negocio agrega a mano y que
+ninguna lista de precios va a actualizar nunca. La importación las ignoraba en
+silencio: no salían como omitidas ni como error, simplemente no se evaluaban,
+porque la vista previa recorre las filas del Excel y no las variantes del
+producto.
+
+El daño no es sólo que quedaran viejas. Con una brida de 5 a 9 pulgadas donde el
+proveedor lista hasta la de 8, un aumento del 20% deja la de 9 más barata que la
+de 7. Dos aumentos, más barata que la de 6. La tarjeta no se rompe (sigue siendo
+el mínimo), pero la escalera de precios entre medidas se invierte.
+
+Dos cosas, que se complementan:
+
+**Precio derivado.** Una variante sin código de proveedor puede seguir el precio
+de otra del mismo producto, con un porcentaje encima (0 = el mismo precio, se
+admiten negativos). Se guarda en `price_source_rule_id` y `price_source_percent`.
+`applyDerivedVariantPrices()` recalcula todas las derivadas del producto de una
+pasada, y corre tanto al importar una lista como al editar precios a mano.
+
+Se prohíben las cadenas: el origen tiene que tener precio propio. Eso descarta
+los ciclos sin necesidad de detectarlos y deja el recálculo en una sola pasada.
+Tampoco puede seguir a otra una variante que sí tiene código de proveedor: la
+derivación pisaría el precio real de la lista en cada carga.
+
+**Aviso en la vista previa.** Antes de confirmar se listan las variantes que la
+importación no va a tocar, separando las hechas a mano de las que tienen código
+pero no vinieron en ese archivo, con su precio actual y desde cuándo lo tienen.
+Las derivadas quedan fuera del aviso: se actualizan solas.
+
+### 2026-08-26 · Historial de cargas de lista por proveedor
+
+No había forma de saber cuándo se había subido la lista de un proveedor.
+`products.price_updated_at` parecía la respuesta pero no lo es: solo se mueve en
+los productos cuyo precio efectivamente cambió, así que una lista que el
+proveedor mandó sin aumentos no dejaba rastro. Justo el caso en que la pregunta
+"¿esto ya lo subí?" no se puede contestar de memoria.
+
+`supplier_price_imports` guarda una fila por carga confirmada — proveedor,
+archivos, filas leídas, creados, actualizados, sin cambios, omitidos, los que
+quedaron esperando variante y la cotización usada.
+
+Se escribe **dentro de la misma transacción** que aplica los precios: una carga
+aplicada pero no registrada sería peor que no tener historial, porque el
+historial afirmaría que nunca se subió. Railway corre `db:migrate` como
+`preDeployCommand`, así que la tabla existe antes de que arranque el código.
+
+En el panel aparece en dos lugares: la tarjeta "Precios proveedor" muestra la
+última carga del proveedor elegido antes de subir nada, y la barra de proveedor
+de la tabla de productos abre el historial completo.
+
+### 2026-08-26 · La vista previa de precios corrige a qué producto va cada código
+
+Dos formas silenciosas de romper el catálogo al subir una lista de precios, las
+dos detectables recién cuando ya habían pasado.
+
+**Código renombrado.** `priceCodeKey` solo normaliza espacios, así que `ALC40` y
+`AL-C40` eran artículos distintos. Confirmar la vista previa creaba un borrador
+sin foto y dejaba el original publicado con el precio viejo. Ahora las altas
+traen candidatos del mismo proveedor: primero la coincidencia por código
+normalizado sin puntuación (que es lo que cambia en casi todo renombre real) y
+después un ranking por similitud. Si dos productos colapsan al mismo código
+normalizado la pista es ambigua y no se marca ninguno como seguro.
+
+**Producto agrupado sin variante asignada.** El checkout resuelve el precio por
+regla de variante (`orders.js`) y la tarjeta publica `products.precio_*`, que
+`recomputeGroupedProduct` mantiene como el mínimo de las variantes. Escribir ahí
+un precio suelto rompía ese invariante: la tarjeta mostraba un importe que el
+checkout no cobraba. Esas filas ya no se aplican — quedan en **Falta elegir
+variante** hasta que se indique a cuál corresponde el código.
+
+Se descartó la idea de reportar como error que dos variantes tengan precios
+distintos: la misma lámpara de 15 W y de 20 W vale distinto, y eso es correcto.
+
+Endpoints nuevos: `PUT`/`DELETE
+/api/products/supplier-settings/:supplier/mappings/:codigo`.
 
 ### 2026-08-26 · Se retira el envío expreso
 
