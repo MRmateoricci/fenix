@@ -105,6 +105,13 @@ export default function AnnouncementBar() {
         mobile: cuotasMobile,
       },
       {
+        key: 'transferencia',
+        href: '/faq#medios-de-pago',
+        onClick: goToMediosDePago,
+        desktop: <>10% DE DESCUENTO PAGANDO CON TRANSFERENCIA</>,
+        mobile: <>10% OFF POR TRANSFERENCIA</>,
+      },
+      {
         key: 'retiro',
         href: '/#contacto',
         onClick: goToContacto,

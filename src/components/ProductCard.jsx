@@ -27,7 +27,7 @@ const fmt = (n) =>
     maximumFractionDigits: 0,
   }).format(n)
 
-const INSTALLMENTS = 6
+const INSTALLMENTS = 3
 const NATIONAL_TAX_RATE = 0.21 // IVA — se descuenta para estimar el "precio sin impuestos nacionales"
 
 // Rating/reseñas de ejemplo, estables por producto (no hay datos reales de
@@ -356,14 +356,14 @@ export default function ProductCard({ product }) {
           <span className="fnx-product-card__installments" style={{ fontFamily: "'Inter', system-ui, sans-serif", fontSize: 12, color: T.text3 }}>
             Hasta {INSTALLMENTS} cuotas sin interés de <strong style={{ fontWeight: 600 }}>{fmt(displayPrice / INSTALLMENTS)}</strong>
           </span>
+          <span className="fnx-product-card__tax" style={{ fontFamily: "'Inter', system-ui, sans-serif", fontSize: 11, color: T.muted2 }}>
+            Precio sin impuestos nacionales: {fmt(displayPrice * (1 - NATIONAL_TAX_RATE))}
+          </span>
           {!product.inStock && product.aPedido && (
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontFamily: "'Inter', system-ui, sans-serif", fontSize: 11.5, color: T.amber, fontWeight: 500 }}>
               <ClockIcon /> A pedido · llega en ~{product.diasEntregaPedido} días hábiles
             </span>
           )}
-          <span className="fnx-product-card__tax" style={{ fontFamily: "'Inter', system-ui, sans-serif", fontSize: 11, color: T.muted2 }}>
-            Precio sin impuestos nacionales: {fmt(displayPrice * (1 - NATIONAL_TAX_RATE))}
-          </span>
         </div>
 
         <div className="fnx-product-card__reviews" style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 'auto' }}>
