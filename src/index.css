@@ -1722,47 +1722,44 @@
 
 .fnx-announcement-bar__viewport {
   flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
   min-width: 0;
-  padding: 0 8px;
+  overflow: hidden;
 }
 
-.fnx-announcement-bar__arrow {
-  flex: 0 0 auto;
-  color: inherit;
-  opacity: 0.7;
-  font-size: 16px;
-  line-height: 1;
-  padding: 4px 8px;
+.fnx-announcement-bar__track {
+  display: flex;
+  width: max-content;
+  height: 100%;
+  will-change: transform;
+  animation: fnx-announcement-marquee 32s linear infinite;
 }
-.fnx-announcement-bar__arrow:hover { opacity: 1; }
+
+.fnx-announcement-bar__track--paused {
+  animation-play-state: paused;
+}
 
 .fnx-announcement-bar__slides {
-  position: relative;
-  flex: 1 1 auto;
-  min-width: 0;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  gap: 64px;
+  min-width: calc(100vw - 36px);
   height: 100%;
+  padding: 0 32px;
+  box-sizing: border-box;
 }
 
 .fnx-announcement-bar__slide {
-  position: absolute;
-  inset: 0;
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   justify-content: center;
   text-align: center;
-  opacity: 0;
-  visibility: hidden;
-  transition: opacity 400ms ease, visibility 0s linear 400ms;
 }
 
-.fnx-announcement-bar__slide--active {
-  opacity: 1;
-  visibility: visible;
-  transition: opacity 400ms ease, visibility 0s linear 0s;
+@keyframes fnx-announcement-marquee {
+  to { transform: translateX(-50%); }
 }
 
 .fnx-announcement-bar__link {
@@ -1775,7 +1772,6 @@
 .fnx-announcement-bar__dot { opacity: 0.6; }
 
 .fnx-announcement-bar__control:focus-visible,
-.fnx-announcement-bar__arrow:focus-visible,
 .fnx-announcement-bar__link:focus-visible {
   outline: 2px solid var(--color-bg);
   outline-offset: -2px;
@@ -1785,14 +1781,16 @@
 
 @media (max-width: 768px) {
   .fnx-announcement-bar { height: 34px; font-size: 11px; }
-  .fnx-announcement-bar__arrow { display: none; }
+  .fnx-announcement-bar__slides {
+    min-width: calc(100vw - 36px);
+    gap: 40px;
+    padding: 0 20px;
+  }
+  .fnx-announcement-bar__track { animation-duration: 26s; }
   .fnx-announcement-bar__text--desktop { display: none; }
   .fnx-announcement-bar__text--mobile { display: inline; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .fnx-announcement-bar__slide,
-  .fnx-announcement-bar__slide--active {
-    transition: none;
-  }
+  .fnx-announcement-bar__track { animation-play-state: paused; }
 }

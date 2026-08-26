@@ -378,9 +378,9 @@ plazos de entrega*.
 
 `src/components/AnnouncementBar.jsx`, montada como primer hijo del `Layout`
 público (`src/App.jsx`), arriba del navbar y **no sticky**: scrollea y
-desaparece. No aparece en `/admin`. Tres mensajes rotan cada 5 s con crossfade
-de 400 ms, pausa manual + hover + pestaña en background, flechas en desktop,
-`prefers-reduced-motion` respetado.
+desaparece. No aparece en `/admin`. Los cuatro mensajes avanzan juntos en una
+cinta horizontal continua y sin cortes. El único control visible permite pausar
+o reanudar el movimiento; `prefers-reduced-motion` sigue respetado.
 
 Sin valores hardcodeados: el umbral de envío gratis sale de
 `shippingConfig.freeShippingThreshold` (`useCart()`, ya alimentado por

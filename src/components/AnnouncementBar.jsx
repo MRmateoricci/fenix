@@ -3,7 +3,6 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useCart } from '../context/CartContext'
 
 const API_BASE = import.meta.env.VITE_API_URL || ''
-const ROTATE_MS = 5000
 
 const fmt = (n) =>
   new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(n)
@@ -25,11 +24,7 @@ export default function AnnouncementBar() {
   // servida acá para no duplicar el número de cuotas ni el mínimo (ver el bug
   // de INSTALLMENTS=6 pelado en ProductCard.jsx, que esto reemplaza a futuro).
   const [cuotas, setCuotas] = useState(null)
-  const [activeIndex, setActiveIndex] = useState(0)
   const [manualPaused, setManualPaused] = useState(false)
-  const [hovering, setHovering] = useState(false)
-  const [tabHidden, setTabHidden] = useState(() => document.visibilityState === 'hidden')
-  const [reducedMotion, setReducedMotion] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -38,20 +33,6 @@ export default function AnnouncementBar() {
       .then((data) => { if (!cancelled && data?.cuotas) setCuotas(data.cuotas) })
       .catch(() => {})
     return () => { cancelled = true }
-  }, [])
-
-  useEffect(() => {
-    const mql = window.matchMedia('(prefers-reduced-motion: reduce)')
-    setReducedMotion(mql.matches)
-    const onChange = (e) => setReducedMotion(e.matches)
-    mql.addEventListener('change', onChange)
-    return () => mql.removeEventListener('change', onChange)
-  }, [])
-
-  useEffect(() => {
-    function onVisibility() { setTabHidden(document.visibilityState === 'hidden') }
-    document.addEventListener('visibilitychange', onVisibility)
-    return () => document.removeEventListener('visibilitychange', onVisibility)
   }, [])
 
   const threshold = shippingConfig?.freeShippingThreshold
@@ -121,29 +102,40 @@ export default function AnnouncementBar() {
     ]
   }, [threshold, tiers, pathname])
 
-  const playing = !manualPaused && !hovering && !tabHidden && !reducedMotion
-
-  useEffect(() => {
-    if (!playing || !slides) return undefined
-    const id = setInterval(() => {
-      setActiveIndex((i) => (i + 1) % slides.length)
-    }, ROTATE_MS)
-    return () => clearInterval(id)
-  }, [playing, slides])
-
-  useEffect(() => {
-    if (reducedMotion) setActiveIndex(0)
-  }, [reducedMotion])
-
   if (!slides) return null
 
-  function prev() {
-    setManualPaused(true)
-    setActiveIndex((i) => (i - 1 + slides.length) % slides.length)
-  }
-  function next() {
-    setManualPaused(true)
-    setActiveIndex((i) => (i + 1) % slides.length)
+  function renderSlides(duplicate = false) {
+    return slides.map((slide) => {
+      const content = (
+        <>
+          <span className="fnx-announcement-bar__text fnx-announcement-bar__text--desktop">{slide.desktop}</span>
+          <span className="fnx-announcement-bar__text fnx-announcement-bar__text--mobile">{slide.mobile}</span>
+        </>
+      )
+
+      return (
+        <div key={`${slide.key}-${duplicate ? 'copy' : 'original'}`} className="fnx-announcement-bar__slide">
+          {slide.onClick ? (
+            <a
+              href={slide.href}
+              onClick={slide.onClick}
+              className="fnx-announcement-bar__link"
+              tabIndex={duplicate ? -1 : undefined}
+            >
+              {content}
+            </a>
+          ) : (
+            <Link
+              to={slide.href}
+              className="fnx-announcement-bar__link"
+              tabIndex={duplicate ? -1 : undefined}
+            >
+              {content}
+            </Link>
+          )}
+        </div>
+      )
+    })
   }
 
   return (
@@ -151,8 +143,6 @@ export default function AnnouncementBar() {
       className="fnx-announcement-bar"
       role="region"
       aria-label="Anuncios de la tienda"
-      onMouseEnter={() => setHovering(true)}
-      onMouseLeave={() => setHovering(false)}
     >
       <button
         type="button"
@@ -164,52 +154,13 @@ export default function AnnouncementBar() {
       </button>
 
       <div className="fnx-announcement-bar__viewport">
-        <button
-          type="button"
-          className="fnx-announcement-bar__arrow fnx-announcement-bar__arrow--prev"
-          onClick={prev}
-          aria-label="Anuncio anterior"
+        <div
+          className={`fnx-announcement-bar__track${manualPaused ? ' fnx-announcement-bar__track--paused' : ''}`}
+          aria-live="off"
         >
-          ‹
-        </button>
-
-        <div className="fnx-announcement-bar__slides" aria-live="off">
-          {slides.map((slide, i) => {
-            const isActive = i === activeIndex
-            const content = (
-              <>
-                <span className="fnx-announcement-bar__text fnx-announcement-bar__text--desktop">{slide.desktop}</span>
-                <span className="fnx-announcement-bar__text fnx-announcement-bar__text--mobile">{slide.mobile}</span>
-              </>
-            )
-            return (
-              <div
-                key={slide.key}
-                className={`fnx-announcement-bar__slide${isActive ? ' fnx-announcement-bar__slide--active' : ''}`}
-                aria-hidden={!isActive}
-              >
-                {slide.onClick ? (
-                  <a href={slide.href} onClick={slide.onClick} className="fnx-announcement-bar__link">
-                    {content}
-                  </a>
-                ) : (
-                  <Link to={slide.href} className="fnx-announcement-bar__link">
-                    {content}
-                  </Link>
-                )}
-              </div>
-            )
-          })}
+          <div className="fnx-announcement-bar__slides">{renderSlides()}</div>
+          <div className="fnx-announcement-bar__slides" aria-hidden="true">{renderSlides(true)}</div>
         </div>
-
-        <button
-          type="button"
-          className="fnx-announcement-bar__arrow fnx-announcement-bar__arrow--next"
-          onClick={next}
-          aria-label="Anuncio siguiente"
-        >
-          ›
-        </button>
       </div>
     </div>
   )
