@@ -133,14 +133,21 @@ const TicketIcon = () => (
 )
 
 // ── Toggle ────────────────────────────────────────────────────────────────────
-function Toggle({ value, onChange, size = 'md' }) {
+// Genérico: se usa para publicar, etiquetar y activar cupones, no sólo para
+// stock. No lleva `title` propio — cada uso ya tiene al lado un texto que dice
+// en qué estado está, y un tooltip fijo terminaba contradiciéndolo. `label`
+// existe sólo para el lector de pantalla, que sin eso lee un botón sin nombre.
+function Toggle({ value, onChange, size = 'md', label }) {
   const w = size === 'sm' ? 32 : 40
   const h = size === 'sm' ? 18 : 22
   const d = size === 'sm' ? 14 : 18
   return (
     <button
+      type="button"
       onClick={() => onChange(!value)}
-      title={value ? 'En stock' : 'Sin stock'}
+      role="switch"
+      aria-checked={Boolean(value)}
+      aria-label={label}
       style={{
         width: w, height: h, borderRadius: h / 2,
         background: value ? C.green : '#CBD5E1',
@@ -1253,7 +1260,7 @@ function ProductModal({ product, onSave, onClose, onVariantsChanged, publishOnSa
               <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
                 <label style={lbl}>Visibilidad en la tienda</label>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, height: 38 }}>
-                  {!publishOnSave && <Toggle value={form.published} onChange={v => set('published', v)} />}
+                  {!publishOnSave && <Toggle value={form.published} onChange={v => set('published', v)} label="Publicar en la tienda" />}
                   {publishOnSave && <span aria-hidden="true" style={{ width: 9, height: 9, borderRadius: '50%', background: C.green }} />}
                   <span style={{ fontSize: 13, color: willBePublished ? C.green : C.text3, fontWeight: 600 }}>
                     {publishOnSave ? 'Se publicará al guardar' : form.published ? 'Publicado' : 'Sin publicar (borrador)'}
@@ -1264,7 +1271,7 @@ function ProductModal({ product, onSave, onClose, onVariantsChanged, publishOnSa
               <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
                 <label style={lbl}>Etiqueta "Nuevo"</label>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, height: 38 }}>
-                  <Toggle value={form.isNew} onChange={v => set('isNew', v)} />
+                  <Toggle value={form.isNew} onChange={v => set('isNew', v)} label={'Etiqueta "Nuevo"'} />
                   <span style={{ fontSize: 13, color: form.isNew ? C.green : C.text3, fontWeight: 600 }}>
                     {form.isNew ? 'Se muestra en la tarjeta' : 'No se muestra'}
                   </span>
@@ -1274,7 +1281,7 @@ function ProductModal({ product, onSave, onClose, onVariantsChanged, publishOnSa
               <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
                 <label style={lbl}>Etiqueta "Más vendido"</label>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, height: 38 }}>
-                  <Toggle value={form.bestSeller} onChange={v => set('bestSeller', v)} />
+                  <Toggle value={form.bestSeller} onChange={v => set('bestSeller', v)} label={'Etiqueta "Más vendido"'} />
                   <span style={{ fontSize: 13, color: form.bestSeller ? C.green : C.text3, fontWeight: 600 }}>
                     {form.bestSeller ? 'Se muestra en la tarjeta' : 'No se muestra'}
                   </span>
@@ -1284,7 +1291,7 @@ function ProductModal({ product, onSave, onClose, onVariantsChanged, publishOnSa
               <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
                 <label style={lbl}>Stock inmediato</label>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, height: 38 }}>
-                  <Toggle value={form.stockInmediato} onChange={v => set('stockInmediato', v)} />
+                  <Toggle value={form.stockInmediato} onChange={v => set('stockInmediato', v)} label="Stock inmediato" />
                   <span style={{ fontSize: 13, color: form.stockInmediato ? C.green : C.text3, fontWeight: 600 }}>
                     {form.stockInmediato
                       ? `Está en el local — despacho en ${currencySettings.diasDespachoInmediato ?? 1} día(s)`
@@ -1642,7 +1649,7 @@ function ProductModal({ product, onSave, onClose, onVariantsChanged, publishOnSa
         {isNew && (form.colors.length > 0 || form.sizes.length > 0 || form.tones.length > 0) && (
           <div style={{ marginTop: 20 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-              <Toggle value={useVariantStock} onChange={setUseVariantStock} />
+              <Toggle value={useVariantStock} onChange={setUseVariantStock} label="Cargar stock por color/tono/medida" />
               <label style={lbl}>Cargar stock por color/tono/medida</label>
             </div>
             <p style={{ fontSize: 11.5, color: C.muted, margin: '0 0 10px' }}>
@@ -3598,7 +3605,7 @@ function CouponsTab() {
                 {(expired || limitReached) && (
                   <span style={pill(C.redLight, C.red)}>{expired ? 'Vencido' : 'Sin usos'}</span>
                 )}
-                <Toggle value={c.active} onChange={() => toggleActive(c)} size="sm" />
+                <Toggle value={c.active} onChange={() => toggleActive(c)} size="sm" label={`Activar cupón ${c.code}`} />
                 <button
                   onClick={() => handleDelete(c)}
                   title="Eliminar cupón"
