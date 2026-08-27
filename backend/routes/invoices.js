@@ -28,7 +28,10 @@ const adminInvoice = (invoice) => publicInvoice(invoice, { includeTechnicalMessa
 async function ownedOrder(orderId, userId, client = pool) {
   if (!UUID_PATTERN.test(orderId)) return null;
   const { rows } = await client.query(
-    'SELECT * FROM orders WHERE id = $1 AND user_id = $2',
+    `SELECT o.*,
+            EXISTS (SELECT 1 FROM bank_transfer_submissions s
+                    WHERE s.order_id = o.id AND s.status = 'approved') AS bank_transfer_approved
+     FROM orders o WHERE o.id = $1 AND o.user_id = $2`,
     [orderId, userId],
   );
   return rows[0] || null;
@@ -36,7 +39,13 @@ async function ownedOrder(orderId, userId, client = pool) {
 
 async function adminOrder(orderId, client = pool) {
   if (!UUID_PATTERN.test(orderId)) return null;
-  const { rows } = await client.query('SELECT * FROM orders WHERE id = $1', [orderId]);
+  const { rows } = await client.query(
+    `SELECT o.*,
+            EXISTS (SELECT 1 FROM bank_transfer_submissions s
+                    WHERE s.order_id = o.id AND s.status = 'approved') AS bank_transfer_approved
+     FROM orders o WHERE o.id = $1`,
+    [orderId],
+  );
   return rows[0] || null;
 }
 
@@ -262,16 +271,18 @@ router.post('/:orderId/invoice/admin', requireAdmin, async (req, res) => {
     }
     const order = await adminOrder(req.params.orderId);
     if (!order) return res.status(404).json({ error: 'Pedido no encontrado' });
-    if (order.payment_method !== 'mercadopago' || order.mp_status !== 'approved') {
+    const verified = (order.payment_method === 'mercadopago' && order.mp_status === 'approved')
+      || (order.payment_method === 'bank_transfer' && order.bank_transfer_approved);
+    if (!verified) {
       return res.status(409).json({
-        error: 'Mercado Pago no confirmó este pago como approved.',
+        error: 'El pago todavía no fue verificado.',
         code: 'PAYMENT_NOT_APPROVED',
       });
     }
     const attempt = await attemptInvoiceForOrder({
       orderId: order.id,
       origin: 'admin',
-      requireMercadoPagoApproval: true,
+      requireMercadoPagoApproval: order.payment_method === 'mercadopago',
     });
     return attemptHttpResponse(res, attempt, { admin: true });
   } catch (error) {

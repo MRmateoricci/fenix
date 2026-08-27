@@ -32,23 +32,34 @@ export async function sendMail({ to, subject, html }) {
 }
 
 const fmt = (n) =>
-  new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(n)
+  new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n)
 
 const fmtDate = (d) =>
   d ? new Date(d).toLocaleDateString('es-AR', { day: '2-digit', month: 'long', year: 'numeric' }) : null
 
+const fmtDateTime = (d) =>
+  d ? new Date(d).toLocaleString('es-AR', { day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : null
+
 // Ventana de entrega. Los pedidos anteriores al cambio de modelo tienen sólo
 // `estimated_delivery_date` y siguen mostrándose con esa fecha única.
+function parseDeliveryDate(value) {
+  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    const [year, month, day] = value.split('-').map(Number)
+    return new Date(year, month - 1, day)
+  }
+  return new Date(value)
+}
+
 const fmtDiaMes = (d) =>
-  new Date(d).toLocaleDateString('es-AR', { day: 'numeric', month: 'long' })
+  parseDeliveryDate(d).toLocaleDateString('es-AR', { day: 'numeric', month: 'long' })
 
 function ventanaEntrega(order) {
   const desde = order.estimated_delivery_date
   const hasta = order.estimated_delivery_max_date
   if (!desde && !hasta) return null
   if (!desde || !hasta) return `el ${fmtDiaMes(desde || hasta)}`
-  const a = new Date(desde)
-  const b = new Date(hasta)
+  const a = parseDeliveryDate(desde)
+  const b = parseDeliveryDate(hasta)
   if (a.getTime() === b.getTime()) return `el ${fmtDiaMes(a)}`
   const mismoMes = a.getMonth() === b.getMonth() && a.getFullYear() === b.getFullYear()
   return mismoMes
@@ -65,7 +76,7 @@ function deliveryLine(order) {
   }
   const when = ventanaEntrega(order)
   const service = order.shipping_service ? ` ${order.shipping_service}` : ''
-  return `Envío${service} a ${order.address}, ${order.city}${order.postal_code ? ` (CP ${order.postal_code})` : ''}${when ? ` — llega ${when}` : ''}.`
+  return `Envío${service} a ${order.address}, ${order.city}${order.postal_code ? ` (CP ${order.postal_code})` : ''}.${when ? ` Tu pedido llega ${when}.` : ''}`
 }
 
 // `flagRepuestos` marca item por item cuáles hay que traer del proveedor. Sólo
@@ -82,14 +93,13 @@ function itemsRows(order, { flagRepuestos = false } = {}) {
     .join('')
 }
 
-// Aviso agregado cuando algo del pedido no estaba en el local. El plazo mostrado
-// es el mayor entre esos items, no una suma: se despachan juntos, así que manda
-// el que más tarda en estar.
-function preparationNotice(order) {
+// Dato operativo exclusivo del mail interno: no se incluye en comunicaciones
+// al cliente, que recibe únicamente la ventana final de llegada.
+function adminPreparationNotice(order) {
   const dias = (order.items || []).filter((i) => i.aPedido).map((i) => Number(i.diasEntregaPedido) || 0)
   if (!dias.length) return ''
   const maxDias = Math.max(...dias)
-  return `<p style="background:#FDF0DC;color:#8A5A00;padding:10px 14px;border-radius:6px;">Preparamos tu pedido en hasta ${maxDias} días hábiles antes de despacharlo.</p>`
+  return `<p style="background:#FDF0DC;color:#8A5A00;padding:10px 14px;border-radius:6px;">Plazo interno de reposición: hasta ${maxDias} días hábiles.</p>`
 }
 
 const appBaseUrl = () =>
@@ -183,13 +193,66 @@ export function customerConfirmationEmail(order) {
       <h2>${isReserved ? 'Tu reserva fue confirmada' : 'Gracias por tu compra'}</h2>
       <p>Pedido <strong>${order.order_number}</strong></p>
       <p>${deliveryLine(order)}</p>
-      ${preparationNotice(order)}
       <table style="border-collapse: collapse; margin: 12px 0;">${itemsRows(order)}</table>
+      ${Number(order.transfer_discount_amount || 0) > 0 ? `<p>Descuento por transferencia: -${fmt(order.transfer_discount_amount)}</p>` : ''}
+      ${Number(order.discount_amount || 0) > 0 ? `<p>Descuento${order.coupon_code ? ` (${escapeHtml(order.coupon_code)})` : ''}: -${fmt(order.discount_amount)}</p>` : ''}
       <p><strong>Total: ${fmt(order.total_amount)}</strong>${order.shipping_cost ? ` (incluye envío ${fmt(order.shipping_cost)})` : ''}</p>
       <p>Ante cualquier consulta, escribinos por WhatsApp mencionando el número de pedido.</p>
     </div>
   `
   return { subject, html }
+}
+
+export function bankTransferInstructionsEmail(order, accessToken) {
+  const bank = order.bank_transfer_snapshot || {}
+  const accountUrl = order.user_id
+    ? `${appBaseUrl()}/orders/${encodeURIComponent(order.id)}`
+    : `${appBaseUrl()}/order-confirmation?orderId=${encodeURIComponent(order.id)}&status=transfer#${encodeURIComponent(accessToken)}`
+  return {
+    subject: `Datos para transferir — pedido ${order.order_number}`,
+    html: `<div style="font-family:Arial,sans-serif;color:#16110B;line-height:1.6;max-width:600px">
+      <h2>Tu pedido fue recibido</h2>
+      <p>Transferí el importe exacto y luego cargá un comprobante. El pedido quedará pendiente hasta que verifiquemos el ingreso.</p>
+      <p><strong>CBU:</strong> ${escapeHtml(bank.cbu)}<br>
+      <strong>Alias:</strong> ${escapeHtml(bank.alias)}<br>
+      <strong>Titular:</strong> ${escapeHtml(bank.accountHolder)}<br>
+      <strong>Importe:</strong> ${fmt(order.total_amount)}<br>
+      <strong>Pedido:</strong> ${escapeHtml(order.order_number)}<br>
+      <strong>Vencimiento:</strong> ${escapeHtml(fmtDateTime(order.reservation_expires_at))}</p>
+      <p>La cuenta de origen puede estar a nombre de cualquier persona; al cargar el comprobante informá su titular real.</p>
+      <p><a href="${accountUrl}" style="display:inline-block;background:#CC0000;color:#fff;text-decoration:none;padding:12px 20px;border-radius:8px;font-weight:600">Cargar comprobante</a></p>
+    </div>`,
+  }
+}
+
+export function bankTransferSubmittedAdminEmail(order, submission) {
+  return {
+    subject: `Transferencia por revisar — ${order.order_number}`,
+    html: `<div style="font-family:Arial,sans-serif;color:#16110B;line-height:1.6">
+      <h2>Nuevo comprobante bancario</h2>
+      <p>Pedido <strong>${escapeHtml(order.order_number)}</strong> de ${escapeHtml(order.customer_name)}.</p>
+      <p>Importe esperado: <strong>${fmt(order.total_amount)}</strong><br>Titular de origen informado: <strong>${escapeHtml(submission.payer_account_holder)}</strong></p>
+      <p>Ingresá al panel administrativo para descargar el archivo y verificar el ingreso bancario.</p>
+    </div>`,
+  }
+}
+
+export function bankTransferRejectedEmail(order, reason, accessToken) {
+  const resubmitUrl = order.user_id
+    ? `${appBaseUrl()}/orders/${encodeURIComponent(order.id)}`
+    : accessToken
+      ? `${appBaseUrl()}/order-confirmation?orderId=${encodeURIComponent(order.id)}&status=transfer#${encodeURIComponent(accessToken)}`
+      : null
+  return {
+    subject: `Revisá tu comprobante — pedido ${order.order_number}`,
+    html: `<div style="font-family:Arial,sans-serif;color:#16110B;line-height:1.6">
+      <h2>No pudimos validar la transferencia</h2>
+      <p>Pedido <strong>${escapeHtml(order.order_number)}</strong>.</p>
+      <p>Motivo: <strong>${escapeHtml(reason)}</strong></p>
+      <p>Si el plazo todavía está vigente, podés enviar otro comprobante.</p>
+      ${resubmitUrl ? `<p><a href="${resubmitUrl}" style="display:inline-block;background:#CC0000;color:#fff;text-decoration:none;padding:12px 20px;border-radius:8px;font-weight:600">Enviar otro comprobante</a></p>` : ''}
+    </div>`,
+  }
 }
 
 // ── Mail al admin avisando el pedido/reserva nueva ───────────────────────────
@@ -203,8 +266,9 @@ export function adminNewOrderEmail(order) {
       <h2>${order.status === 'reserved' ? 'Nueva reserva de retiro' : 'Nuevo pedido'}</h2>
       <p>Pedido <strong>${order.order_number}</strong> — ${order.customer_name} (${order.customer_email}, ${order.customer_phone})</p>
       <p>${deliveryLine(order)}</p>
-      ${preparationNotice(order)}
+      ${adminPreparationNotice(order)}
       <table style="border-collapse: collapse; margin: 12px 0;">${itemsRows(order, { flagRepuestos: true })}</table>
+      ${Number(order.transfer_discount_amount || 0) > 0 ? `<p>Descuento por transferencia: -${fmt(order.transfer_discount_amount)}</p>` : ''}
       <p><strong>Total: ${fmt(order.total_amount)}</strong></p>
       ${order.delivery_type === 'delivery'
         ? '<p><strong>Importante:</strong> separá la mercadería o pedila al proveedor antes del próximo despacho de Correo Argentino.</p>'

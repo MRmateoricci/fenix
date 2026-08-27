@@ -242,6 +242,11 @@ export async function generateInvoicePdf(invoice, { logoSource } = {}) {
       y += Math.max(18, document.heightOfString(label, { width: 275 }) + 6);
     }
 
+    if (Number(itemsSnapshot.transferDiscountAmount) > 0) {
+      document.text('Descuento por transferencia', 320, y, { width: 140 });
+      document.text(`-${money(itemsSnapshot.transferDiscountAmount)}`, 470, y, { width: 83, align: 'right' });
+      y += 16;
+    }
     if (Number(itemsSnapshot.discountAmount) > 0) {
       document.text(`Descuento${itemsSnapshot.couponCode ? ` (${itemsSnapshot.couponCode})` : ''}`, 320, y, { width: 140 });
       document.text(`-${money(itemsSnapshot.discountAmount)}`, 470, y, { width: 83, align: 'right' });

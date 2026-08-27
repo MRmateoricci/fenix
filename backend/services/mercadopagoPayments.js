@@ -2,6 +2,7 @@ import { MercadoPagoConfig, MerchantOrder, Payment } from 'mercadopago'
 import { pool } from '../db/pool.js'
 import { sendOrderConfirmationNotifications } from './orderNotifications.js'
 import { attemptAutomaticInvoiceForApprovedPayment } from './invoiceAttempts.js'
+import { countCouponUsageOnce } from './orderPayment.js'
 import 'dotenv/config'
 
 const mpClient = new MercadoPagoConfig({ accessToken: process.env.MP_ACCESS_TOKEN })
@@ -179,20 +180,7 @@ export async function reconcileMercadoPagoPayment({ paymentId, expectedOrderId =
     // Un intento rechazado no consume el cupón. La contabilización ocurre una
     // sola vez, al confirmar el pago, dentro del mismo lock de la orden.
     if (shouldCountCouponUsage(order, newStatus)) {
-      await client.query(
-        `UPDATE coupons
-         SET times_used = times_used + 1
-         WHERE UPPER(code) = UPPER($1)`,
-        [order.coupon_code]
-      )
-      const counted = await client.query(
-        `UPDATE orders
-         SET coupon_usage_counted_at = NOW()
-         WHERE id = $1 AND coupon_usage_counted_at IS NULL
-         RETURNING *`,
-        [externalReference]
-      )
-      order = counted.rows[0] || order
+      order = await countCouponUsageOnce(client, order)
     }
 
     await client.query('COMMIT')

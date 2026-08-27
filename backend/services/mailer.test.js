@@ -22,3 +22,23 @@ test('los correos de retiro identifican a la persona autorizada', () => {
   assert.match(customerConfirmationEmail(pickupOrder).html, /Persona autorizada: Lucía Pérez/)
   assert.match(adminNewOrderEmail(pickupOrder).html, /Persona autorizada: Lucía Pérez/)
 })
+
+test('el correo al cliente muestra la ventana final y oculta plazos internos', () => {
+  const deliveryOrder = {
+    ...pickupOrder,
+    order_number: 'FX-ENVIO',
+    delivery_type: 'delivery',
+    address: 'Calle 42 123',
+    city: 'La Plata',
+    postal_code: '1900',
+    shipping_service: 'Clásico',
+    estimated_delivery_date: '2026-09-03',
+    estimated_delivery_max_date: '2026-09-08',
+    items: [{ name: 'Aplique', quantity: 1, subtotal: 100, aPedido: true, diasEntregaPedido: 7 }],
+  }
+
+  const customerHtml = customerConfirmationEmail(deliveryOrder).html
+  assert.match(customerHtml, /Tu pedido llega entre el 3 y el 8 de septiembre\./)
+  assert.doesNotMatch(customerHtml, /prepara|reposición|días hábiles/i)
+  assert.match(adminNewOrderEmail(deliveryOrder).html, /Plazo interno de reposición/)
+})

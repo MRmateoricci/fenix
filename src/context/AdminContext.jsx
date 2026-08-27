@@ -1,9 +1,13 @@
 import { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react'
 import { buildCategoryTree } from '../data/categoryTree'
 
-const STORAGE_AUTH     = 'fenix_admin_session'
-const ADMIN_PASSWORD   = 'fenix2024'
 const API_BASE         = import.meta.env.VITE_API_URL || ''
+
+async function adminFetch(url, options = {}) {
+  const response = await fetch(url, { ...options, credentials: 'include' })
+  if (response.status === 401) window.dispatchEvent(new Event('fenix-admin-unauthorized'))
+  return response
+}
 
 export const AdminContext = createContext(null)
 
@@ -54,9 +58,28 @@ function toBackendPayload(p) {
 }
 
 export function AdminProvider({ children }) {
-  const [isAdmin, setIsAdmin] = useState(() =>
-    localStorage.getItem(STORAGE_AUTH) === 'true'
-  )
+  const [isAdmin, setIsAdmin] = useState(false)
+  const [adminAuthLoading, setAdminAuthLoading] = useState(true)
+
+  useEffect(() => {
+    let active = true
+    const handleUnauthorized = () => setIsAdmin(false)
+    window.addEventListener('fenix-admin-unauthorized', handleUnauthorized)
+    adminFetch(`${API_BASE}/api/admin/session`)
+      .then(response => {
+        if (active) setIsAdmin(response.ok)
+      })
+      .catch(() => {
+        if (active) setIsAdmin(false)
+      })
+      .finally(() => {
+        if (active) setAdminAuthLoading(false)
+      })
+    return () => {
+      active = false
+      window.removeEventListener('fenix-admin-unauthorized', handleUnauthorized)
+    }
+  }, [])
 
   // ── Catálogo público (products) ──────────────────────────────────────────
   // Vive en la base de datos (misma tabla que Inventario, filtrada por
@@ -91,13 +114,14 @@ export function AdminProvider({ children }) {
   const [coupons, setCoupons]           = useState([])
   const [couponsLoading, setCouponsLoading] = useState(false)
   const [couponsError, setCouponsError] = useState(null)
+  const [bankTransferSettings, setBankTransferSettings] = useState(null)
 
   // ── fetchCatalog — trae el catálogo público publicado (sin auth) ─────────
   const fetchCatalog = useCallback(async () => {
     setProductsLoading(true)
     setProductsError(null)
     try {
-      const res = await fetch(`${API_BASE}/api/catalog`)
+      const res = await adminFetch(`${API_BASE}/api/catalog`)
       if (!res.ok) throw new Error('Error al cargar el catálogo')
       setProducts(await res.json())
     } catch (err) {
@@ -109,17 +133,19 @@ export function AdminProvider({ children }) {
 
   useEffect(() => { fetchCatalog() }, [fetchCatalog])
 
-  const login = (pwd) => {
-    if (pwd === ADMIN_PASSWORD) {
-      localStorage.setItem(STORAGE_AUTH, 'true')
-      setIsAdmin(true)
-      return true
-    }
-    return false
+  const login = async (pwd) => {
+    const response = await adminFetch(`${API_BASE}/api/admin/session`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: pwd }),
+    })
+    if (!response.ok) return false
+    setIsAdmin(true)
+    return true
   }
 
-  const logout = () => {
-    localStorage.removeItem(STORAGE_AUTH)
+  const logout = async () => {
+    await adminFetch(`${API_BASE}/api/admin/session`, { method: 'DELETE' }).catch(() => {})
     setIsAdmin(false)
   }
 
@@ -129,8 +155,8 @@ export function AdminProvider({ children }) {
     setOrdersError(null)
     try {
       const params = new URLSearchParams(filters).toString()
-      const res = await fetch(`${API_BASE}/api/orders${params ? `?${params}` : ''}`, {
-        headers: { 'x-admin-token': ADMIN_PASSWORD },
+      const res = await adminFetch(`${API_BASE}/api/orders${params ? `?${params}` : ''}`, {
+
       })
       if (!res.ok) throw new Error('Error al cargar pedidos')
       const data = await res.json()
@@ -147,9 +173,9 @@ export function AdminProvider({ children }) {
   }, [])
 
   const issueInvoiceAsAdmin = useCallback(async (id) => {
-    const res = await fetch(`${API_BASE}/api/orders/${id}/invoice/admin`, {
+    const res = await adminFetch(`${API_BASE}/api/orders/${id}/invoice/admin`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-admin-token': ADMIN_PASSWORD },
+      headers: { 'Content-Type': 'application/json' },
       body: '{}',
     })
     const data = await res.json().catch(() => ({}))
@@ -164,8 +190,8 @@ export function AdminProvider({ children }) {
 
   const openAdminInvoicePdf = useCallback(async (id, orderNumber, { inline = false } = {}) => {
     const query = inline ? '?disposition=inline' : ''
-    const res = await fetch(`${API_BASE}/api/orders/${id}/invoice/pdf/admin${query}`, {
-      headers: { 'x-admin-token': ADMIN_PASSWORD },
+    const res = await adminFetch(`${API_BASE}/api/orders/${id}/invoice/pdf/admin${query}`, {
+
     })
     if (!res.ok) {
       const data = await res.json().catch(() => ({}))
@@ -184,19 +210,63 @@ export function AdminProvider({ children }) {
     URL.revokeObjectURL(url)
   }, [])
 
+  const fetchBankTransferSettings = useCallback(async () => {
+    const response = await adminFetch(`${API_BASE}/api/bank-transfers/settings`)
+    const data = await response.json().catch(() => ({}))
+    if (!response.ok) throw new Error(data.error || 'No se pudo cargar la configuración bancaria')
+    setBankTransferSettings(data)
+    return data
+  }, [])
+
+  const updateBankTransferSettings = useCallback(async (changes) => {
+    const response = await adminFetch(`${API_BASE}/api/bank-transfers/settings`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(changes),
+    })
+    const data = await response.json().catch(() => ({}))
+    if (!response.ok) throw new Error(data.error || 'No se pudo guardar la configuración bancaria')
+    setBankTransferSettings(data)
+    return data
+  }, [])
+
+  const reviewBankTransfer = useCallback(async (submissionId, action, reason, expectedAmount) => {
+    const response = await adminFetch(`${API_BASE}/api/bank-transfers/admin/submissions/${submissionId}/${action}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...(reason ? { reason } : {}), ...(expectedAmount != null ? { expectedAmount } : {}) }),
+    })
+    const data = await response.json().catch(() => ({}))
+    if (!response.ok) throw new Error(data.error || 'No se pudo revisar la transferencia')
+    return data
+  }, [])
+
+  const downloadBankTransferProof = useCallback(async (submissionId, fileName = 'comprobante') => {
+    const response = await adminFetch(`${API_BASE}/api/bank-transfers/admin/submissions/${submissionId}/proof`)
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}))
+      throw new Error(data.error || 'No se pudo descargar el comprobante')
+    }
+    const url = URL.createObjectURL(await response.blob())
+    const link = document.createElement('a')
+    link.href = url
+    link.download = fileName
+    link.click()
+    URL.revokeObjectURL(url)
+  }, [])
+
   // ── updateOrderStatus — cambia el estado de un pedido ────────────────────
   const updateOrderStatus = useCallback(async (id, status) => {
     try {
-      const res = await fetch(`${API_BASE}/api/orders/${id}/status`, {
+      const res = await adminFetch(`${API_BASE}/api/orders/${id}/status`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
-          'x-admin-token': ADMIN_PASSWORD,
         },
         body: JSON.stringify({ status }),
       })
-      if (!res.ok) throw new Error('No se pudo actualizar el estado')
-      const updated = await res.json()
+      const updated = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(updated.error || 'No se pudo actualizar el estado')
       setOrders((prev) => prev.map((o) => o.id === id ? { ...o, ...updated } : o))
       return updated
     } catch (err) {
@@ -210,8 +280,8 @@ export function AdminProvider({ children }) {
     setInventoryError(null)
     try {
       const params = new URLSearchParams(filters).toString()
-      const res = await fetch(`${API_BASE}/api/products${params ? `?${params}` : ''}`, {
-        headers: { 'x-admin-token': ADMIN_PASSWORD },
+      const res = await adminFetch(`${API_BASE}/api/products${params ? `?${params}` : ''}`, {
+
       })
       if (!res.ok) throw new Error('Error al cargar el inventario')
       const data = await res.json()
@@ -229,9 +299,9 @@ export function AdminProvider({ children }) {
 
   // ── createInventoryItem / updateInventoryItem / deleteInventoryItem ──────
   const createInventoryItem = useCallback(async (payload) => {
-    const res = await fetch(`${API_BASE}/api/products`, {
+    const res = await adminFetch(`${API_BASE}/api/products`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-admin-token': ADMIN_PASSWORD },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     })
     const data = await res.json()
@@ -240,9 +310,9 @@ export function AdminProvider({ children }) {
   }, [])
 
   const updateInventoryItem = useCallback(async (id, changes) => {
-    const res = await fetch(`${API_BASE}/api/products/${id}`, {
+    const res = await adminFetch(`${API_BASE}/api/products/${id}`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', 'x-admin-token': ADMIN_PASSWORD },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(changes),
     })
     const data = await res.json()
@@ -251,9 +321,9 @@ export function AdminProvider({ children }) {
   }, [])
 
   const updateProductCurrency = useCallback(async (id, currency) => {
-    const res = await fetch(`${API_BASE}/api/products/${id}/currency`, {
+    const res = await adminFetch(`${API_BASE}/api/products/${id}/currency`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', 'x-admin-token': ADMIN_PASSWORD },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ currency }),
     })
     const data = await res.json()
@@ -262,9 +332,9 @@ export function AdminProvider({ children }) {
   }, [])
 
   const deleteInventoryItem = useCallback(async (id) => {
-    const res = await fetch(`${API_BASE}/api/products/${id}`, {
+    const res = await adminFetch(`${API_BASE}/api/products/${id}`, {
       method: 'DELETE',
-      headers: { 'x-admin-token': ADMIN_PASSWORD },
+
     })
     if (!res.ok && res.status !== 204) {
       const data = await res.json().catch(() => ({}))
@@ -274,8 +344,8 @@ export function AdminProvider({ children }) {
 
   const fetchInventorySelectionIds = useCallback(async (filters = {}) => {
     const params = new URLSearchParams(filters).toString()
-    const res = await fetch(`${API_BASE}/api/products/selection/ids${params ? `?${params}` : ''}`, {
-      headers: { 'x-admin-token': ADMIN_PASSWORD },
+    const res = await adminFetch(`${API_BASE}/api/products/selection/ids${params ? `?${params}` : ''}`, {
+
     })
     const data = await res.json()
     if (!res.ok) throw new Error(data.error || 'No se pudieron seleccionar los productos')
@@ -283,9 +353,9 @@ export function AdminProvider({ children }) {
   }, [])
 
   const applyInventoryBatch = useCallback(async (ids, action, changes = undefined) => {
-    const res = await fetch(`${API_BASE}/api/products/batch`, {
+    const res = await adminFetch(`${API_BASE}/api/products/batch`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-admin-token': ADMIN_PASSWORD },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ids, action, ...(changes ? { changes } : {}) }),
     })
     const data = await res.json()
@@ -294,9 +364,9 @@ export function AdminProvider({ children }) {
   }, [])
 
   const previewProductMerge = useCallback(async (productIds) => {
-    const res = await fetch(`${API_BASE}/api/products/merge/preview`, {
+    const res = await adminFetch(`${API_BASE}/api/products/merge/preview`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-admin-token': ADMIN_PASSWORD },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ productIds }),
     })
     const data = await res.json()
@@ -305,9 +375,9 @@ export function AdminProvider({ children }) {
   }, [])
 
   const mergeInventoryProducts = useCallback(async (payload) => {
-    const res = await fetch(`${API_BASE}/api/products/merge`, {
+    const res = await adminFetch(`${API_BASE}/api/products/merge`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-admin-token': ADMIN_PASSWORD },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     })
     const data = await res.json()
@@ -316,9 +386,9 @@ export function AdminProvider({ children }) {
   }, [])
 
   const updateProductVariantRules = useCallback(async (productId, rules) => {
-    const res = await fetch(`${API_BASE}/api/products/${productId}/variant-rules`, {
+    const res = await adminFetch(`${API_BASE}/api/products/${productId}/variant-rules`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', 'x-admin-token': ADMIN_PASSWORD },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ rules }),
     })
     const data = await res.json()
@@ -327,9 +397,9 @@ export function AdminProvider({ children }) {
   }, [])
 
   const detachProductVariant = useCallback(async (productId, ruleId) => {
-    const res = await fetch(`${API_BASE}/api/products/${productId}/variant-rules/${ruleId}/detach`, {
+    const res = await adminFetch(`${API_BASE}/api/products/${productId}/variant-rules/${ruleId}/detach`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-admin-token': ADMIN_PASSWORD },
+      headers: { 'Content-Type': 'application/json' },
     })
     const data = await res.json()
     if (!res.ok) throw new Error(data.error || 'No se pudo separar la variante')
@@ -365,9 +435,9 @@ export function AdminProvider({ children }) {
     const endpoint = id
       ? `${API_BASE}/api/products/${id}/image`
       : `${API_BASE}/api/products/image`
-    const res = await fetch(endpoint, {
+    const res = await adminFetch(endpoint, {
       method: 'POST',
-      headers: { 'x-admin-token': ADMIN_PASSWORD },
+
       body: formData,
     })
     const data = await res.json()
@@ -378,9 +448,9 @@ export function AdminProvider({ children }) {
   // Guarda varios ajustes juntos y sincroniza las dos vistas locales del mismo
   // producto sin volver a descargar toda la tabla.
   const adjustInventoryStocks = useCallback(async (changes) => {
-    const res = await fetch(`${API_BASE}/api/products/stock/batch`, {
+    const res = await adminFetch(`${API_BASE}/api/products/stock/batch`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-admin-token': ADMIN_PASSWORD },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ changes }),
     })
     const data = await res.json()
@@ -402,9 +472,9 @@ export function AdminProvider({ children }) {
     try {
       const formData = new FormData()
       formData.append('file', file)
-      const res = await fetch(`${API_BASE}/api/products/import/${type}`, {
+      const res = await adminFetch(`${API_BASE}/api/products/import/${type}`, {
         method: 'POST',
-        headers: { 'x-admin-token': ADMIN_PASSWORD },
+
         body: formData,
       })
       const data = await res.json()
@@ -421,8 +491,8 @@ export function AdminProvider({ children }) {
 
   // ── searchProducts — búsqueda liviana para el matching de factura PDF ────
   const fetchCurrencySettings = useCallback(async () => {
-    const res = await fetch(`${API_BASE}/api/products/currency-settings`, {
-      headers: { 'x-admin-token': ADMIN_PASSWORD },
+    const res = await adminFetch(`${API_BASE}/api/products/currency-settings`, {
+
     })
     const data = await res.json()
     if (!res.ok) throw new Error(data.error || 'No se pudo cargar la cotizacion')
@@ -431,9 +501,9 @@ export function AdminProvider({ children }) {
   }, [])
 
   const updateCurrencySettings = useCallback(async (usdArsRate) => {
-    const res = await fetch(`${API_BASE}/api/products/currency-settings`, {
+    const res = await adminFetch(`${API_BASE}/api/products/currency-settings`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', 'x-admin-token': ADMIN_PASSWORD },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ usdArsRate }),
     })
     const data = await res.json()
@@ -446,9 +516,9 @@ export function AdminProvider({ children }) {
   // inmediato no tarde más que la reposición, y esa comparación necesita ver
   // ambos valores en la misma llamada.
   const updateDeliverySettings = useCallback(async ({ diasDespachoInmediato, diasReposicion }) => {
-    const res = await fetch(`${API_BASE}/api/products/delivery-settings`, {
+    const res = await adminFetch(`${API_BASE}/api/products/delivery-settings`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', 'x-admin-token': ADMIN_PASSWORD },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ diasDespachoInmediato, diasReposicion }),
     })
     const data = await res.json()
@@ -458,8 +528,8 @@ export function AdminProvider({ children }) {
   }, [])
 
   const fetchInventoryItem = useCallback(async (id) => {
-    const res = await fetch(`${API_BASE}/api/products/${id}`, {
-      headers: { 'x-admin-token': ADMIN_PASSWORD },
+    const res = await adminFetch(`${API_BASE}/api/products/${id}`, {
+
     })
     const data = await res.json()
     if (!res.ok) throw new Error(data.error || 'No se pudo cargar el producto')
@@ -467,8 +537,8 @@ export function AdminProvider({ children }) {
   }, [])
 
   const fetchSupplierSettings = useCallback(async () => {
-    const res = await fetch(`${API_BASE}/api/products/supplier-settings`, {
-      headers: { 'x-admin-token': ADMIN_PASSWORD },
+    const res = await adminFetch(`${API_BASE}/api/products/supplier-settings`, {
+
     })
     const data = await res.json()
     if (!res.ok) throw new Error(data.error || 'No se pudieron cargar los proveedores')
@@ -477,9 +547,9 @@ export function AdminProvider({ children }) {
   }, [])
 
   const updateSupplierCurrency = useCallback(async (supplier, currency) => {
-    const res = await fetch(`${API_BASE}/api/products/supplier-settings/${encodeURIComponent(supplier)}`, {
+    const res = await adminFetch(`${API_BASE}/api/products/supplier-settings/${encodeURIComponent(supplier)}`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', 'x-admin-token': ADMIN_PASSWORD },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ currency }),
     })
     const data = await res.json()
@@ -494,9 +564,9 @@ export function AdminProvider({ children }) {
   }, [])
 
   const setPriceCodeCurrency = useCallback(async (supplier, codigo, currency) => {
-    const res = await fetch(`${API_BASE}/api/products/supplier-settings/${encodeURIComponent(supplier)}/codes/${encodeURIComponent(codigo)}`, {
+    const res = await adminFetch(`${API_BASE}/api/products/supplier-settings/${encodeURIComponent(supplier)}/codes/${encodeURIComponent(codigo)}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json', 'x-admin-token': ADMIN_PASSWORD },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ currency }),
     })
     const data = await res.json()
@@ -505,9 +575,9 @@ export function AdminProvider({ children }) {
   }, [])
 
   const clearPriceCodeCurrency = useCallback(async (supplier, codigo) => {
-    const res = await fetch(`${API_BASE}/api/products/supplier-settings/${encodeURIComponent(supplier)}/codes/${encodeURIComponent(codigo)}`, {
+    const res = await adminFetch(`${API_BASE}/api/products/supplier-settings/${encodeURIComponent(supplier)}/codes/${encodeURIComponent(codigo)}`, {
       method: 'DELETE',
-      headers: { 'x-admin-token': ADMIN_PASSWORD },
+
     })
     if (!res.ok && res.status !== 204) {
       const data = await res.json().catch(() => ({}))
@@ -518,8 +588,8 @@ export function AdminProvider({ children }) {
   // Historial de cargas de lista de un proveedor. Se pide bajo demanda: el
   // resumen de la última carga ya viene en fetchSupplierSettings.
   const fetchSupplierImports = useCallback(async (supplier) => {
-    const res = await fetch(`${API_BASE}/api/products/supplier-settings/${encodeURIComponent(supplier)}/imports`, {
-      headers: { 'x-admin-token': ADMIN_PASSWORD },
+    const res = await adminFetch(`${API_BASE}/api/products/supplier-settings/${encodeURIComponent(supplier)}/imports`, {
+
     })
     const data = await res.json()
     if (!res.ok) throw new Error(data.error || 'No se pudo cargar el historial de cargas')
@@ -530,9 +600,9 @@ export function AdminProvider({ children }) {
   // usa cuando el proveedor renombra un código y la vista previa lo lee como
   // alta; la asociación queda guardada y las listas siguientes ya lo reconocen.
   const setPriceCodeMapping = useCallback(async (supplier, codigo, productId, variantRuleId = null) => {
-    const res = await fetch(`${API_BASE}/api/products/supplier-settings/${encodeURIComponent(supplier)}/mappings/${encodeURIComponent(codigo)}`, {
+    const res = await adminFetch(`${API_BASE}/api/products/supplier-settings/${encodeURIComponent(supplier)}/mappings/${encodeURIComponent(codigo)}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json', 'x-admin-token': ADMIN_PASSWORD },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ productId, variantRuleId }),
     })
     const data = await res.json()
@@ -541,9 +611,9 @@ export function AdminProvider({ children }) {
   }, [])
 
   const clearPriceCodeMapping = useCallback(async (supplier, codigo) => {
-    const res = await fetch(`${API_BASE}/api/products/supplier-settings/${encodeURIComponent(supplier)}/mappings/${encodeURIComponent(codigo)}`, {
+    const res = await adminFetch(`${API_BASE}/api/products/supplier-settings/${encodeURIComponent(supplier)}/mappings/${encodeURIComponent(codigo)}`, {
       method: 'DELETE',
-      headers: { 'x-admin-token': ADMIN_PASSWORD },
+
     })
     if (!res.ok && res.status !== 204) {
       const data = await res.json().catch(() => ({}))
@@ -557,7 +627,7 @@ export function AdminProvider({ children }) {
   // lectura es pública (la usan el mega-menú del header y /products, no solo
   // el admin) — se trae al montar la app, sin esperar a que haya sesión.
   const fetchSubcategories = useCallback(async () => {
-    const res = await fetch(`${API_BASE}/api/subcategories`)
+    const res = await adminFetch(`${API_BASE}/api/subcategories`)
     const data = await res.json()
     if (!res.ok) throw new Error(data.error || 'No se pudieron cargar las subcategorías')
     setSubcategories(data)
@@ -565,9 +635,9 @@ export function AdminProvider({ children }) {
   }, [])
 
   const createSubcategory = useCallback(async (category, name) => {
-    const res = await fetch(`${API_BASE}/api/subcategories`, {
+    const res = await adminFetch(`${API_BASE}/api/subcategories`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-admin-token': ADMIN_PASSWORD },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ category, name }),
     })
     const data = await res.json()
@@ -577,9 +647,9 @@ export function AdminProvider({ children }) {
   }, [])
 
   const deleteSubcategory = useCallback(async (id) => {
-    const res = await fetch(`${API_BASE}/api/subcategories/${id}`, {
+    const res = await adminFetch(`${API_BASE}/api/subcategories/${id}`, {
       method: 'DELETE',
-      headers: { 'x-admin-token': ADMIN_PASSWORD },
+
     })
     if (!res.ok && res.status !== 204) {
       const data = await res.json().catch(() => ({}))
@@ -593,9 +663,9 @@ export function AdminProvider({ children }) {
   }, [subcategories])
 
   const updateSubcategory = useCallback(async (id, name) => {
-    const res = await fetch(`${API_BASE}/api/subcategories/${id}`, {
+    const res = await adminFetch(`${API_BASE}/api/subcategories/${id}`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', 'x-admin-token': ADMIN_PASSWORD },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name }),
     })
     const data = await res.json()
@@ -612,7 +682,7 @@ export function AdminProvider({ children }) {
   }, [subcategories, fetchCatalog])
 
   const fetchProductTypes = useCallback(async () => {
-    const res = await fetch(`${API_BASE}/api/product-types`)
+    const res = await adminFetch(`${API_BASE}/api/product-types`)
     const data = await res.json()
     if (!res.ok) throw new Error(data.error || 'No se pudieron cargar los tipos de producto')
     setProductTypes(data)
@@ -620,9 +690,9 @@ export function AdminProvider({ children }) {
   }, [])
 
   const createProductType = useCallback(async (category, subcategory, name) => {
-    const res = await fetch(`${API_BASE}/api/product-types`, {
+    const res = await adminFetch(`${API_BASE}/api/product-types`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-admin-token': ADMIN_PASSWORD },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ category, subcategory, name }),
     })
     const data = await res.json()
@@ -632,9 +702,9 @@ export function AdminProvider({ children }) {
   }, [])
 
   const deleteProductType = useCallback(async (id) => {
-    const res = await fetch(`${API_BASE}/api/product-types/${id}`, {
+    const res = await adminFetch(`${API_BASE}/api/product-types/${id}`, {
       method: 'DELETE',
-      headers: { 'x-admin-token': ADMIN_PASSWORD },
+
     })
     if (!res.ok && res.status !== 204) {
       const data = await res.json().catch(() => ({}))
@@ -644,9 +714,9 @@ export function AdminProvider({ children }) {
   }, [])
 
   const updateProductType = useCallback(async (id, name) => {
-    const res = await fetch(`${API_BASE}/api/product-types/${id}`, {
+    const res = await adminFetch(`${API_BASE}/api/product-types/${id}`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', 'x-admin-token': ADMIN_PASSWORD },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name }),
     })
     const data = await res.json()
@@ -657,7 +727,7 @@ export function AdminProvider({ children }) {
   }, [fetchCatalog])
 
   const fetchCategoryCustomizations = useCallback(async () => {
-    const res = await fetch(`${API_BASE}/api/category-customizations`)
+    const res = await adminFetch(`${API_BASE}/api/category-customizations`)
     const data = await res.json()
     if (!res.ok) throw new Error(data.error || 'No se pudieron cargar los cambios de categorias')
     setCategoryCustomizations(data)
@@ -665,9 +735,9 @@ export function AdminProvider({ children }) {
   }, [])
 
   const saveCategoryCustomization = useCallback(async (change) => {
-    const res = await fetch(`${API_BASE}/api/category-customizations`, {
+    const res = await adminFetch(`${API_BASE}/api/category-customizations`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json', 'x-admin-token': ADMIN_PASSWORD },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(change),
     })
     const data = await res.json()
@@ -724,9 +794,9 @@ export function AdminProvider({ children }) {
     const formData = new FormData()
     formData.append('file', file)
     formData.append('supplier', supplier)
-    const res = await fetch(`${API_BASE}/api/products/import/prices/parse`, {
+    const res = await adminFetch(`${API_BASE}/api/products/import/prices/parse`, {
       method: 'POST',
-      headers: { 'x-admin-token': ADMIN_PASSWORD },
+
       body: formData,
     })
     const data = await res.json()
@@ -742,9 +812,9 @@ export function AdminProvider({ children }) {
       const formData = new FormData()
       for (const file of files) formData.append('files', file)
       formData.append('supplier', supplier)
-      const res = await fetch(`${API_BASE}/api/products/import/prices/bulk`, {
+      const res = await adminFetch(`${API_BASE}/api/products/import/prices/bulk`, {
         method: 'POST',
-        headers: { 'x-admin-token': ADMIN_PASSWORD },
+
         body: formData,
       })
       const data = await res.json()
@@ -768,9 +838,9 @@ export function AdminProvider({ children }) {
     const formData = new FormData()
     for (const file of files) formData.append('files', file)
     formData.append('supplier', supplier)
-    const res = await fetch(`${API_BASE}/api/products/import/prices/bulk/preview`, {
+    const res = await adminFetch(`${API_BASE}/api/products/import/prices/bulk/preview`, {
       method: 'POST',
-      headers: { 'x-admin-token': ADMIN_PASSWORD },
+
       body: formData,
     })
     const data = await res.json()
@@ -786,9 +856,9 @@ export function AdminProvider({ children }) {
   }, [])
 
   const rematchPriceLines = useCallback(async (lines, supplier) => {
-    const res = await fetch(`${API_BASE}/api/products/import/prices/rematch`, {
+    const res = await adminFetch(`${API_BASE}/api/products/import/prices/rematch`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-admin-token': ADMIN_PASSWORD },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ lines, supplier }),
     })
     const data = await res.json()
@@ -800,9 +870,9 @@ export function AdminProvider({ children }) {
     setImportLoading(true)
     setImportError(null)
     try {
-      const res = await fetch(`${API_BASE}/api/products/import/prices/apply`, {
+      const res = await adminFetch(`${API_BASE}/api/products/import/prices/apply`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-admin-token': ADMIN_PASSWORD },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ actions, supplier }),
       })
       const data = await res.json()
@@ -825,8 +895,8 @@ export function AdminProvider({ children }) {
   const searchProducts = useCallback(async (query, filters = {}) => {
     if (!query || query.trim().length < 2) return []
     const params = new URLSearchParams({ search: query.trim(), limit: 8, ...filters }).toString()
-    const res = await fetch(`${API_BASE}/api/products?${params}`, {
-      headers: { 'x-admin-token': ADMIN_PASSWORD },
+    const res = await adminFetch(`${API_BASE}/api/products?${params}`, {
+
     })
     if (!res.ok) return []
     const data = await res.json()
@@ -837,9 +907,9 @@ export function AdminProvider({ children }) {
   const parseInvoicePdf = useCallback(async (file) => {
     const formData = new FormData()
     formData.append('file', file)
-    const res = await fetch(`${API_BASE}/api/products/import/invoice/parse`, {
+    const res = await adminFetch(`${API_BASE}/api/products/import/invoice/parse`, {
       method: 'POST',
-      headers: { 'x-admin-token': ADMIN_PASSWORD },
+
       body: formData,
     })
     const data = await res.json()
@@ -851,9 +921,9 @@ export function AdminProvider({ children }) {
     setImportLoading(true)
     setImportError(null)
     try {
-      const res = await fetch(`${API_BASE}/api/products/import/invoice/apply`, {
+      const res = await adminFetch(`${API_BASE}/api/products/import/invoice/apply`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-admin-token': ADMIN_PASSWORD },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ actions }),
       })
       const data = await res.json()
@@ -873,9 +943,9 @@ export function AdminProvider({ children }) {
   const parseCleosCatalogPdf = useCallback(async (file) => {
     const formData = new FormData()
     formData.append('file', file)
-    const res = await fetch(`${API_BASE}/api/products/import/cleos/parse`, {
+    const res = await adminFetch(`${API_BASE}/api/products/import/cleos/parse`, {
       method: 'POST',
-      headers: { 'x-admin-token': ADMIN_PASSWORD },
+
       body: formData,
     })
     const data = await res.json()
@@ -887,9 +957,9 @@ export function AdminProvider({ children }) {
     const formData = new FormData()
     formData.append('importId', importId)
     formData.append('file', file)
-    const res = await fetch(`${API_BASE}/api/products/import/cleos/image`, {
+    const res = await adminFetch(`${API_BASE}/api/products/import/cleos/image`, {
       method: 'POST',
-      headers: { 'x-admin-token': ADMIN_PASSWORD },
+
       body: formData,
     })
     const data = await res.json()
@@ -901,9 +971,9 @@ export function AdminProvider({ children }) {
     setImportLoading(true)
     setImportError(null)
     try {
-      const res = await fetch(`${API_BASE}/api/products/import/cleos/apply`, {
+      const res = await adminFetch(`${API_BASE}/api/products/import/cleos/apply`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-admin-token': ADMIN_PASSWORD },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ importId, actions }),
       })
       const data = await res.json()
@@ -922,9 +992,9 @@ export function AdminProvider({ children }) {
     const formData = new FormData()
     formData.append('file', file)
     formData.append('supplier', supplier)
-    const res = await fetch(`${API_BASE}/api/products/import/catalog-images/parse`, {
+    const res = await adminFetch(`${API_BASE}/api/products/import/catalog-images/parse`, {
       method: 'POST',
-      headers: { 'x-admin-token': ADMIN_PASSWORD },
+
       body: formData,
     })
     const data = await res.json()
@@ -936,9 +1006,9 @@ export function AdminProvider({ children }) {
     const formData = new FormData()
     formData.append('importId', importId)
     formData.append('file', file)
-    const res = await fetch(`${API_BASE}/api/products/import/catalog-images/image`, {
+    const res = await adminFetch(`${API_BASE}/api/products/import/catalog-images/image`, {
       method: 'POST',
-      headers: { 'x-admin-token': ADMIN_PASSWORD },
+
       body: formData,
     })
     const data = await res.json()
@@ -950,9 +1020,9 @@ export function AdminProvider({ children }) {
     setImportLoading(true)
     setImportError(null)
     try {
-      const res = await fetch(`${API_BASE}/api/products/import/catalog-images/apply`, {
+      const res = await adminFetch(`${API_BASE}/api/products/import/catalog-images/apply`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-admin-token': ADMIN_PASSWORD },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ importId, supplier, actions, merges, deletes }),
       })
       const data = await res.json()
@@ -976,9 +1046,9 @@ export function AdminProvider({ children }) {
     formData.append('supplier', supplier)
     for (const file of files) formData.append('files', file)
     const qs = importId ? `?importId=${encodeURIComponent(importId)}` : ''
-    const res = await fetch(`${API_BASE}/api/products/import/folder-images/parse${qs}`, {
+    const res = await adminFetch(`${API_BASE}/api/products/import/folder-images/parse${qs}`, {
       method: 'POST',
-      headers: { 'x-admin-token': ADMIN_PASSWORD },
+
       body: formData,
     })
     const data = await res.json()
@@ -990,9 +1060,9 @@ export function AdminProvider({ children }) {
     setImportLoading(true)
     setImportError(null)
     try {
-      const res = await fetch(`${API_BASE}/api/products/import/folder-images/apply`, {
+      const res = await adminFetch(`${API_BASE}/api/products/import/folder-images/apply`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-admin-token': ADMIN_PASSWORD },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ importId, supplier, actions }),
       })
       const data = await res.json()
@@ -1012,8 +1082,8 @@ export function AdminProvider({ children }) {
     setCouponsLoading(true)
     setCouponsError(null)
     try {
-      const res = await fetch(`${API_BASE}/api/coupons`, {
-        headers: { 'x-admin-token': ADMIN_PASSWORD },
+      const res = await adminFetch(`${API_BASE}/api/coupons`, {
+
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'No se pudieron cargar los cupones')
@@ -1028,9 +1098,9 @@ export function AdminProvider({ children }) {
   }, [])
 
   const createCoupon = useCallback(async (payload) => {
-    const res = await fetch(`${API_BASE}/api/coupons`, {
+    const res = await adminFetch(`${API_BASE}/api/coupons`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-admin-token': ADMIN_PASSWORD },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     })
     const data = await res.json()
@@ -1040,9 +1110,9 @@ export function AdminProvider({ children }) {
   }, [])
 
   const updateCoupon = useCallback(async (id, changes) => {
-    const res = await fetch(`${API_BASE}/api/coupons/${id}`, {
+    const res = await adminFetch(`${API_BASE}/api/coupons/${id}`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', 'x-admin-token': ADMIN_PASSWORD },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(changes),
     })
     const data = await res.json()
@@ -1052,9 +1122,9 @@ export function AdminProvider({ children }) {
   }, [])
 
   const deleteCoupon = useCallback(async (id) => {
-    const res = await fetch(`${API_BASE}/api/coupons/${id}`, {
+    const res = await adminFetch(`${API_BASE}/api/coupons/${id}`, {
       method: 'DELETE',
-      headers: { 'x-admin-token': ADMIN_PASSWORD },
+
     })
     if (!res.ok && res.status !== 204) {
       const data = await res.json().catch(() => ({}))
@@ -1065,11 +1135,13 @@ export function AdminProvider({ children }) {
 
   return (
     <AdminContext.Provider value={{
-      isAdmin, products, productsLoading, productsError, fetchCatalog,
+      isAdmin, adminAuthLoading, products, productsLoading, productsError, fetchCatalog,
       login, logout,
       updateProduct, addProduct, deleteProduct,
       orders, ordersTotal, invoiceSummary, ordersLoading, ordersError,
       fetchOrders, updateOrderStatus, issueInvoiceAsAdmin, openAdminInvoicePdf,
+      bankTransferSettings, fetchBankTransferSettings, updateBankTransferSettings,
+      reviewBankTransfer, downloadBankTransferProof,
       inventory, inventoryTotal, inventorySuppliers, inventoryLoading, inventoryError,
       importResult, importLoading, importError,
       currencySettings, fetchCurrencySettings, updateCurrencySettings, updateDeliverySettings,

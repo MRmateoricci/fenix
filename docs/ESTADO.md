@@ -21,7 +21,8 @@
 | Importación de listas de precios | ✅ Funcionando | XLSX + PDF de factura |
 | Importación de imágenes de catálogo | ✅ Funcionando | Con revisión y borrador |
 | Variantes (color × medida × tono) | ✅ Funcionando | Precio e imagen por combinación; el stock por celda quedó sin uso |
-| Carrito y checkout | ✅ Funcionando | Mercado Pago + datos fiscales dinámicos A/B/C |
+| Carrito y checkout | ✅ Funcionando | Mercado Pago + transferencia manual + datos fiscales A/B/C |
+| Transferencia bancaria | ✅ Implementada | Descuento configurable, comprobante privado y validación manual |
 | Cotización de envío | 🟡 Provisorio | Tarifario manual por zona · plazos de tránsito propios (Shipnow) |
 | Envío gratis por monto | ✅ Funcionando | Umbral por env var |
 | Cupones de descuento | ✅ Funcionando | |
@@ -33,6 +34,19 @@
 | Disponibilidad y plazos | ✅ Funcionando | Reemplazó al control de stock y a "productos a pedido" — ver detalle abajo |
 | SEO | ✅ Funcionando | Helmet + sitemap + robots |
 | Facturación electrónica ARCA | 🟡 Implementada, producción bloqueada | A/B para RI y C para Monotributo; falta confirmar habilitación A real de Fenix |
+
+---
+
+## Transferencia bancaria con validación manual (2026-08-26)
+
+- El checkout ofrece transferencia solamente cuando CBU, alias y titular están completos y el medio fue habilitado desde **Tienda**.
+- El backend calcula primero el descuento sobre productos, luego el cupón y finalmente suma el envío. El pedido congela cuenta, porcentaje, vigencia e importe.
+- Los comprobantes JPG, PNG o PDF se validan por firma, admiten hasta 10 MB y se guardan fuera de `/uploads` en `TRANSFER_PROOFS_DIR`.
+- Invitados reciben un token aleatorio del que solo se persiste el hash; usuarios registrados acceden desde Mi cuenta.
+- La cola de **Pedidos** permite descargar, aprobar o rechazar. Solo la aprobación específica mueve el pedido a `paid`, consume el cupón una vez y habilita notificación y facturación.
+- El panel usa una cookie HTTP-only de ocho horas firmada con `ADMIN_SESSION_SECRET`; la contraseña ya no forma parte del bundle React.
+- Para desplegar: migrar, configurar ambos secretos/volumen, cargar la cuenta bancaria y hacer una prueba de rechazo, reenvío y aprobación antes de habilitarla.
+- Pendiente operativo: integración PostgreSQL cuando exista `TEST_DATABASE_URL` y validación visual final en un dispositivo móvil real.
 
 ---
 

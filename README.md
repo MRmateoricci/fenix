@@ -29,6 +29,7 @@ La tienda puede ejecutarse localmente, pero para usar el checkout completo se ne
 - Checkout como invitado o como usuario registrado.
 - Retiro en el local o envío según código postal.
 - Pago online con Mercado Pago Checkout Pro.
+- Transferencia bancaria configurable, con descuento, comprobante privado y aprobación manual.
 - Reserva para pagar en el local al retirar.
 - Confirmación y seguimiento mediante número de pedido `FX-XXXXXX`.
 - Registro, inicio de sesión, perfil e historial de pedidos.
@@ -39,6 +40,7 @@ La tienda puede ejecutarse localmente, pero para usar el checkout completo se ne
 
 - Resumen de ventas y productos.
 - Listado y cambio de estado de pedidos.
+- Cola de transferencias por revisar, con aprobación o rechazo manual.
 - Alta, edición, publicación y eliminación de productos.
 - Ajustes manuales de stock.
 - Subida de imágenes de producto.
@@ -104,6 +106,7 @@ El backend no confía en el precio enviado por el navegador: vuelve a consultar 
 Las reservas tienen vencimiento:
 
 - Mercado Pago pendiente: 45 minutos.
+- Transferencia sin comprobante: 72 horas por defecto; un comprobante en revisión detiene el vencimiento.
 - Retiro con pago en el local: fecha de retiro más 2 días.
 
 Un proceso interno revisa vencimientos cada 30 minutos. Los pedidos `expired`, `cancelled` o `payment_failed` reponen el stock una sola vez mediante `stock_released_at`.
@@ -218,7 +221,8 @@ Editar `backend/.env` y, como mínimo, configurar:
 ```dotenv
 PORT=3001
 DATABASE_URL=postgresql://postgres:TU_PASSWORD@localhost:5432/fenix_db
-ADMIN_SECRET=fenix2024
+ADMIN_SECRET=reemplazar-por-una-contrasena-segura
+ADMIN_SESSION_SECRET=reemplazar-por-otro-secreto-largo-y-aleatorio
 JWT_SECRET=reemplazar-por-un-secreto-largo-y-aleatorio
 APP_BASE_URL=http://localhost:3001
 FRONTEND_BASE_URL=http://localhost:5173
@@ -279,13 +283,15 @@ Abrir:
 | `PORT` | No | Puerto de Express. Predeterminado: `3001`. |
 | `NODE_ENV` | En producción | Activa SSL de PostgreSQL y cookies `Secure`/`SameSite=None`. |
 | `DATABASE_URL` | Sí | Cadena de conexión PostgreSQL. |
-| `ADMIN_SECRET` | Sí para el panel | Valor esperado en el header `x-admin-token`. Actualmente debe coincidir con la clave del frontend. |
+| `ADMIN_SECRET` | Sí para el panel | Contraseña validada exclusivamente por el backend al iniciar sesión. |
+| `ADMIN_SESSION_SECRET` | Sí para el panel | Firma la cookie HTTP-only administrativa de ocho horas. |
 | `JWT_SECRET` | Sí | Firma las sesiones de clientes por 30 días. |
 | `MP_ACCESS_TOKEN` | Para Mercado Pago | Token de la aplicación de Mercado Pago. |
 | `MP_WEBHOOK_SECRET` | Producción | Verifica la firma HMAC de los webhooks. Si falta, la validación se omite. |
 | `APP_BASE_URL` | Para Mercado Pago | URL pública del backend usada en `notification_url`. |
 | `FRONTEND_BASE_URL` | Sí | Origen CORS permitido y base de las URLs de retorno de Mercado Pago. |
 | `UPLOADS_DIR` | No | Carpeta de imágenes. Predeterminado: `backend/public/uploads`. |
+| `TRANSFER_PROOFS_DIR` | En producción | Volumen privado para comprobantes; nunca debe estar bajo `/uploads`. |
 | `GMAIL_USER` | No | Cuenta emisora de Gmail/Workspace. |
 | `GMAIL_APP_PASSWORD` | No | Contraseña de aplicación de Google. |
 | `ADMIN_NOTIFICATION_EMAIL` | No | Destinatario interno de nuevas compras/reservas. |
@@ -426,7 +432,7 @@ La sesión se guarda en la cookie HTTP-only `fenix_session`.
 
 ### Administración
 
-Estas rutas requieren el header `x-admin-token`:
+Estas rutas requieren la cookie HTTP-only obtenida mediante `POST /api/admin/session`:
 
 - `GET /api/orders`
 - `GET /api/orders/:id`
@@ -608,11 +614,7 @@ lo que nunca confía solamente en el contenido recibido por el webhook.
 
 ## Panel administrativo y seguridad
 
-El panel actual compara la clave ingresada con `ADMIN_PASSWORD` en `src/context/AdminContext.jsx` y envía esa misma clave como `x-admin-token`. El backend la compara con `ADMIN_SECRET`.
-
-Por lo tanto, en el estado actual `ADMIN_SECRET` debe coincidir con `ADMIN_PASSWORD` (`fenix2024`) para que el panel funcione. Cambiar solamente `.env` rompe las operaciones administrativas.
-
-> Importante: este mecanismo no es seguro para producción porque la clave está incluida en el JavaScript que recibe el navegador. Antes de publicar el panel se debe reemplazar por autenticación administrativa del lado del servidor, con contraseña hasheada, sesión HTTP-only y autorización real por rol. No alcanza con ocultar la ruta `/admin`.
+El panel envía la contraseña una sola vez a `POST /api/admin/session`. El backend valida `ADMIN_SECRET`, limita intentos fallidos por IP y emite una cookie HTTP-only, `SameSite=Strict`, firmada con `ADMIN_SESSION_SECRET`. La contraseña no se compila ni se guarda en el navegador. Las mutaciones administrativas también validan el origen.
 
 También se deben usar secretos distintos a los valores de ejemplo, HTTPS y `MP_WEBHOOK_SECRET` obligatorio.
 
@@ -665,12 +667,14 @@ Variables mínimas recomendadas en producción:
 NODE_ENV=production
 DATABASE_URL=${{Postgres.DATABASE_URL}}
 ADMIN_SECRET=...
+ADMIN_SESSION_SECRET=...
 JWT_SECRET=...
 MP_ACCESS_TOKEN=...
 MP_WEBHOOK_SECRET=...
 APP_BASE_URL=https://${{RAILWAY_PUBLIC_DOMAIN}}
 FRONTEND_BASE_URL=https://${{RAILWAY_PUBLIC_DOMAIN}}
 UPLOADS_DIR=/ruta/persistente/uploads
+TRANSFER_PROOFS_DIR=/ruta/persistente/transfer-proofs
 ```
 
 `APP_BASE_URL` y `FRONTEND_BASE_URL` apuntan al mismo dominio porque la tienda y la API salen del mismo servicio. No se debe configurar `VITE_API_URL` en este despliegue.
@@ -741,7 +745,7 @@ Verificar que exista `backend/.env` y revisar usuario, contraseña, puerto y nom
 
 ### El panel abre pero devuelve `401 No autorizado`
 
-El `ADMIN_SECRET` de `backend/.env` debe coincidir con `ADMIN_PASSWORD` en `src/context/AdminContext.jsx`. Reiniciar backend y frontend después del cambio.
+Verificar que `ADMIN_SECRET` y `ADMIN_SESSION_SECRET` existan y que `FRONTEND_BASE_URL` coincida con el origen del navegador. Después de cambiar secretos hay que iniciar sesión nuevamente.
 
 ### El frontend no llega al backend en producción
 

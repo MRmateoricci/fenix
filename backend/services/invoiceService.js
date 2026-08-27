@@ -129,6 +129,7 @@ function snapshots(order, receiver, config, fiscal) {
     items: {
       items: Array.isArray(order.items) ? order.items : [],
       discountAmount: Number(order.discount_amount || 0),
+      transferDiscountAmount: Number(order.transfer_discount_amount || 0),
       couponCode: order.coupon_code || null,
       shippingCost: Number(order.shipping_cost || 0),
       total: Number(order.total_amount),

@@ -54,7 +54,7 @@ const FAQS = [
       {
         id: 'medios-de-pago',
         q: '¿Cuáles son los medios de pago?',
-        a: 'Aceptamos transferencia bancaria, efectivo y MercadoPago (tarjeta de crédito con cuotas y tarjeta de débito). Transferencia y efectivo sin recargo. Para pedidos por WhatsApp coordinamos el pago directamente.',
+        a: 'En el checkout podés pagar con Mercado Pago o, cuando esté habilitada, por transferencia bancaria con 10% de descuento sobre los productos. El pedido queda pendiente hasta que cargues el comprobante y verifiquemos el ingreso.',
       },
       {
         q: '¿Puedo hacer consultas antes de comprar?',

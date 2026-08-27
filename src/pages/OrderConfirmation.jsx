@@ -2,6 +2,7 @@ import { useEffect, useState, useRef } from 'react'
 import { Link, useSearchParams, Navigate } from 'react-router-dom'
 import { OrderItemsBlock } from '../components/OrderItemsBlock'
 import { useCart } from '../context/CartContext'
+import BankTransferPanel from '../components/BankTransferPanel'
 
 const API_BASE = import.meta.env.VITE_API_URL || ''
 
@@ -39,6 +40,13 @@ export default function OrderConfirmation() {
   useEffect(() => {
     sessionStorage.removeItem('fenix_pending_order_id')
   }, [])
+
+  useEffect(() => {
+    const token = decodeURIComponent(window.location.hash.slice(1))
+    if (!orderId || !token) return
+    localStorage.setItem(`fenix_order_access_${orderId}`, token)
+    window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`)
+  }, [orderId])
 
   useEffect(() => {
     if (!orderId) { setLoading(false); return }
@@ -133,33 +141,36 @@ export default function OrderConfirmation() {
   const isPending = !isFailed && (mpStatus === 'pending' || order?.status === 'pending_payment')
   const isSuccess = !isFailed && !isPending
   const isReserved = isSuccess && order?.status === 'reserved'
+  const isBankTransfer = order?.payment_method === 'bank_transfer'
 
   return (
     <div style={{ backgroundColor: 'var(--color-bg)', minHeight: '100vh' }}>
-      <div className="max-w-xl mx-auto px-4 sm:px-6 py-16 pb-24">
+      <div className={`fnx-order-confirmation-content${isBankTransfer ? ' is-bank-transfer' : ' max-w-xl mx-auto px-4 sm:px-6 py-16 pb-24'}`}>
 
         {/* ── Ícono de estado ──────────────────────────────────────────────── */}
-        <div className="flex justify-center mb-8">
+        <div className="fnx-order-confirmation-status flex justify-center mb-8">
           {isSuccess && <AnimatedCheck />}
           {isPending  && <PendingIcon />}
           {isFailed   && <FailedIcon />}
         </div>
 
         {/* ── Título ───────────────────────────────────────────────────────── */}
-        <div className="text-center mb-10">
+        <div className="fnx-order-confirmation-intro text-center mb-10">
           <h1
             className="text-3xl sm:text-4xl font-normal mb-3"
             style={{ fontFamily: 'var(--font-serif)', color: 'var(--color-text)' }}
           >
             {isReserved && '¡Reserva confirmada!'}
             {isSuccess && !isReserved && '¡Pedido confirmado!'}
-            {isPending  && 'Pago en proceso'}
+            {isPending  && (isBankTransfer ? 'Pedido recibido' : 'Pago en proceso')}
             {isFailed   && (order?.status === 'expired' ? 'La reserva venció' : 'El pago no fue aprobado')}
           </h1>
           <p className="text-base leading-relaxed" style={{ color: 'var(--color-text-muted)' }}>
             {isReserved && `Te esperamos el ${order.pickup_date ? new Date(order.pickup_date).toLocaleDateString('es-AR', { day: '2-digit', month: 'long' }) : 'día elegido'} en el local para pagar y retirar tu pedido.`}
             {isSuccess && !isReserved && 'Te contactaremos a la brevedad para coordinar la entrega.'}
-            {isPending  && 'Tu pago está siendo procesado. Te avisaremos cuando se confirme.'}
+            {isPending  && (isBankTransfer
+              ? 'Realizá la transferencia y cargá el comprobante. El pago se confirmará después de verificarlo.'
+              : 'Tu pago está siendo procesado. Te avisaremos cuando se confirme.')}
             {isFailed && order?.status === 'expired' && 'No llegamos a confirmar el pago/retiro a tiempo y el pedido venció. Si todavía te interesa, hacelo de nuevo.'}
             {isFailed && order?.status !== 'expired' && 'Podés intentarlo de nuevo o contactarnos por WhatsApp.'}
           </p>
@@ -168,7 +179,7 @@ export default function OrderConfirmation() {
         {/* ── Detalle del pedido (solo si tenemos datos) ───────────────────── */}
         {order && !isFailed && (
           <div
-            className="rounded-2xl overflow-hidden mb-8"
+            className="fnx-order-confirmation-summary rounded-2xl overflow-hidden mb-8"
             style={{ border: '1px solid var(--color-border)' }}
           >
             {/* Header */}
@@ -202,15 +213,19 @@ export default function OrderConfirmation() {
                 deliveryType={order.delivery_type}
                 address={order.address}
                 city={order.city}
+                estimatedDeliveryMinDate={order.estimated_delivery_date}
+                estimatedDeliveryMaxDate={order.estimated_delivery_max_date}
               />
             </div>
           </div>
         )}
 
+        {order && isBankTransfer && !isFailed && <BankTransferPanel orderId={order.id} />}
+
         {/* ── Contacto ─────────────────────────────────────────────────────── */}
         {!isFailed && (
           <div
-            className="rounded-xl p-5 mb-8 text-sm"
+            className="fnx-order-confirmation-contact rounded-xl p-5 mb-8 text-sm"
             style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}
           >
             <p className="font-medium mb-1" style={{ color: 'var(--color-text)' }}>
@@ -232,7 +247,7 @@ export default function OrderConfirmation() {
         )}
 
         {/* ── CTAs ─────────────────────────────────────────────────────────── */}
-        <div className="flex flex-col sm:flex-row gap-3 justify-center">
+        <div className="fnx-order-confirmation-actions flex flex-col sm:flex-row gap-3 justify-center">
           {isSuccess && (
             <>
               <Link

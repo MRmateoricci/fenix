@@ -3,6 +3,9 @@ import {
   sendMail,
   customerConfirmationEmail,
   adminNewOrderEmail,
+  bankTransferInstructionsEmail,
+  bankTransferSubmittedAdminEmail,
+  bankTransferRejectedEmail,
 } from './mailer.js'
 
 // Reclama el envío de confirmación de forma atómica. Los webhooks de Mercado
@@ -45,4 +48,20 @@ export async function sendOrderConfirmationNotifications(orderId) {
   }
 
   return true
+}
+
+export async function sendBankTransferInstructions(order, accessToken) {
+  return sendMail({ to: order.customer_email, ...bankTransferInstructionsEmail(order, accessToken) })
+}
+
+export async function sendBankTransferSubmittedNotification(order, submission) {
+  if (!process.env.ADMIN_NOTIFICATION_EMAIL) return false
+  return sendMail({
+    to: process.env.ADMIN_NOTIFICATION_EMAIL,
+    ...bankTransferSubmittedAdminEmail(order, submission),
+  })
+}
+
+export async function sendBankTransferRejectedNotification(order, reason, accessToken) {
+  return sendMail({ to: order.customer_email, ...bankTransferRejectedEmail(order, reason, accessToken) })
 }

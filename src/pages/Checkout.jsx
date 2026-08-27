@@ -7,7 +7,7 @@ import { getShippingForCP, SHIPPING_SERVICES } from '../config/shipping'
 import mercadoPagoLogo from '../assets/mercado-pago-horizontal.svg'
 import { POLICIES } from './Policy'
 import { applyInvoiceMode, documentKindForNumber } from '../utils/checkoutInvoice'
-import { diasHabiles, plazoMaximo, rangoEntregaTexto } from '../utils/plazoEntrega'
+import { plazoMaximo, rangoEntregaTexto } from '../utils/plazoEntrega'
 
 const API_BASE = import.meta.env.VITE_API_URL || ''
 const CHECKOUT_PAYMENT_DRAFT_KEY = 'fenix_checkout_payment_draft'
@@ -26,7 +26,8 @@ const fmt = (n) =>
   new Intl.NumberFormat('es-AR', {
     style: 'currency',
     currency: 'ARS',
-    maximumFractionDigits: 0,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
   }).format(n)
 
 const fmtDate = (iso) =>
@@ -157,6 +158,9 @@ export default function Checkout() {
   const [couponError, setCouponError] = useState(null)
   const [invoiceOptions, setInvoiceOptions] = useState(null)
   const [invoiceOptionsError, setInvoiceOptionsError] = useState(null)
+  const [paymentConfig, setPaymentConfig] = useState({
+    bankTransfer: { enabled: null, discountPercent: 10 },
+  })
   const [showPaymentFailureNotice, setShowPaymentFailureNotice] = useState(paymentReturn === 'failure')
 
   const [formData, setFormData] = useState({
@@ -198,6 +202,21 @@ export default function Checkout() {
   // despacha todo junto. Se recalcula cuando cambia el carrito y vuelve a pedir
   // la estimación, para que la fecha mostrada nunca quede de un carrito viejo.
   const handlingDays = useMemo(() => plazoMaximo(items), [items])
+
+  useEffect(() => {
+    const controller = new AbortController()
+    fetch(`${API_BASE}/api/payments/config`, { signal: controller.signal })
+      .then(response => response.ok ? response.json() : Promise.reject())
+      .then(config => setPaymentConfig(config))
+      .catch(() => {})
+    return () => controller.abort()
+  }, [])
+
+  useEffect(() => {
+    if (paymentConfig.bankTransfer?.enabled === false && formData.paymentMethod === 'bank_transfer') {
+      setFormData(current => ({ ...current, paymentMethod: 'mercadopago' }))
+    }
+  }, [paymentConfig.bankTransfer?.enabled, formData.paymentMethod])
 
   // El checkout viaja a otro dominio para pagar. Guardamos cada cambio, no
   // solamente el instante de la redirección, para que dirección, receptor
@@ -383,8 +402,12 @@ export default function Checkout() {
       }
     : localShippingZone
   const shippingCost   = shippingZone?.price ?? null
+  const transferDiscountAmount = formData.paymentMethod === 'bank_transfer'
+    ? Math.round(totalPrice * Number(paymentConfig.bankTransfer?.discountPercent || 0)) / 100
+    : 0
+  const couponBase = Math.round((totalPrice - transferDiscountAmount) * 100) / 100
   const discountAmount = appliedCoupon?.discountAmount || 0
-  const orderTotal     = (shippingCost != null ? totalPrice + shippingCost : totalPrice) - discountAmount
+  const orderTotal = Math.round(((shippingCost != null ? couponBase + shippingCost : couponBase) - discountAmount) * 100) / 100
 
   async function handleApplyCoupon() {
     const code = discountCode.trim()
@@ -395,7 +418,7 @@ export default function Checkout() {
       const res = await fetch(`${API_BASE}/api/coupons/validate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code, subtotal: totalPrice }),
+        body: JSON.stringify({ code, subtotal: couponBase }),
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(data.error || 'No pudimos validar el código')
@@ -413,6 +436,33 @@ export default function Checkout() {
     setAppliedCoupon(null)
     setCouponError(null)
   }
+
+  useEffect(() => {
+    if (!appliedCoupon?.code) return undefined
+    const controller = new AbortController()
+    setCouponChecking(true)
+    fetch(`${API_BASE}/api/coupons/validate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code: appliedCoupon.code, subtotal: couponBase }),
+      signal: controller.signal,
+    })
+      .then(async response => {
+        const data = await response.json().catch(() => ({}))
+        if (!response.ok) throw new Error(data.error || 'El cupón no aplica a este medio de pago')
+        setAppliedCoupon(data)
+        setCouponError(null)
+      })
+      .catch(error => {
+        if (error.name !== 'AbortError') {
+          setAppliedCoupon(null)
+          setCouponError(error.message)
+        }
+      })
+      .finally(() => { if (!controller.signal.aborted) setCouponChecking(false) })
+    return () => controller.abort()
+    // El backend vuelve a validar el cupón al confirmar el pedido.
+  }, [formData.paymentMethod])
 
   // Estimación de entrega (Correo Argentino + preparación del pedido) — solo
   // tiene sentido pedirla cuando la zona ya resolvió a un costo concreto.
@@ -635,7 +685,7 @@ export default function Checkout() {
         }
         throw new Error(data.error || 'Error al crear el pedido')
       }
-      const { orderId, checkoutUrl } = await res.json()
+      const { orderId, checkoutUrl, paymentMethod, customerAccessToken } = await res.json()
       if (checkoutUrl) {
         try {
           sessionStorage.setItem(CHECKOUT_PAYMENT_DRAFT_KEY, JSON.stringify({ formData, appliedCoupon }))
@@ -643,10 +693,11 @@ export default function Checkout() {
         sessionStorage.setItem('fenix_pending_order_id', orderId)
         window.location.href = checkoutUrl
       } else {
-        // Pago en el local: no hay redirección a Mercado Pago, el pedido ya
-        // quedó reservado.
+        if (paymentMethod === 'bank_transfer' && customerAccessToken) {
+          localStorage.setItem(`fenix_order_access_${orderId}`, customerAccessToken)
+        }
         clearCart()
-        navigate(`/order-confirmation?orderId=${orderId}&status=success`)
+        navigate(`/order-confirmation?orderId=${orderId}&status=${paymentMethod === 'bank_transfer' ? 'transfer' : 'success'}`)
       }
     } catch (err) {
       setSubmitError(err.message || 'No pudimos procesar tu pedido. Intentá de nuevo.')
@@ -685,7 +736,7 @@ export default function Checkout() {
 
   return (
     <>
-    <PageSEO title="Finalizar compra" description="Completá tu pedido en Fénix Iluminación y pagá de forma segura con Mercado Pago." url="/checkout" />
+    <PageSEO title="Finalizar compra" description="Completá tu pedido en Fénix Iluminación y elegí Mercado Pago o transferencia bancaria." url="/checkout" />
     {showPaymentFailureNotice && paymentReturn === 'failure' && (
       <PaymentFailureNotice onClose={() => setShowPaymentFailureNotice(false)} />
     )}
@@ -706,6 +757,7 @@ export default function Checkout() {
               onDiscountCodeChange={setDiscountCode}
               appliedCoupon={appliedCoupon}
               discountAmount={discountAmount}
+              transferDiscountAmount={transferDiscountAmount}
               couponChecking={couponChecking}
               couponError={couponError}
               onApplyCoupon={handleApplyCoupon}
@@ -734,6 +786,7 @@ export default function Checkout() {
               invoiceOptions={invoiceOptions}
               invoiceOptionsError={invoiceOptionsError}
               onInvoiceModeChange={setInvoiceMode}
+              paymentConfig={paymentConfig}
             />
             {false && <>
         {/* ── Step 1: Datos personales ── */}
@@ -1000,7 +1053,7 @@ export default function Checkout() {
                     {deliveryEstimateLoading
                       ? 'Calculando la fecha de entrega...'
                       : deliveryEstimateMatches
-                        ? `Llega ${fmtVentanaEntrega(deliveryEstimate)} (incluye el tiempo de preparación del pedido)`
+                        ? `Tu pedido llega ${fmtVentanaEntrega(deliveryEstimate)}.`
                         : null}
                   </p>
                 )}
@@ -1049,13 +1102,13 @@ export default function Checkout() {
                 </p>
                 {formData.deliveryType === 'pickup' && (
                   <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: '0.125rem' }}>
-                    Pago online con Mercado Pago
+                    {formData.paymentMethod === 'bank_transfer' ? 'Pago por transferencia bancaria' : 'Pago online con Mercado Pago'}
                     {formData.pickupDate ? ` · Retirás el ${fmtDate(formData.pickupDate)}` : ''}
                   </p>
                 )}
                 {formData.deliveryType === 'delivery' && deliveryEstimateMatches && (
                   <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: '0.125rem' }}>
-                    Llega {fmtVentanaEntrega(deliveryEstimate)}
+                    Tu pedido llega {fmtVentanaEntrega(deliveryEstimate)}.
                   </p>
                 )}
               </div>
@@ -1065,23 +1118,10 @@ export default function Checkout() {
               <h3 style={{ margin: '0 0 8px', fontSize: '0.8rem', fontWeight: 700, color: 'var(--color-text)' }}>
                 Pago
               </h3>
-              <div style={{ border: '1.5px solid var(--color-primary)', borderRadius: 10, overflow: 'hidden' }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14, padding: '14px 16px', background: 'rgba(204,0,0,.045)' }}>
-                  <span style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, fontWeight: 600 }}>
-                    <span style={{ width: 14, height: 14, borderRadius: '50%', border: '4px solid var(--color-primary)' }} />
-                    Mercado Pago
-                  </span>
-                  <img src={mercadoPagoLogo} alt="Mercado Pago" style={{ width: 112, height: 'auto' }} />
-                </div>
-                <p style={{ margin: 0, padding: '11px 16px', borderTop: '1px solid var(--color-border)', background: 'var(--color-surface-2)', color: 'var(--color-text-muted)', fontSize: 11.5, textAlign: 'center' }}>
-                  Te redirigiremos a Mercado Pago para completar la compra de forma segura.
-                </p>
-              </div>
+              <PaymentMethodSelector value={formData.paymentMethod} onChange={value => setField('paymentMethod', value)} bankTransfer={paymentConfig.bankTransfer} />
             </section>
 
             <BillingAddress formData={formData} errors={errors} setField={setField} />
-
-            <PreparacionCheckoutNotice items={items} deliveryType={formData.deliveryType} />
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginBottom: '2rem' }}>
               <GhostBtn onClick={() => setStep(2)} disabled={submitting}>
@@ -1092,9 +1132,9 @@ export default function Checkout() {
                 onClick={handleConfirm}
                 disabled={submitting}
                 className="fnx-mercadopago-button"
-                aria-label="Pagar con Mercado Pago"
+                aria-label={formData.paymentMethod === 'bank_transfer' ? 'Confirmar pedido por transferencia' : 'Pagar con Mercado Pago'}
               >
-                {submitting ? 'Procesando...' : <><span>Pagar con</span><img src={mercadoPagoLogo} alt="Mercado Pago" /></>}
+                {submitting ? 'Procesando...' : formData.paymentMethod === 'bank_transfer' ? 'Confirmar pedido' : <><span>Pagar con</span><img src={mercadoPagoLogo} alt="Mercado Pago" /></>}
               </button>
             </div>
 
@@ -1137,6 +1177,54 @@ function PaymentFailureNotice({ onClose }) {
   )
 }
 
+function PaymentMethodSelector({ value, onChange, bankTransfer }) {
+  const options = [
+    {
+      value: 'mercadopago',
+      title: 'Mercado Pago',
+      description: 'Te redirigiremos a Mercado Pago para completar el pago.',
+      logo: <img src={mercadoPagoLogo} alt="Mercado Pago" />,
+    },
+    ...(bankTransfer?.enabled ? [{
+      value: 'bank_transfer',
+      title: 'Transferencia bancaria',
+      description: `${bankTransfer.discountPercent}% de descuento en los productos. Después podrás cargar el comprobante.`,
+      logo: <span aria-hidden="true" style={{ fontSize: 20 }}>🏦</span>,
+    }] : []),
+  ]
+
+  return (
+    <div style={{ display: 'grid', gap: 10 }}>
+      {options.map(option => {
+        const selected = value === option.value
+        return (
+          <button
+            type="button"
+            key={option.value}
+            onClick={() => onChange(option.value)}
+            className="fnx-payment-option"
+            aria-pressed={selected}
+            style={{
+              width: '100%',
+              textAlign: 'left',
+              borderColor: selected ? 'var(--color-primary)' : 'var(--color-border)',
+              background: selected ? 'rgba(204,0,0,.035)' : 'var(--color-surface)',
+              cursor: 'pointer',
+            }}
+          >
+            <div>
+              <span className="fnx-radio-dot" style={{ opacity: selected ? 1 : 0.3 }} />
+              <strong>{option.title}</strong>
+              {option.logo}
+            </div>
+            <p>{option.description}</p>
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
 function SinglePageCheckout({
   formData, errors, setField, user, onLogout, navigate, shippingZone,
   deliveryEstimate, deliveryEstimateMatches, deliveryEstimateLoading,
@@ -1144,6 +1232,7 @@ function SinglePageCheckout({
   paymentRejected,
   invoiceOptions, invoiceOptionsError,
   onInvoiceModeChange,
+  paymentConfig,
 }) {
   const [activePolicy, setActivePolicy] = useState(null)
   const [accountMenuOpen, setAccountMenuOpen] = useState(false)
@@ -1307,7 +1396,7 @@ function SinglePageCheckout({
                   {deliveryEstimateLoading
                     ? 'Calculando la fecha de entrega...'
                     : deliveryEstimateMatches
-                      ? `Llega ${fmtVentanaEntrega(deliveryEstimate)}`
+                      ? `Tu pedido llega ${fmtVentanaEntrega(deliveryEstimate)}.`
                       : ''}
                 </p>
               </>
@@ -1329,11 +1418,12 @@ function SinglePageCheckout({
 
       <section className="fnx-checkout-section">
         <h2>Pago</h2>
-        <p className="fnx-section-caption">Todas las transacciones son seguras y están encriptadas.</p>
-        <div className="fnx-payment-option">
-          <div><span className="fnx-radio-dot" /> <strong>Mercado Pago</strong><img src={mercadoPagoLogo} alt="Mercado Pago" /></div>
-          <p>Se te redirigirá a Mercado Pago para que completes la compra.</p>
-        </div>
+        <p className="fnx-section-caption">Elegí cómo querés abonar tu pedido.</p>
+        <PaymentMethodSelector
+          value={formData.paymentMethod}
+          onChange={value => setField('paymentMethod', value)}
+          bankTransfer={paymentConfig.bankTransfer}
+        />
       </section>
 
       {(profileError || (!paymentRejected && submitError)) && (
@@ -1341,7 +1431,13 @@ function SinglePageCheckout({
       )}
 
       <button type="button" className="fnx-pay-now" onClick={onConfirm} disabled={submitting || !invoiceOptions}>
-        {submitting ? 'Procesando...' : !invoiceOptions ? 'Cargando datos fiscales...' : 'Pagar ahora'}
+        {submitting
+          ? 'Procesando...'
+          : !invoiceOptions
+            ? 'Cargando datos fiscales...'
+            : formData.paymentMethod === 'bank_transfer'
+              ? 'Confirmar pedido'
+              : 'Pagar ahora'}
       </button>
 
       <nav className="fnx-checkout-legal" aria-label="Información legal">
@@ -1699,7 +1795,8 @@ function BillingAddress({ formData, errors, setField }) {
 // ─── Order Summary ─────────────────────────────────────────────────────────────
 function OrderSummary({
   items, totalPrice, deliveryType, shippingZone, shippingCost, orderTotal, shippingConfig,
-  discountCode, onDiscountCodeChange, appliedCoupon, discountAmount, couponChecking, couponError,
+  discountCode, onDiscountCodeChange, appliedCoupon, discountAmount, transferDiscountAmount,
+  couponChecking, couponError,
   onApplyCoupon, onRemoveCoupon,
 }) {
   const showFreeShippingNote =
@@ -1831,6 +1928,12 @@ function OrderSummary({
           <span>Subtotal</span>
           <span>{fmt(totalPrice)}</span>
         </div>
+        {transferDiscountAmount > 0 && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.75rem 0', fontSize: '0.875rem', color: '#166534', fontWeight: 600 }}>
+            <span>Descuento por transferencia</span>
+            <span>-{fmt(transferDiscountAmount)}</span>
+          </div>
+        )}
         {discountAmount > 0 && (
           <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.75rem 0', fontSize: '0.875rem', color: '#166534', fontWeight: 600 }}>
             <span>Descuento{appliedCoupon ? ` · ${appliedCoupon.code}` : ''}</span>
@@ -2139,47 +2242,6 @@ function CheckSmall() {
   return (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
       <polyline points="20 6 9 17 4 12" />
-    </svg>
-  )
-}
-
-// El plazo de preparación aparece en un solo lugar de toda la tienda: acá, y
-// sólo en retiro en local. Con envío no hace falta — "Entrega estimada" ya
-// combina preparación + correo en una fecha concreta, y repetir el plazo suelto
-// al lado sería decir dos veces lo mismo con números distintos.
-//
-// El resto del sitio (ficha, tarjetas, carrito) no muestra plazos a propósito:
-// antes de conocer el domicilio cualquier número es incompleto, y adelantarlo
-// espanta compras que igual iban a llegar a tiempo.
-//
-// El plazo es el mayor del carrito, nunca la suma: todo se despacha junto.
-function PreparacionCheckoutNotice({ items, deliveryType }) {
-  if (deliveryType !== 'pickup') return null
-  const maxDias = plazoMaximo(items)
-  if (!maxDias) return null
-  return (
-    <div style={{
-      display: 'flex', alignItems: 'flex-start', gap: 10,
-      padding: '14px 16px', borderRadius: 10, marginBottom: '1.5rem',
-      backgroundColor: 'var(--color-surface-2)', border: '1px solid var(--color-border)',
-    }}>
-      <ClockIcon />
-      <p style={{ margin: 0, fontSize: '0.8125rem', color: 'var(--color-text-muted)', lineHeight: 1.5 }}>
-        Te avisamos cuando esté listo para retirar: lo preparamos en hasta <strong>{diasHabiles(maxDias)}</strong>.
-      </p>
-    </div>
-  )
-}
-
-function ClockIcon() {
-  return (
-    <svg
-      style={{ flexShrink: 0, marginTop: '0.125rem', color: 'var(--color-text-muted)' }}
-      width="16" height="16" viewBox="0 0 24 24" fill="none"
-      stroke="currentColor" strokeWidth="1.8"
-    >
-      <circle cx="12" cy="12" r="9" />
-      <path d="M12 7v5l3.5 2" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   )
 }

@@ -10,7 +10,7 @@ import { attachUserIfPresent, requireAuth } from '../middleware/requireAuth.js'
 import { estimateDeliveryDate } from '../services/correoArgentino.js'
 import { SHIPPING_SERVICES, normalizeShippingService, qualifiesForFreeShipping } from '../config/shipping.js'
 import { quoteShipping } from '../services/shippingQuotes.js'
-import { sendOrderConfirmationNotifications } from '../services/orderNotifications.js'
+import { sendBankTransferInstructions, sendOrderConfirmationNotifications } from '../services/orderNotifications.js'
 import { PaymentReconciliationError, reconcileMercadoPagoReturn } from '../services/mercadopagoPayments.js'
 import { sendReviewInvitationForOrder } from '../services/reviewInvitations.js'
 import { isValidEmail, normalizeEmail } from '../utils/email.js'
@@ -30,6 +30,14 @@ import {
 } from '../services/arcaTaxpayerRegistry.js'
 import { safeArcaErrorMessage } from '../services/arcaSafeLog.js'
 import { DEFAULT_VAT_RATE } from '../config/tax.js'
+import {
+  calculateTransferSubtotal,
+  createCustomerAccessToken,
+  hashCustomerAccessToken,
+  normalizeBankTransferSettings,
+  roundMoney,
+  validateBankTransferSettings,
+} from '../services/bankTransfer.js'
 import 'dotenv/config'
 
 const router = Router()
@@ -308,8 +316,8 @@ router.post('/', attachUserIfPresent, async (req, res) => {
     if (!['pickup', 'delivery'].includes(deliveryType)) {
       return res.status(400).json({ error: 'Modalidad de entrega inválida' })
     }
-    if (paymentMethod !== 'mercadopago') {
-      return res.status(400).json({ error: 'Por el momento, Mercado Pago es el único método de pago disponible' })
+    if (!['mercadopago', 'bank_transfer'].includes(paymentMethod)) {
+      return res.status(400).json({ error: 'Método de pago inválido' })
     }
     if (deliveryType === 'pickup' && !pickupDate) {
       return res.status(400).json({ error: 'Falta la fecha de retiro' })
@@ -408,7 +416,33 @@ router.post('/', attachUserIfPresent, async (req, res) => {
         diasEntregaPedido: Number(dbProduct.dias_entrega) || 3,
       })
     }
-    const productsTotal = itemsSnapshot.reduce((sum, i) => sum + i.subtotal, 0)
+    const productsTotal = roundMoney(itemsSnapshot.reduce((sum, i) => sum + i.subtotal, 0))
+    let transferSettings = null
+    let transferDiscountAmount = 0
+    let couponBase = productsTotal
+    let customerAccessToken = null
+    let customerAccessTokenHash = null
+    if (paymentMethod === 'bank_transfer') {
+      const { rows: settingsRows } = await pool.query(
+        `SELECT bank_transfer_enabled, bank_transfer_discount_percent,
+                bank_transfer_expiry_hours, bank_transfer_cbu,
+                bank_transfer_alias, bank_transfer_account_holder
+         FROM store_settings WHERE id = 1`,
+      )
+      transferSettings = normalizeBankTransferSettings(settingsRows[0])
+      if (!transferSettings.enabled || validateBankTransferSettings(transferSettings)) {
+        return res.status(409).json({
+          error: 'La transferencia bancaria ya no está disponible. Elegí otro medio de pago.',
+        })
+      }
+      const transferCalculation = calculateTransferSubtotal(productsTotal, transferSettings.discountPercent)
+      transferDiscountAmount = transferCalculation.transferDiscountAmount
+      couponBase = transferCalculation.couponBase
+      if (!orderUserId) {
+        customerAccessToken = createCustomerAccessToken()
+        customerAccessTokenHash = hashCustomerAccessToken(customerAccessToken)
+      }
+    }
 
     // Cupón de descuento: se revalida contra la DB acá (nunca se confía en el
     // monto que haya calculado el navegador en /api/coupons/validate).
@@ -416,7 +450,7 @@ router.post('/', attachUserIfPresent, async (req, res) => {
     let couponCode = null
     if (req.body?.discountCode) {
       const coupon = await findCouponByCode(req.body.discountCode)
-      const evaluation = evaluateCoupon(coupon, productsTotal)
+      const evaluation = evaluateCoupon(coupon, couponBase)
       if (evaluation.error) {
         return res.status(400).json({ error: evaluation.error })
       }
@@ -453,7 +487,10 @@ router.post('/', attachUserIfPresent, async (req, res) => {
       estimatedDeliveryMaxDate = estimate.maxDate
     }
 
-    const total = productsTotal - discountAmount + shippingCost
+    const total = roundMoney(couponBase - discountAmount + shippingCost)
+    if (paymentMethod === 'bank_transfer' && total <= 0) {
+      return res.status(400).json({ error: 'El importe final de la transferencia debe ser mayor a cero' })
+    }
     validateReceiverForVoucher({
       receiver: invoiceReceiver,
       receiverVatCondition: receiverVatCondition.category,
@@ -464,6 +501,8 @@ router.post('/', attachUserIfPresent, async (req, res) => {
     let reservationExpiresAt = null
     if (paymentMethod === 'mercadopago') {
       reservationExpiresAt = new Date(Date.now() + PENDING_PAYMENT_EXPIRY_MINUTES * 60 * 1000)
+    } else if (paymentMethod === 'bank_transfer') {
+      reservationExpiresAt = new Date(Date.now() + transferSettings.expiryHours * 60 * 60 * 1000)
     }
 
     const initialStatus = 'pending_payment'
@@ -483,10 +522,11 @@ router.post('/', attachUserIfPresent, async (req, res) => {
             billing_address, billing_address_extra, billing_city, billing_postal_code, billing_province,
             coupon_code, discount_amount, invoice_recipient_name, invoice_doc_type,
             invoice_doc_number, invoice_vat_condition_id, invoice_data_confirmed_at, invoice_concept,
-            pickup_person_name, pickup_person_last_name)
+            pickup_person_name, pickup_person_last_name, transfer_discount_amount,
+            bank_transfer_snapshot, customer_access_token_hash)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,
                  $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29,
-                 $30, $31, $32, $33, $34, NOW(), $35, $36, $37)
+                 $30, $31, $32, $33, $34, NOW(), $35, $36, $37, $38, $39, $40)
          RETURNING *`,
         [
           orderNumber, initialStatus,
@@ -525,6 +565,15 @@ router.post('/', attachUserIfPresent, async (req, res) => {
           1,
           pickupPersonName,
           pickupPersonLastName,
+          transferDiscountAmount,
+          transferSettings ? JSON.stringify({
+            cbu: transferSettings.cbu,
+            alias: transferSettings.alias,
+            accountHolder: transferSettings.accountHolder,
+            discountPercent: transferSettings.discountPercent,
+            expiryHours: transferSettings.expiryHours,
+          }) : null,
+          customerAccessTokenHash,
         ]
       )
       order = rows[0]
@@ -566,12 +615,18 @@ router.post('/', attachUserIfPresent, async (req, res) => {
         ?.trim()
         .startsWith('APP_USR-')
       checkoutUrl = usesProductionCredentials ? initPoint : sandboxInitPoint
+    } else {
+      await sendBankTransferInstructions(order, customerAccessToken).catch((error) => {
+        console.error('Error enviando instrucciones de transferencia:', error.message)
+      })
     }
 
     res.status(201).json({
       orderId:      order.id,
       orderNumber:  order.order_number,
       checkoutUrl,
+      paymentMethod,
+      customerAccessToken,
     })
   } catch (err) {
     if (err instanceof InvoiceValidationError) {
@@ -592,9 +647,9 @@ router.post('/', attachUserIfPresent, async (req, res) => {
 const PUBLIC_ORDER_FIELDS = `
   id, order_number, status, customer_name, delivery_type,
   address, city, postal_code, total_amount, shipping_cost, shipping_service,
-  payment_method, pickup_date, estimated_delivery_date,
+  payment_method, pickup_date, estimated_delivery_date, estimated_delivery_max_date,
   pickup_person_name, pickup_person_last_name,
-  coupon_code, discount_amount,
+  coupon_code, discount_amount, transfer_discount_amount,
   items, created_at, paid_at
 `
 
@@ -681,7 +736,9 @@ router.get('/mine', requireAuth, async (req, res) => {
        `SELECT ${PUBLIC_ORDER_FIELDS}
        FROM orders
        WHERE user_id = $1
-         AND (status = ANY($2::varchar[]) OR (status = 'cancelled' AND paid_at IS NOT NULL))
+         AND (status = ANY($2::varchar[])
+              OR (payment_method = 'bank_transfer' AND status IN ('pending_payment', 'expired'))
+              OR (status = 'cancelled' AND paid_at IS NOT NULL))
        ORDER BY created_at DESC`,
       [req.userId, CUSTOMER_ORDER_STATUSES]
     )
@@ -709,6 +766,7 @@ router.get('/mine/:id/retry-data', requireAuth, async (req, res) => {
        FROM orders o
        JOIN users u ON u.id = o.user_id
        WHERE o.id = $1 AND o.user_id = $2
+         AND o.payment_method = 'mercadopago'
          AND o.status IN ('pending_payment', 'payment_failed', 'expired')`,
       [req.params.id, req.userId]
     )
@@ -733,12 +791,15 @@ router.get('/mine/:id', requireAuth, async (req, res) => {
               invoice_vat_condition_id, invoice_data_confirmed_at, invoice_concept,
               invoice_service_from, invoice_service_to, invoice_payment_due,
               total_amount, shipping_cost, shipping_service, payment_method,
-              coupon_code, discount_amount,
-              pickup_date, estimated_delivery_date, pickup_person_name, pickup_person_last_name,
+              coupon_code, discount_amount, transfer_discount_amount,
+              pickup_date, estimated_delivery_date, estimated_delivery_max_date,
+              pickup_person_name, pickup_person_last_name,
               items, created_at, paid_at
        FROM orders
        WHERE id = $1 AND user_id = $2
-         AND (status = ANY($3::varchar[]) OR (status = 'cancelled' AND paid_at IS NOT NULL))`,
+         AND (status = ANY($3::varchar[])
+              OR (payment_method = 'bank_transfer' AND status IN ('pending_payment', 'expired'))
+              OR (status = 'cancelled' AND paid_at IS NOT NULL))`,
       [req.params.id, req.userId, CUSTOMER_ORDER_STATUSES]
     )
     if (!rows.length) return res.status(404).json({ error: 'Pedido no encontrado' })
@@ -756,7 +817,7 @@ router.get('/mine/:id', requireAuth, async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 router.get('/', requireAdmin, async (req, res) => {
   try {
-    const { status, search, page = 1, limit = 50, all = 'false' } = req.query
+    const { status, search, paymentMethod, transferStatus, page = 1, limit = 50, all = 'false' } = req.query
     const fetchAll = all === 'true'
     const offset = (Number(page) - 1) * Number(limit)
 
@@ -775,6 +836,14 @@ router.get('/', requireAdmin, async (req, res) => {
       params.push(`%${search}%`)
       idx++
     }
+    if (paymentMethod) {
+      conditions.push(`o.payment_method = $${idx++}`)
+      params.push(paymentMethod)
+    }
+    if (transferStatus) {
+      conditions.push(`COALESCE(bt.status, 'awaiting_proof') = $${idx++}`)
+      params.push(transferStatus)
+    }
 
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''
 
@@ -786,9 +855,10 @@ router.get('/', requireAdmin, async (req, res) => {
         `SELECT o.id, o.order_number, o.status, o.customer_name, o.customer_email, o.customer_phone,
                 o.delivery_type, o.address, o.city, o.postal_code, o.total_amount,
                 o.shipping_cost, o.shipping_service, o.payment_method, o.mp_status,
-                o.pickup_date, o.estimated_delivery_date, o.items,
+                o.pickup_date, o.estimated_delivery_date, o.estimated_delivery_max_date, o.items,
                 o.pickup_person_name, o.pickup_person_last_name,
-                o.coupon_code, o.discount_amount, o.created_at, o.updated_at,
+                o.coupon_code, o.discount_amount, o.transfer_discount_amount,
+                o.created_at, o.updated_at,
                 o.paid_at, o.mp_payment_id, o.invoice_data_confirmed_at,
                 o.invoice_recipient_name, o.invoice_doc_type, o.invoice_doc_number,
                 o.invoice_vat_condition_id,
@@ -804,40 +874,86 @@ router.get('/', requireAdmin, async (req, res) => {
                 j.last_error_message AS invoice_last_error_message,
                 j.last_attempt_origin AS invoice_last_attempt_origin,
                 j.updated_at AS invoice_attempt_updated_at,
+                bt.id AS transfer_submission_id,
+                bt.attempt_number AS transfer_attempt,
+                bt.status AS transfer_status,
+                bt.payer_account_holder AS transfer_payer_account_holder,
+                bt.proof_original_name AS transfer_proof_original_name,
+                bt.rejection_reason AS transfer_rejection_reason,
+                bt.submitted_at AS transfer_submitted_at,
+                bt.reviewed_at AS transfer_reviewed_at,
+                COALESCE(bth.history, '[]'::jsonb) AS transfer_history,
                 CASE
                   WHEN i.status IS NOT NULL THEN i.status
                   WHEN j.status = 'needs_data' THEN 'needs_data'
                   WHEN j.status = 'processing' THEN 'processing'
                   WHEN j.status = 'failed' THEN 'error'
-                  WHEN o.payment_method = 'mercadopago' AND o.mp_status = 'approved'
+                  WHEN ((o.payment_method = 'mercadopago' AND o.mp_status = 'approved')
+                        OR (o.payment_method = 'bank_transfer' AND bt.status = 'approved'))
                        AND o.status IN ('paid', 'preparing', 'shipped', 'delivered')
                        AND o.invoice_data_confirmed_at IS NULL THEN 'needs_data'
-                  WHEN o.payment_method = 'mercadopago' AND o.mp_status = 'approved'
+                  WHEN ((o.payment_method = 'mercadopago' AND o.mp_status = 'approved')
+                        OR (o.payment_method = 'bank_transfer' AND bt.status = 'approved'))
                        AND o.status IN ('paid', 'preparing', 'shipped', 'delivered') THEN 'pending'
                   ELSE 'not_applicable'
                 END AS invoice_display_status,
-                (o.payment_method = 'mercadopago' AND o.mp_status = 'approved'
+                (((o.payment_method = 'mercadopago' AND o.mp_status = 'approved')
+                  OR (o.payment_method = 'bank_transfer' AND bt.status = 'approved'))
                   AND o.status IN ('paid', 'preparing', 'shipped', 'delivered')
                   AND i.status IS DISTINCT FROM 'authorized'
                   AND o.paid_at < NOW() - INTERVAL '24 hours') AS invoice_overdue
          FROM orders o
          LEFT JOIN invoices i ON i.order_id = o.id
          LEFT JOIN invoice_jobs j ON j.order_id = o.id
+         LEFT JOIN LATERAL (
+           SELECT s.* FROM bank_transfer_submissions s
+           WHERE s.order_id = o.id
+           ORDER BY s.attempt_number DESC LIMIT 1
+         ) bt ON TRUE
+         LEFT JOIN LATERAL (
+           SELECT jsonb_agg(jsonb_build_object(
+             'attempt', s.attempt_number,
+             'status', s.status,
+             'payerAccountHolder', s.payer_account_holder,
+             'originalName', s.proof_original_name,
+             'rejectionReason', s.rejection_reason,
+             'submittedAt', s.submitted_at,
+             'reviewedAt', s.reviewed_at
+           ) ORDER BY s.attempt_number DESC) AS history
+           FROM bank_transfer_submissions s WHERE s.order_id = o.id
+         ) bth ON TRUE
          ${where}
          ORDER BY o.created_at DESC
          ${pagination}`,
         dataParams
       ),
-      pool.query(`SELECT COUNT(*) FROM orders o ${where}`, params),
+      pool.query(
+        `SELECT COUNT(*) FROM orders o
+         LEFT JOIN LATERAL (
+           SELECT s.status FROM bank_transfer_submissions s
+           WHERE s.order_id = o.id
+           ORDER BY s.attempt_number DESC LIMIT 1
+         ) bt ON TRUE
+         ${where}`,
+        params,
+      ),
       pool.query(
         `SELECT
            COUNT(*) FILTER (
-             WHERE o.payment_method = 'mercadopago' AND o.mp_status = 'approved'
+             WHERE ((o.payment_method = 'mercadopago' AND o.mp_status = 'approved')
+                    OR (o.payment_method = 'bank_transfer' AND EXISTS (
+                      SELECT 1 FROM bank_transfer_submissions s
+                      WHERE s.order_id = o.id AND s.status = 'approved'
+                    )))
                AND o.status IN ('paid', 'preparing', 'shipped', 'delivered')
                AND i.status IS DISTINCT FROM 'authorized'
            )::integer AS pending,
            COUNT(*) FILTER (
-             WHERE o.payment_method = 'mercadopago' AND o.mp_status = 'approved'
+             WHERE ((o.payment_method = 'mercadopago' AND o.mp_status = 'approved')
+                    OR (o.payment_method = 'bank_transfer' AND EXISTS (
+                      SELECT 1 FROM bank_transfer_submissions s
+                      WHERE s.order_id = o.id AND s.status = 'approved'
+                    )))
                AND o.status IN ('paid', 'preparing', 'shipped', 'delivered')
                AND i.status IS DISTINCT FROM 'authorized'
                AND o.paid_at < NOW() - INTERVAL '24 hours'
@@ -853,6 +969,9 @@ router.get('/', requireAdmin, async (req, res) => {
       page:   Number(page),
       limit:  fetchAll ? data.rows.length : Number(limit),
       invoiceSummary: invoiceSummaryResult.rows[0] || { pending: 0, overdue: 0 },
+      transferSummary: {
+        pendingReview: data.rows.filter(order => order.transfer_status === 'pending_review').length,
+      },
     })
   } catch (err) {
     console.error('[GET /api/orders]', err)
@@ -866,12 +985,20 @@ router.get('/', requireAdmin, async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 router.get('/:id', requireAdmin, async (req, res) => {
   try {
-    const { rows } = await pool.query(
-      'SELECT * FROM orders WHERE id = $1',
-      [req.params.id]
-    )
+    const { rows } = await pool.query('SELECT * FROM orders WHERE id = $1', [req.params.id])
     if (!rows.length) return res.status(404).json({ error: 'Pedido no encontrado' })
-    res.json(rows[0])
+    const submissions = rows[0].payment_method === 'bank_transfer'
+      ? await pool.query(
+        `SELECT id, attempt_number, payer_account_holder, proof_original_name,
+                proof_mime_type, proof_size_bytes, status, rejection_reason,
+                submitted_at, reviewed_at
+         FROM bank_transfer_submissions WHERE order_id = $1
+         ORDER BY attempt_number DESC`,
+        [req.params.id],
+      )
+      : { rows: [] }
+    res.set('Cache-Control', 'no-store')
+    res.json({ ...rows[0], bankTransferSubmissions: submissions.rows })
   } catch (err) {
     console.error('[GET /api/orders/:id]', err)
     res.status(500).json({ error: 'Error interno' })
@@ -892,6 +1019,25 @@ router.patch('/:id/status', requireAdmin, async (req, res) => {
 
     if (!VALID.includes(status)) {
       return res.status(400).json({ error: 'Estado inválido' })
+    }
+
+    const currentResult = await pool.query(
+      'SELECT payment_method, status FROM orders WHERE id = $1',
+      [req.params.id],
+    )
+    if (!currentResult.rows.length) return res.status(404).json({ error: 'Pedido no encontrado' })
+    const current = currentResult.rows[0]
+    if (current.payment_method === 'bank_transfer'
+        && !['paid', 'preparing', 'shipped', 'delivered'].includes(current.status)
+        && ['paid', 'preparing', 'shipped', 'delivered'].includes(status)) {
+      return res.status(409).json({
+        error: 'Una transferencia solo puede marcarse como pagada desde la revisión de su comprobante',
+      })
+    }
+    if (current.payment_method === 'bank_transfer'
+        && ['paid', 'preparing', 'shipped', 'delivered'].includes(current.status)
+        && ['pending_payment', 'payment_failed', 'reserved', 'expired'].includes(status)) {
+      return res.status(409).json({ error: 'Un pago bancario aprobado no puede volver a estado pendiente' })
     }
 
     const { rows } = await pool.query(

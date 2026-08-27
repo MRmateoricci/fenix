@@ -898,3 +898,100 @@ ALTER TABLE product_variant_rules
 CREATE INDEX IF NOT EXISTS idx_product_variant_rules_price_source
   ON product_variant_rules(price_source_rule_id)
   WHERE price_source_rule_id IS NOT NULL;
+
+-- Transferencia bancaria manual. La configuracion vive en store_settings para
+-- que el comercio pueda cambiar la cuenta sin desplegar; cada pedido conserva
+-- un snapshot porque las instrucciones y el importe no deben mutar despues de
+-- que el cliente confirma la compra.
+ALTER TABLE store_settings
+  ADD COLUMN IF NOT EXISTS bank_transfer_enabled BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE store_settings
+  ADD COLUMN IF NOT EXISTS bank_transfer_discount_percent NUMERIC(5,2) NOT NULL DEFAULT 10;
+ALTER TABLE store_settings
+  ADD COLUMN IF NOT EXISTS bank_transfer_expiry_hours INTEGER NOT NULL DEFAULT 72;
+ALTER TABLE store_settings
+  ADD COLUMN IF NOT EXISTS bank_transfer_cbu VARCHAR(22);
+ALTER TABLE store_settings
+  ADD COLUMN IF NOT EXISTS bank_transfer_alias VARCHAR(80);
+ALTER TABLE store_settings
+  ADD COLUMN IF NOT EXISTS bank_transfer_account_holder VARCHAR(160);
+
+ALTER TABLE store_settings DROP CONSTRAINT IF EXISTS store_settings_bank_transfer_discount_check;
+ALTER TABLE store_settings ADD CONSTRAINT store_settings_bank_transfer_discount_check
+  CHECK (bank_transfer_discount_percent >= 0 AND bank_transfer_discount_percent < 100);
+ALTER TABLE store_settings DROP CONSTRAINT IF EXISTS store_settings_bank_transfer_expiry_check;
+ALTER TABLE store_settings ADD CONSTRAINT store_settings_bank_transfer_expiry_check
+  CHECK (bank_transfer_expiry_hours BETWEEN 1 AND 720);
+
+ALTER TABLE orders DROP CONSTRAINT IF EXISTS orders_payment_method_check;
+ALTER TABLE orders ADD CONSTRAINT orders_payment_method_check
+  CHECK (payment_method IN ('mercadopago', 'pay_in_store', 'bank_transfer'));
+
+-- El descuento bancario queda separado del cupon para reconstruir el total y
+-- mostrar ambas bonificaciones sin cambiar la semantica historica de
+-- discount_amount.
+ALTER TABLE orders
+  ADD COLUMN IF NOT EXISTS transfer_discount_amount NUMERIC(12,2) NOT NULL DEFAULT 0;
+-- Snapshot de CBU, alias, titular, porcentaje y vencimiento mostrados al crear
+-- el pedido; evita que una edicion posterior cambie una instruccion ya emitida.
+ALTER TABLE orders
+  ADD COLUMN IF NOT EXISTS bank_transfer_snapshot JSONB;
+-- Solo se persiste el hash del secreto que autoriza a un invitado a informar el
+-- pago; conocer el UUID o el numero corto del pedido no alcanza.
+ALTER TABLE orders
+  ADD COLUMN IF NOT EXISTS customer_access_token_hash VARCHAR(64);
+
+ALTER TABLE orders DROP CONSTRAINT IF EXISTS orders_transfer_discount_check;
+ALTER TABLE orders ADD CONSTRAINT orders_transfer_discount_check
+  CHECK (transfer_discount_amount >= 0);
+
+-- Cada reenvio es inmutable y auditable. Los indices parciales impiden que dos
+-- requests concurrentes dejen mas de un comprobante pendiente o aprobado.
+CREATE TABLE IF NOT EXISTS bank_transfer_submissions (
+  id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  order_id              UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+  attempt_number        INTEGER NOT NULL,
+  payer_account_holder  VARCHAR(160) NOT NULL,
+  proof_storage_key     VARCHAR(255) NOT NULL UNIQUE,
+  proof_original_name   VARCHAR(255) NOT NULL,
+  proof_mime_type       VARCHAR(80) NOT NULL,
+  proof_size_bytes      INTEGER NOT NULL,
+  status                VARCHAR(20) NOT NULL DEFAULT 'pending_review',
+  rejection_reason      VARCHAR(500),
+  submitted_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  reviewed_at           TIMESTAMPTZ,
+  created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT bank_transfer_submissions_attempt_unique UNIQUE (order_id, attempt_number),
+  CONSTRAINT bank_transfer_submissions_attempt_check CHECK (attempt_number > 0),
+  CONSTRAINT bank_transfer_submissions_size_check CHECK (proof_size_bytes > 0),
+  CONSTRAINT bank_transfer_submissions_status_check
+    CHECK (status IN ('pending_review', 'approved', 'rejected')),
+  CONSTRAINT bank_transfer_submissions_rejection_check CHECK (
+    status <> 'rejected' OR (rejection_reason IS NOT NULL AND length(trim(rejection_reason)) >= 3)
+  )
+);
+
+DROP TRIGGER IF EXISTS bank_transfer_submissions_updated_at ON bank_transfer_submissions;
+CREATE TRIGGER bank_transfer_submissions_updated_at
+  BEFORE UPDATE ON bank_transfer_submissions
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+CREATE INDEX IF NOT EXISTS idx_bank_transfer_submissions_order
+  ON bank_transfer_submissions(order_id, attempt_number DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_bank_transfer_one_pending
+  ON bank_transfer_submissions(order_id) WHERE status = 'pending_review';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_bank_transfer_one_approved
+  ON bank_transfer_submissions(order_id) WHERE status = 'approved';
+
+-- Un rechazo puede emitir un nuevo enlace sin invalidar el enlace original.
+-- Igual que el token principal del pedido, solo se conserva su SHA-256.
+CREATE TABLE IF NOT EXISTS bank_transfer_guest_tokens (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  order_id    UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+  token_hash  VARCHAR(64) NOT NULL UNIQUE,
+  expires_at  TIMESTAMPTZ NOT NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_bank_transfer_guest_tokens_order
+  ON bank_transfer_guest_tokens(order_id, expires_at);

@@ -58,6 +58,9 @@ export function invoiceAttemptEligibility(order, { requireMercadoPagoApproval = 
     || (requireMercadoPagoApproval && order.payment_method !== 'mercadopago')) {
     return { allowed: false, status: 'failed', code: 'PAYMENT_NOT_APPROVED', message: 'Mercado Pago no confirmo el pago como approved.' };
   }
+  if (order.payment_method === 'bank_transfer' && !order.bank_transfer_approved) {
+    return { allowed: false, status: 'failed', code: 'PAYMENT_NOT_APPROVED', message: 'La transferencia bancaria no fue aprobada.' };
+  }
   if (!hasRequiredInvoiceData(order)) {
     return { allowed: false, status: 'needs_data', code: 'INVOICE_RECIPIENT_NOT_CONFIRMED', message: 'Faltan confirmar los datos fiscales del receptor.' };
   }
@@ -75,8 +78,10 @@ export function classifyInvoiceAttemptResult(result) {
 }
 
 export function isInvoiceOverdue(order, invoiceStatus, now = new Date()) {
-  if (order?.payment_method !== 'mercadopago'
-    || order?.mp_status !== 'approved'
+  const verifiedPayment = (order?.payment_method === 'mercadopago' && order?.mp_status === 'approved')
+    || (order?.payment_method === 'bank_transfer' && order?.bank_transfer_approved)
+    || order?.payment_method === 'pay_in_store';
+  if (!verifiedPayment
     || !BILLABLE_ORDER_STATUSES.has(order?.status)
     || invoiceStatus === 'authorized') return false;
   const paidAt = new Date(order?.paid_at).getTime();
@@ -96,7 +101,16 @@ function classifyInvoiceAttemptError(error) {
 
 async function loadOrder(orderId, client) {
   const { rows } = await client.query('SELECT * FROM orders WHERE id = $1', [orderId]);
-  return rows[0] || null;
+  const order = rows[0] || null;
+  if (!order || order.payment_method !== 'bank_transfer') return order;
+  const approval = await client.query(
+    `SELECT EXISTS (
+       SELECT 1 FROM bank_transfer_submissions
+       WHERE order_id = $1 AND status = 'approved'
+     ) AS approved`,
+    [orderId],
+  );
+  return { ...order, bank_transfer_approved: Boolean(approval.rows[0]?.approved) };
 }
 
 async function recordSkippedAttempt(orderId, origin, decision, client) {
@@ -258,6 +272,20 @@ export async function attemptAutomaticInvoiceForApprovedPayment({ order, payment
   } finally {
     clearTimeout(timer);
   }
+}
+
+export async function attemptAutomaticInvoiceForConfirmedBankTransfer({ order }, {
+  environmentVariables = process.env,
+  attempt = attemptInvoiceForOrder,
+} = {}) {
+  const automation = getArcaAutomationConfig(environmentVariables);
+  if (!automation.enabled) return { attempted: false, reason: automation.disabledReason };
+  if (order?.payment_method !== 'bank_transfer'
+    || !order?.bank_transfer_approved
+    || !BILLABLE_ORDER_STATUSES.has(order?.status)) {
+    return { attempted: false, reason: 'payment_not_approved' };
+  }
+  return attempt({ orderId: order.id, origin: 'admin' });
 }
 
 export async function getInvoiceAttemptForOrder(orderId, client = pool) {

@@ -1,22 +1,8 @@
-// Plazo de preparación en palabras.
-//
-// La tienda NO muestra plazos mientras el cliente navega: ni en la ficha, ni en
-// la tarjeta, ni en el carrito. Antes de conocer el domicilio cualquier número
-// es incompleto, y adelantarlo espanta compras que igual llegaban a tiempo.
-// Sólo quedan dos lugares: el checkout con retiro en local (donde no hay fecha
-// de envío que lo cubra) y el resumen del pedido ya hecho.
-//
-// El número siempre viene del backend (products.stock_inmediato + los plazos de
-// store_settings). Acá no se decide ningún plazo, sólo cómo se escribe.
+// La preparación se usa únicamente para calcular internamente la ventana final
+// de entrega. Al cliente se le muestran fechas de llegada, no plazos internos.
 
 function normalizar(dias) {
   return Math.max(0, Math.round(Number(dias) || 0))
-}
-
-// "3 días hábiles" — para armar frases propias ("hasta X", "en X").
-export function diasHabiles(dias) {
-  const n = normalizar(dias)
-  return n === 1 ? '1 día hábil' : `${n} días hábiles`
 }
 
 // Mayor plazo de preparación del carrito. Es el máximo y nunca la suma: los

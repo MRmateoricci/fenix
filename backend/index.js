@@ -18,6 +18,8 @@ import catalogRouter  from './routes/catalog.js'
 import googleReviewsRouter from './routes/googleReviews.js'
 import shippingRouter from './routes/shipping.js'
 import paymentsRouter from './routes/payments.js'
+import bankTransfersRouter from './routes/bankTransfers.js'
+import adminRouter from './routes/admin.js'
 import newsletterRouter from './routes/newsletter.js'
 import couponsRouter from './routes/coupons.js'
 import arcaRouter from './routes/arca.js'
@@ -68,6 +70,7 @@ app.use('/uploads', express.static(uploadsDir))
 
 // ── Rutas ─────────────────────────────────────────────────────────────────────
 app.get('/api/health', (_req, res) => res.json({ ok: true, env: process.env.NODE_ENV || 'development' }))
+app.use('/api/admin', adminRouter)
 app.use('/api/arca', arcaRouter)
 app.use('/api/orders', invoicesRouter)
 app.use('/api/orders',   ordersRouter)
@@ -84,6 +87,7 @@ app.use('/api/catalog',  catalogRouter)
 app.use('/api/google-reviews', googleReviewsRouter)
 app.use('/api/shipping', shippingRouter)
 app.use('/api/payments', paymentsRouter)
+app.use('/api/bank-transfers', bankTransfersRouter)
 app.use('/api/newsletter', newsletterRouter)
 app.use('/api/coupons', couponsRouter)
 

@@ -51,7 +51,7 @@ const COLOR_PRESETS = [
 
 
 const fmt = n =>
-  new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(n)
+  new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n)
 
 const fmtUsd = n =>
   `US$ ${Number(n).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -2102,6 +2102,62 @@ function OverviewTab({ products }) {
 }
 
 // ── StoreTab ──────────────────────────────────────────────────────────────────
+function BankTransferSettingsCard() {
+  const { bankTransferSettings, fetchBankTransferSettings, updateBankTransferSettings } = useAdmin()
+  const [form, setForm] = useState(null)
+  const [saving, setSaving] = useState(false)
+  const [message, setMessage] = useState('')
+
+  useEffect(() => {
+    fetchBankTransferSettings()
+      .then(setForm)
+      .catch(error => setMessage(error.message))
+  }, [fetchBankTransferSettings])
+
+  useEffect(() => {
+    if (bankTransferSettings) setForm(bankTransferSettings)
+  }, [bankTransferSettings])
+
+  if (!form) return <div style={{ marginBottom: 20 }}>Cargando configuración de transferencia…</div>
+  const change = (key, value) => setForm(current => ({ ...current, [key]: value }))
+  const save = async event => {
+    event.preventDefault()
+    setSaving(true)
+    setMessage('')
+    try {
+      const saved = await updateBankTransferSettings({
+        ...form,
+        cbu: String(form.cbu || '').replace(/\D/g, ''),
+        discountPercent: Number(form.discountPercent),
+        expiryHours: Number(form.expiryHours),
+      })
+      setForm(saved)
+      setMessage('Configuración bancaria guardada.')
+    } catch (error) {
+      setMessage(error.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <form onSubmit={save} style={{ background: C.white, border: `1px solid ${C.border}`, borderRadius: 10, padding: 18, marginBottom: 24 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'center', marginBottom: 14 }}>
+        <div><h2 style={{ margin: 0, fontSize: 17 }}>Transferencia bancaria</h2><p style={{ margin: '4px 0 0', color: C.muted, fontSize: 12 }}>Cuenta receptora, descuento y plazo para cargar comprobantes.</p></div>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 700 }}><input type="checkbox" checked={form.enabled} onChange={event => change('enabled', event.target.checked)} /> Habilitada</label>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(190px,1fr))', gap: 12 }}>
+        <label style={lbl}>CBU (22 dígitos)<input style={{ ...inp, marginTop: 5 }} inputMode="numeric" maxLength={22} value={form.cbu || ''} onChange={event => change('cbu', event.target.value.replace(/\D/g, ''))} /></label>
+        <label style={lbl}>Alias<input style={{ ...inp, marginTop: 5 }} maxLength={80} value={form.alias || ''} onChange={event => change('alias', event.target.value)} /></label>
+        <label style={lbl}>Titular<input style={{ ...inp, marginTop: 5 }} maxLength={160} value={form.accountHolder || ''} onChange={event => change('accountHolder', event.target.value)} /></label>
+        <label style={lbl}>Descuento (%)<input style={{ ...inp, marginTop: 5 }} type="number" min="0" max="99.99" step="0.01" value={form.discountPercent} onChange={event => change('discountPercent', event.target.value)} /></label>
+        <label style={lbl}>Vigencia (horas)<input style={{ ...inp, marginTop: 5 }} type="number" min="1" max="720" step="1" value={form.expiryHours} onChange={event => change('expiryHours', event.target.value)} /></label>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 15 }}><button type="submit" disabled={saving} style={{ ...solidBtn, background: C.red, color: '#fff' }}>{saving ? 'Guardando…' : 'Guardar configuración'}</button>{message && <span style={{ color: message.includes('guardada') ? C.green : C.red, fontSize: 12 }}>{message}</span>}</div>
+    </form>
+  )
+}
+
 function StoreTab({ products, onUpdate, onDelete }) {
   const { fetchInventoryItem, fetchCatalog, categoryTree } = useAdmin()
   const categoryOptions = categoryTree.map(node => ({ value: getCategoryValue(node), label: node.label }))
@@ -2153,6 +2209,7 @@ function StoreTab({ products, onUpdate, onDelete }) {
 
   return (
     <div>
+      <BankTransferSettingsCard />
       {/* Stats bar + add button */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
@@ -3076,7 +3133,8 @@ function InvoiceBadge({ order }) {
   )
 }
 
-function OrderDetailModal({ order, onClose, onStatusChange, onInvoice, onInvoicePdf, invoiceSaving = false }) {
+function OrderDetailModal({ order, onClose, onStatusChange, onInvoice, onInvoicePdf,
+  onTransferReview, onTransferProof, invoiceSaving = false }) {
   const [newStatus, setNewStatus] = useState(order.status)
   const [saving, setSaving]       = useState(false)
   const [saved, setSaved]         = useState(false)
@@ -3141,6 +3199,22 @@ function OrderDetailModal({ order, onClose, onStatusChange, onInvoice, onInvoice
           <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.text3, fontSize: 20 }}>✕</button>
         </div>
 
+        {order.payment_method === 'bank_transfer' && (
+          <div style={{ background: C.white, borderRadius: 8, border: `1px solid ${order.transfer_status === 'pending_review' ? C.amber : C.border}`, padding: '14px 18px', marginBottom: 14 }}>
+            <p style={lbl}>Transferencia bancaria</p>
+            <p style={{ margin: '7px 0 0', fontSize: 13 }}>Importe esperado: <strong>{fmt(order.total_amount)}</strong></p>
+            <p style={{ margin: '5px 0 0', fontSize: 12 }}>Estado: <strong>{order.transfer_status || 'awaiting_proof'}</strong></p>
+            {order.transfer_payer_account_holder && <p style={{ margin: '5px 0 0', fontSize: 12 }}>Titular de origen informado: <strong>{order.transfer_payer_account_holder}</strong></p>}
+            {order.transfer_rejection_reason && <p style={{ margin: '5px 0 0', fontSize: 12, color: C.red }}>Motivo anterior: {order.transfer_rejection_reason}</p>}
+            {(order.transfer_history || []).filter(item => item.status === 'rejected').map(item => <p key={item.attempt} style={{ margin: '5px 0 0', fontSize: 11, color: C.text3 }}>Intento {item.attempt} rechazado: {item.rejectionReason}</p>)}
+            {order.transfer_submission_id && <button type="button" onClick={() => onTransferProof?.(order)} style={{ ...outlineBtn, marginTop: 10 }}>Descargar {order.transfer_proof_original_name || 'comprobante'}</button>}
+            {order.transfer_status === 'pending_review' && <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+              <button type="button" onClick={() => onTransferReview?.(order, 'approve')} style={{ ...solidBtn, background: C.green, color: '#fff' }}>Confirmar pago</button>
+              <button type="button" onClick={() => onTransferReview?.(order, 'reject')} style={{ ...outlineBtn, color: C.red, borderColor: C.red }}>Rechazar</button>
+            </div>}
+          </div>
+        )}
+
         {/* Cliente */}
         <div style={{ background: C.white, borderRadius: 8, border: `1px solid ${C.border}`, padding: '14px 18px', marginBottom: 14 }}>
           <p style={lbl}>Cliente</p>
@@ -3199,6 +3273,7 @@ function OrderDetailModal({ order, onClose, onStatusChange, onInvoice, onInvoice
             <span style={{ fontSize: 14, fontWeight: 600, color: C.ink }}>Total</span>
             <span style={{ fontSize: 16, fontWeight: 600, color: C.ink }}>{fmt(order.total_amount)}</span>
           </div>
+          {Number(order.transfer_discount_amount) > 0 && <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 18px', color: C.green, fontSize: 12 }}><span>Descuento por transferencia</span><strong>-{fmt(order.transfer_discount_amount)}</strong></div>}
         </div>
 
         {(order.invoice_display_status !== 'not_applicable' || order.invoice_id) && (
@@ -3214,7 +3289,9 @@ function OrderDetailModal({ order, onClose, onStatusChange, onInvoice, onInvoice
               <InvoiceBadge order={order} />
             </div>
             {order.invoice_overdue && <p style={{ margin: '9px 0 0', color: '#9A3412', fontSize: 12, fontWeight: 700 }}>Pago aprobado hace más de 24 horas sin factura autorizada.</p>}
-            <p style={{ margin: '9px 0 0', fontSize: 11, color: C.text3 }}>Pago MP: {order.mp_status || 'sin estado'}</p>
+            <p style={{ margin: '9px 0 0', fontSize: 11, color: C.text3 }}>
+              Pago: {order.payment_method === 'bank_transfer' ? `transferencia ${order.transfer_status || 'pendiente'}` : `Mercado Pago ${order.mp_status || 'sin estado'}`}
+            </p>
             {order.invoice_id && <p style={{ margin: '4px 0 0', fontSize: 11, color: C.text3 }}>Punto de venta: {order.invoice_pto_vta} · Tipo: {order.invoice_cbte_tipo}</p>}
             {order.invoice_cbte_numero && <p style={{ margin: '4px 0 0', fontSize: 12, color: C.ink }}>Comprobante {String(order.invoice_pto_vta).padStart(5, '0')}-{String(order.invoice_cbte_numero).padStart(8, '0')}</p>}
             {order.invoice_cae && <p style={{ margin: '4px 0 0', fontSize: 11, color: C.text3 }}>CAE: {order.invoice_cae} · Vence: {String(order.invoice_cae_expiration_date || '').slice(0, 10)}</p>}
@@ -3237,8 +3314,8 @@ function OrderDetailModal({ order, onClose, onStatusChange, onInvoice, onInvoice
                   <button type="button" onClick={() => handleInvoicePdf(false)} style={{ ...solidBtn, background: C.dark, color: '#fff' }}>Descargar factura</button>
                 </>
               ) : (
-                order.payment_method === 'mercadopago'
-                && order.mp_status === 'approved'
+                ((order.payment_method === 'mercadopago' && order.mp_status === 'approved')
+                || (order.payment_method === 'bank_transfer' && order.transfer_status === 'approved'))
                 && ['paid', 'preparing', 'shipped', 'delivered'].includes(order.status)
                 && order.invoice_data_confirmed_at
                 && order.invoice_display_status !== 'rejected'
@@ -3708,9 +3785,12 @@ function OrdersTab() {
   const {
     orders, ordersTotal, invoiceSummary, ordersLoading, ordersError,
     fetchOrders, updateOrderStatus, issueInvoiceAsAdmin, openAdminInvoicePdf,
+    reviewBankTransfer, downloadBankTransferProof,
   } = useAdmin()
   const [statusFilter, setStatusFilter] = useState('all')
   const [invoiceFilter, setInvoiceFilter] = useState('all')
+  const [paymentFilter, setPaymentFilter] = useState('all')
+  const [transferFilter, setTransferFilter] = useState('all')
   const [search, setSearch]             = useState('')
   const [selectedOrder, setSelectedOrder] = useState(null)
   const [updatingOrderIds, setUpdatingOrderIds] = useState(() => new Set())
@@ -3736,9 +3816,12 @@ function OrdersTab() {
     const term = search.trim().toLowerCase()
     return orders.filter((order) => {
       if (statusFilter !== 'all' && order.status !== statusFilter) return false
+      if (paymentFilter !== 'all' && order.payment_method !== paymentFilter) return false
+      const transferState = order.transfer_status || 'awaiting_proof'
+      if (transferFilter !== 'all' && (order.payment_method !== 'bank_transfer' || transferState !== transferFilter)) return false
       const invoiceStatus = order.invoice_display_status || 'not_applicable'
-      const needsAttention = order.payment_method === 'mercadopago'
-        && order.mp_status === 'approved'
+      const needsAttention = ((order.payment_method === 'mercadopago' && order.mp_status === 'approved')
+        || (order.payment_method === 'bank_transfer' && order.transfer_status === 'approved'))
         && ['paid', 'preparing', 'shipped', 'delivered'].includes(order.status)
         && invoiceStatus !== 'authorized'
       if (invoiceFilter === 'attention' && !needsAttention) return false
@@ -3749,7 +3832,7 @@ function OrdersTab() {
       return [order.customer_name, order.customer_email, order.order_number]
         .some((value) => String(value || '').toLowerCase().includes(term))
     })
-  }, [orders, search, statusFilter, invoiceFilter])
+  }, [orders, search, statusFilter, invoiceFilter, paymentFilter, transferFilter])
 
   const ordersToShip = useMemo(() =>
     orders
@@ -3774,6 +3857,36 @@ function OrdersTab() {
         || new Date(a.pickup_date || a.created_at) - new Date(b.pickup_date || b.created_at)
       ),
   [orders])
+
+  const transfersToReview = useMemo(() => orders.filter(order =>
+    order.payment_method === 'bank_transfer' && order.transfer_status === 'pending_review'
+  ), [orders])
+
+  async function handleTransferReview(order, action) {
+    let reason
+    if (action === 'approve') {
+      if (!window.confirm(`Confirmá que ingresaron exactamente ${fmt(order.total_amount)} para el pedido #${order.order_number}.`)) return
+    } else {
+      reason = window.prompt('Motivo del rechazo (obligatorio):', '')
+      if (reason == null) return
+    }
+    try {
+      await reviewBankTransfer(order.transfer_submission_id, action, reason, action === 'approve' ? order.total_amount : undefined)
+      const data = await fetchOrders({ all: true })
+      setSelectedOrder(data.orders?.find(item => item.id === order.id) || null)
+      notifyStatus(action === 'approve' ? 'Transferencia aprobada.' : 'Transferencia rechazada.')
+    } catch (error) {
+      notifyStatus(error.message, 'error')
+    }
+  }
+
+  async function handleTransferProof(order) {
+    try {
+      await downloadBankTransferProof(order.transfer_submission_id, order.transfer_proof_original_name)
+    } catch (error) {
+      notifyStatus(error.message, 'error')
+    }
+  }
 
   async function handleStatusChange(id, status) {
     const order = orders.find(item => item.id === id)
@@ -3862,6 +3975,15 @@ function OrdersTab() {
         </div>
       )}
       <div className="adm-work-queues">
+        <section className="adm-work-queue" style={{ borderTop: `3px solid ${C.amber}`, gridColumn: '1 / -1' }}>
+          <header className="adm-work-queue__head"><div><h2>Transferencias por revisar</h2><p>Verificá el ingreso bancario antes de confirmar el pago.</p></div><span>{transfersToReview.length}</span></header>
+          <div className="adm-work-queue__list">
+            {!transfersToReview.length && <p className="adm-work-queue__empty">No hay comprobantes pendientes.</p>}
+            {transfersToReview.map(order => <button type="button" key={order.id} onClick={() => setSelectedOrder(order)} style={{ width: '100%', border: 0, borderBottom: `1px solid ${C.hairline}`, background: C.white, padding: '12px 18px', display: 'grid', gridTemplateColumns: '110px 1fr 1fr 110px', gap: 10, textAlign: 'left', cursor: 'pointer' }}>
+              <strong>#{order.order_number}</strong><span>{order.customer_name}</span><span>{order.transfer_payer_account_holder}</span><strong>{fmt(order.total_amount)}</strong>
+            </button>)}
+          </div>
+        </section>
         <OperationalOrdersSection
           title="Pedidos a enviar"
           subtitle="Pagados, en preparación o en camino"
@@ -3937,6 +4059,18 @@ function OrdersTab() {
       </div>
 
       <div style={{ marginBottom: 16 }}>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 10 }}>
+          <label style={{ ...lbl, minWidth: 220 }}>Medio de pago
+            <select value={paymentFilter} onChange={event => setPaymentFilter(event.target.value)} style={{ ...inp, display: 'block', marginTop: 5 }}>
+              <option value="all">Todos</option><option value="mercadopago">Mercado Pago</option><option value="bank_transfer">Transferencia bancaria</option>
+            </select>
+          </label>
+          <label style={{ ...lbl, minWidth: 220 }}>Estado de transferencia
+            <select value={transferFilter} onChange={event => setTransferFilter(event.target.value)} style={{ ...inp, display: 'block', marginTop: 5 }}>
+              <option value="all">Todos</option><option value="awaiting_proof">Esperando comprobante</option><option value="pending_review">Pendiente de revisión</option><option value="rejected">Rechazada</option><option value="approved">Aprobada</option>
+            </select>
+          </label>
+        </div>
         <label style={{ ...lbl, display: 'block', marginBottom: 5 }}>Estado de factura</label>
         <select value={invoiceFilter} onChange={(event) => setInvoiceFilter(event.target.value)} style={{ ...inp, maxWidth: 250 }}>
           <option value="all">Todas</option>
@@ -4055,6 +4189,8 @@ function OrdersTab() {
           onStatusChange={handleStatusChange}
           onInvoice={handleInvoice}
           onInvoicePdf={handleInvoicePdf}
+          onTransferReview={handleTransferReview}
+          onTransferProof={handleTransferProof}
           invoiceSaving={invoicingOrderIds.has(selectedOrder.id)}
         />
       )}

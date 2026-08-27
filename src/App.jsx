@@ -90,7 +90,8 @@ function Layout() {
 }
 
 function PrivateRoute({ children }) {
-  const { isAdmin } = useAdmin()
+  const { isAdmin, adminAuthLoading } = useAdmin()
+  if (adminAuthLoading) return null
   return isAdmin ? children : <Navigate to="/admin/login" replace />
 }
 

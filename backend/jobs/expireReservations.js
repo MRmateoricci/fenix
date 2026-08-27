@@ -16,13 +16,22 @@ const SWEEP_INTERVAL_MS = 30 * 60 * 1000 // 30 minutos
 async function sweepExpiredReservations() {
   try {
     const { rows } = await pool.query(
-      `UPDATE orders SET status = 'expired'
-       WHERE status IN ('reserved', 'pending_payment') AND reservation_expires_at < NOW()
+      `UPDATE orders o SET status = 'expired'
+       WHERE o.status IN ('reserved', 'pending_payment')
+         AND o.reservation_expires_at < NOW()
+         AND NOT (
+           o.payment_method = 'bank_transfer'
+           AND EXISTS (
+             SELECT 1 FROM bank_transfer_submissions s
+             WHERE s.order_id = o.id AND s.status = 'pending_review'
+           )
+         )
        RETURNING id`
     )
     if (rows.length) {
       console.log(`[expireReservations] ${rows.length} pedido(s) vencido(s)`)
     }
+    await pool.query('DELETE FROM bank_transfer_guest_tokens WHERE expires_at < NOW()')
   } catch (err) {
     console.error('[expireReservations] Error en el barrido:', err)
   }

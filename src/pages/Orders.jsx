@@ -82,6 +82,8 @@ export default function Orders() {
                       deliveryType={order.delivery_type}
                       address={order.address}
                       city={order.city}
+                      estimatedDeliveryMinDate={order.estimated_delivery_date}
+                      estimatedDeliveryMaxDate={order.estimated_delivery_max_date}
                       showDeliveryLabel={false}
                       imageSizeClass="w-11 h-11"
                       totalSizeClass="text-lg font-bold"

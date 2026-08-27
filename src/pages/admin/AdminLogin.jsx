@@ -4,7 +4,7 @@ import { useAdmin } from '../../context/AdminContext'
 import FenixLogo from '../../assets/FenixLogo'
 
 export default function AdminLogin() {
-  const { isAdmin, login } = useAdmin()
+  const { isAdmin, adminAuthLoading, login } = useAdmin()
   const navigate = useNavigate()
   const [pwd, setPwd]         = useState('')
   const [error, setError]     = useState(false)
@@ -15,12 +15,14 @@ export default function AdminLogin() {
     if (isAdmin) navigate('/admin', { replace: true })
   }, [isAdmin, navigate])
 
-  const handleSubmit = (e) => {
+  if (adminAuthLoading) return null
+
+  const handleSubmit = async (e) => {
     e.preventDefault()
     if (!pwd) return
     setLoading(true)
-    setTimeout(() => {
-      const ok = login(pwd)
+    try {
+      const ok = await login(pwd)
       if (ok) {
         navigate('/admin', { replace: true })
       } else {
@@ -28,7 +30,10 @@ export default function AdminLogin() {
         setPwd('')
         setLoading(false)
       }
-    }, 350)
+    } catch {
+      setError(true)
+      setLoading(false)
+    }
   }
 
   return (

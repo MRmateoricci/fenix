@@ -723,6 +723,79 @@
 .fnx-pay-now { width: 100%; min-height: 46px; border: 0; border-radius: 8px; background: #111; color: #fff; cursor: pointer; font-size: 12px; font-weight: 700; }
 .fnx-pay-now:disabled { cursor: not-allowed; opacity: .55; }
 
+.fnx-bank-transfer-panel {
+  padding: 22px;
+  margin: 24px 0;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-surface);
+}
+
+.fnx-bank-transfer-note {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 13px;
+}
+
+.fnx-bank-transfer-file-field > label:first-child { display: block; }
+
+.fnx-bank-transfer-file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.fnx-bank-transfer-file-picker {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 7px;
+  cursor: pointer;
+}
+
+.fnx-bank-transfer-file-button {
+  min-height: 42px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  padding: 0 15px;
+  border: 1px solid #111;
+  border-radius: 8px;
+  background: #111;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  transition: background-color 150ms ease, border-color 150ms ease;
+}
+
+.fnx-bank-transfer-file-picker:hover .fnx-bank-transfer-file-button {
+  border-color: var(--color-primary);
+  background: var(--color-primary);
+}
+
+.fnx-bank-transfer-file-input:focus-visible + .fnx-bank-transfer-file-picker .fnx-bank-transfer-file-button {
+  outline: 3px solid rgba(204, 0, 0, .22);
+  outline-offset: 2px;
+}
+
+.fnx-bank-transfer-file-name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .fnx-payment-failure-notice { z-index: 2300; }
 .fnx-payment-failure-notice .fnx-added-notice__body img {
   width: 92px;
@@ -958,6 +1031,74 @@
 }
 
 /* ── Animated checkmark (OrderConfirmation) ─────────────────────────────── */
+/* Confirmación por transferencia: misma jerarquía que el checkout. */
+.fnx-order-confirmation-content.is-bank-transfer {
+  width: min(70rem, calc(100% - 48px));
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(360px, .95fr);
+  grid-template-areas:
+    "status summary"
+    "intro summary"
+    "transfer summary"
+    "contact summary"
+    "actions summary";
+  column-gap: 32px;
+  align-items: start;
+  margin: 0 auto;
+  padding: 48px 0 72px;
+}
+
+.fnx-order-confirmation-content.is-bank-transfer .fnx-order-confirmation-status { grid-area: status; }
+.fnx-order-confirmation-content.is-bank-transfer .fnx-order-confirmation-intro { grid-area: intro; }
+.fnx-order-confirmation-content.is-bank-transfer .fnx-bank-transfer-panel { grid-area: transfer; margin: 0 0 24px; }
+.fnx-order-confirmation-content.is-bank-transfer .fnx-order-confirmation-contact { grid-area: contact; }
+.fnx-order-confirmation-content.is-bank-transfer .fnx-order-confirmation-actions { grid-area: actions; }
+.fnx-order-confirmation-content.is-bank-transfer .fnx-order-confirmation-summary {
+  position: sticky;
+  top: 88px;
+  grid-area: summary;
+  margin-bottom: 0;
+}
+
+@media (max-width: 820px) {
+  .fnx-order-confirmation-content.is-bank-transfer {
+    width: min(100% - 32px, 36rem);
+    display: flex;
+    flex-direction: column;
+    padding: 40px 0 72px;
+  }
+
+  .fnx-order-confirmation-content.is-bank-transfer .fnx-order-confirmation-status,
+  .fnx-order-confirmation-content.is-bank-transfer .fnx-order-confirmation-intro,
+  .fnx-order-confirmation-content.is-bank-transfer .fnx-bank-transfer-panel,
+  .fnx-order-confirmation-content.is-bank-transfer .fnx-order-confirmation-summary,
+  .fnx-order-confirmation-content.is-bank-transfer .fnx-order-confirmation-contact,
+  .fnx-order-confirmation-content.is-bank-transfer .fnx-order-confirmation-actions {
+    width: 100%;
+  }
+
+  .fnx-order-confirmation-content.is-bank-transfer .fnx-order-confirmation-summary {
+    position: static;
+    order: 3;
+    margin-bottom: 24px;
+  }
+
+  .fnx-order-confirmation-content.is-bank-transfer .fnx-order-confirmation-status { order: 1; }
+  .fnx-order-confirmation-content.is-bank-transfer .fnx-order-confirmation-intro { order: 2; }
+  .fnx-order-confirmation-content.is-bank-transfer .fnx-bank-transfer-panel { order: 4; }
+  .fnx-order-confirmation-content.is-bank-transfer .fnx-order-confirmation-contact { order: 5; }
+  .fnx-order-confirmation-content.is-bank-transfer .fnx-order-confirmation-actions { order: 6; }
+}
+
+@media (max-width: 480px) {
+  .fnx-bank-transfer-file-picker {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .fnx-bank-transfer-file-button { width: 100%; }
+}
+
 @keyframes check-circle-anim {
   from { stroke-dashoffset: 166; }
   to   { stroke-dashoffset: 0; }

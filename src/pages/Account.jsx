@@ -6,7 +6,7 @@ import PageSEO from '../components/SEO'
 const API_BASE = import.meta.env.VITE_API_URL || ''
 
 const fmt = (value) => new Intl.NumberFormat('es-AR', {
-  style: 'currency', currency: 'ARS', maximumFractionDigits: 0,
+  style: 'currency', currency: 'ARS', minimumFractionDigits: 2, maximumFractionDigits: 2,
 }).format(Number(value || 0))
 
 const date = (value) => new Date(value).toLocaleDateString('es-AR', {

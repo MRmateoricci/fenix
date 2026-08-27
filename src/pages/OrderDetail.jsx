@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import PageSEO from '../components/SEO'
+import BankTransferPanel from '../components/BankTransferPanel'
+import { rangoEntregaTexto } from '../utils/plazoEntrega'
 
 const API_BASE = import.meta.env.VITE_API_URL || ''
 const PAID_STATUSES = ['paid', 'preparing', 'shipped', 'delivered']
-const fmt = (value) => new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(Number(value || 0))
+const fmt = (value) => new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(value || 0))
 const fmtDateTime = (value) => new Date(value).toLocaleString('es-AR', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })
 
 const statusLabel = (status) => ({
@@ -18,6 +20,9 @@ function Address({ order, billing = false }) {
   const city = billing ? order.billing_city : order.city
   const province = billing ? order.billing_province : order.province
   const postalCode = billing ? order.billing_postal_code : order.postal_code
+  const deliveryWindow = !billing && order.delivery_type === 'delivery'
+    ? rangoEntregaTexto(order.estimated_delivery_date, order.estimated_delivery_max_date)
+    : null
   return (
     <div className="fnx-order-address">
       <strong>{order.customer_name}</strong>
@@ -27,6 +32,7 @@ function Address({ order, billing = false }) {
       {postalCode && <span>{postalCode}</span>}
       <span>Argentina</span>
       {order.customer_phone && <span>{order.customer_phone}</span>}
+      {deliveryWindow && <strong>Tu pedido llega {deliveryWindow}.</strong>}
     </div>
   )
 }
@@ -274,10 +280,12 @@ export default function OrderDetail() {
             </div>
             <div className="fnx-order-totals">
               <div><span>Subtotal</span><strong>{fmt(productsSubtotal)}</strong></div>
+              {Number(order.transfer_discount_amount) > 0 && <div><span>Descuento por transferencia</span><strong>-{fmt(order.transfer_discount_amount)}</strong></div>}
               {Number(order.discount_amount) > 0 && <div><span>Descuento{order.coupon_code ? ` · ${order.coupon_code}` : ''}</span><strong>-{fmt(order.discount_amount)}</strong></div>}
               <div><span>{order.delivery_type === 'pickup' ? 'Retiro en el local' : `Envío${order.shipping_service ? ` · ${order.shipping_service}` : ''}`}</span><strong>{Number(order.shipping_cost) ? fmt(order.shipping_cost) : 'Gratis'}</strong></div>
               <div className="total"><span>Total</span><strong>{fmt(order.total_amount)}</strong></div>
             </div>
+            {order.payment_method === 'bank_transfer' && <BankTransferPanel orderId={order.id} />}
             <InvoicePanel order={order} invoiceData={invoiceData} setInvoiceData={setInvoiceData} />
             <Link className="fnx-order-back" to="/account">← Volver a detalles de la cuenta</Link>
           </section>
