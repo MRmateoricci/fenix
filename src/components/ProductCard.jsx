@@ -200,28 +200,6 @@ export default function ProductCard({ product }) {
               </svg>
             </button>
 
-            {/* Hover overlay */}
-            <div style={{
-              position: 'absolute', inset: 0, zIndex: 2,
-              background: 'rgba(22,17,11,0.36)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              opacity: cardHovered ? 1 : 0,
-              transition: 'opacity .3s ease',
-              pointerEvents: 'none',
-            }}>
-              <span style={{
-                background: T.cream,
-                color: T.ink,
-                fontSize: 12, fontWeight: 500,
-                letterSpacing: '.15em', textTransform: 'uppercase',
-                padding: '12px 24px', borderRadius: 2,
-                fontFamily: "var(--font-sans)",
-                transform: cardHovered ? 'translateY(0)' : 'translateY(10px)',
-                transition: 'transform .35s ease',
-              }}>
-                Ver producto
-              </span>
-            </div>
           </div>
         </Link>
 

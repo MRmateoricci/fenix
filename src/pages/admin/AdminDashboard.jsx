@@ -4,6 +4,7 @@ import { useAdmin } from '../../context/AdminContext'
 import { getCategoryValue, getSubcategoryOptions, getProductTypeOptions } from '../../data/categoryTree'
 import FenixLogo from '../../assets/FenixLogo'
 import OverviewDashboard from './OverviewDashboard'
+import { isPreparationOverdue, PREPARATION_ALERT_HOURS } from '../../utils/orderPreparation'
 
 // ── Paleta ────────────────────────────────────────────────────────────────────
 const C = {
@@ -3519,6 +3520,14 @@ function StoreProductPicker({ onSelect, onClose }) {
 }
 
 function OperationalOrdersSection({ title, subtitle, orders, emptyText, type, onSelect, onQuickStatus, updatingOrderIds }) {
+  const [nowMs, setNowMs] = useState(() => Date.now())
+  const overdueCount = orders.filter(order => isPreparationOverdue(order, nowMs)).length
+
+  useEffect(() => {
+    const timer = setInterval(() => setNowMs(Date.now()), 60_000)
+    return () => clearInterval(timer)
+  }, [])
+
   return (
     <section className={`adm-work-queue adm-work-queue--${type}`}>
       <div className="adm-work-queue__head">
@@ -3529,17 +3538,42 @@ function OperationalOrdersSection({ title, subtitle, orders, emptyText, type, on
         <span>{orders.length}</span>
       </div>
 
+      {overdueCount > 0 && (
+        <div className="adm-work-queue__preparation-alert" role="status">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="9" />
+            <path d="M12 7v5l3 2" />
+          </svg>
+          <span>
+            {overdueCount === 1
+              ? `1 pedido lleva más de ${PREPARATION_ALERT_HOURS} horas pagado. Hay que comenzar a prepararlo.`
+              : `${overdueCount} pedidos llevan más de ${PREPARATION_ALERT_HOURS} horas pagados. Hay que comenzar a prepararlos.`}
+          </span>
+        </div>
+      )}
+
       {orders.length === 0 ? (
         <div className="adm-work-queue__empty">{emptyText}</div>
       ) : (
         <div className="adm-work-queue__list">
-          {orders.map((order) => (
-            <article className="adm-work-order" key={order.id}>
+          {orders.map((order) => {
+            const preparationOverdue = isPreparationOverdue(order, nowMs)
+            return (
+            <article className={`adm-work-order${preparationOverdue ? ' is-preparation-overdue' : ''}`} key={order.id}>
               <div className="adm-work-order__top">
                 <strong>#{order.order_number}</strong>
                 <StatusBadge status={order.status} />
               </div>
               <div className="adm-work-order__customer">{order.customer_name}</div>
+              {order.created_at && (
+                <div className="adm-work-order__created-at">Pedido realizado: {fmtDate(order.created_at)}</div>
+              )}
+              {preparationOverdue && (
+                <div className="adm-work-order__preparation-alert">
+                  <span aria-hidden="true">!</span>
+                  <strong>Hace más de {PREPARATION_ALERT_HOURS} horas que está pagado. Pasalo a Preparando.</strong>
+                </div>
+              )}
               <div className="adm-work-order__destination">
                 {type === 'delivery' ? (
                   <>
@@ -3570,7 +3604,8 @@ function OperationalOrdersSection({ title, subtitle, orders, emptyText, type, on
                 </div>
               </div>
             </article>
-          ))}
+            )
+          })}
         </div>
       )}
     </section>
@@ -4013,22 +4048,32 @@ function OrdersTab() {
         </div>
       </div>
 
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>
-        <button type="button" onClick={() => setInvoiceFilter(invoiceFilter === 'attention' ? 'all' : 'attention')} style={{
-          ...outlineBtn,
-          borderColor: invoiceFilter === 'attention' ? C.red : C.border,
-          color: invoiceFilter === 'attention' ? C.red : C.ink,
-          background: invoiceFilter === 'attention' ? C.redLight : C.white,
-        }}>
-          Facturas pendientes: {Number(invoiceSummary?.pending || 0)}
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 14 }}>
+        <button
+          type="button"
+          aria-pressed={invoiceFilter === 'attention'}
+          onClick={() => setInvoiceFilter(invoiceFilter === 'attention' ? 'all' : 'attention')}
+          style={{
+            padding: '6px 14px', borderRadius: 20, border: 'none', cursor: 'pointer',
+            fontSize: 11, fontFamily: 'inherit', fontWeight: 600, letterSpacing: '0.02em',
+            color: invoiceFilter === 'attention' ? C.white : C.text2,
+            background: invoiceFilter === 'attention' ? C.dark : C.hairline,
+          }}
+        >
+          Facturas pendientes {Number(invoiceSummary?.pending || 0)}
         </button>
-        <button type="button" onClick={() => setInvoiceFilter(invoiceFilter === 'overdue' ? 'all' : 'overdue')} style={{
-          ...outlineBtn,
-          borderColor: invoiceFilter === 'overdue' ? '#C2410C' : '#FDBA74',
-          color: '#9A3412',
-          background: invoiceFilter === 'overdue' ? '#FFEDD5' : '#FFF7ED',
-        }}>
-          Más de 24 h: {Number(invoiceSummary?.overdue || 0)}
+        <button
+          type="button"
+          aria-pressed={invoiceFilter === 'overdue'}
+          onClick={() => setInvoiceFilter(invoiceFilter === 'overdue' ? 'all' : 'overdue')}
+          style={{
+            padding: '6px 14px', borderRadius: 20, border: 'none', cursor: 'pointer',
+            fontSize: 11, fontFamily: 'inherit', fontWeight: 600, letterSpacing: '0.02em',
+            color: invoiceFilter === 'overdue' ? C.white : C.text2,
+            background: invoiceFilter === 'overdue' ? C.dark : C.hairline,
+          }}
+        >
+          Más de 24 h {Number(invoiceSummary?.overdue || 0)}
         </button>
       </div>
 
@@ -4206,13 +4251,20 @@ function OrdersTab() {
         .adm-work-queue__head > span { display:grid; place-items:center; min-width:28px; height:28px; padding:0 8px; border-radius:20px; background:${C.hairline}; color:${C.ink}; font-size:12px; font-weight:700; }
         .adm-work-queue--delivery .adm-work-queue__head > span { background:${C.redLight}; color:${C.red}; }
         .adm-work-queue--pickup .adm-work-queue__head > span { background:${C.amberLight}; color:${C.amberDark}; }
+        .adm-work-queue__preparation-alert { display:flex; align-items:flex-start; gap:9px; padding:10px 18px; border-bottom:1px solid #F3D18C; background:${C.amberLight}; color:#805B12; font-size:11.5px; font-weight:650; line-height:1.45; }
+        .adm-work-queue__preparation-alert svg { flex:0 0 auto; margin-top:1px; }
         .adm-work-queue__list { max-height:440px; overflow-y:auto; }
         .adm-work-queue__empty { padding:30px 18px; text-align:center; color:${C.muted}; font-size:12px; }
         .adm-work-order { padding:14px 18px; border-bottom:1px solid ${C.hairline}; }
+        .adm-work-order.is-preparation-overdue { padding-left:14px; border-left:4px solid ${C.amber}; background:#FFFCF5; }
         .adm-work-order:last-child { border-bottom:0; }
         .adm-work-order__top,.adm-work-order__footer { display:flex; align-items:center; justify-content:space-between; gap:12px; }
         .adm-work-order__top > strong { color:${C.ink}; font:600 12px ${ADMIN_FONT}; }
         .adm-work-order__customer { margin-top:8px; color:${C.ink}; font-size:13px; font-weight:600; }
+        .adm-work-order__created-at { margin-top:3px; color:${C.muted}; font-size:10px; line-height:1.35; }
+        .adm-work-order__preparation-alert { display:flex; align-items:center; gap:7px; margin-top:8px; color:#805B12; font-size:10.5px; }
+        .adm-work-order__preparation-alert > span { width:17px; height:17px; display:grid; place-items:center; flex:0 0 auto; border-radius:50%; background:${C.amber}; color:#fff; font-size:11px; font-weight:900; }
+        .adm-work-order__preparation-alert strong { font-weight:700; }
         .adm-work-order__destination { display:flex; flex-direction:column; gap:2px; margin-top:7px; min-width:0; color:${C.text3}; font-size:11px; }
         .adm-work-order__destination b { color:${C.ink}; font-size:10px; text-transform:uppercase; letter-spacing:.06em; }
         .adm-work-order__destination span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }

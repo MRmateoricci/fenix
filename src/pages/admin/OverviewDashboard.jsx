@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useAdmin } from '../../context/AdminContext'
+import { isPreparationOverdue, PREPARATION_ALERT_HOURS } from '../../utils/orderPreparation'
 
 const C = {
   white: '#FFFFFF', paper: '#FFFFFF', ink: '#111827', text2: '#374151',
@@ -134,11 +135,17 @@ function StatusBadge({ status }) {
 export default function OverviewDashboard({ products, onNavigate }) {
   const { orders, fetchOrders } = useAdmin()
   const [currentDate] = useState(() => new Date())
+  const [preparationClock, setPreparationClock] = useState(() => Date.now())
   const [periodMode, setPeriodMode] = useState('month')
   const [selectedYear, setSelectedYear] = useState(currentDate.getFullYear())
   const [selectedMonth, setSelectedMonth] = useState(currentDate.getMonth())
 
   useEffect(() => { fetchOrders({ all: true }) }, [fetchOrders])
+
+  useEffect(() => {
+    const timer = setInterval(() => setPreparationClock(Date.now()), 60_000)
+    return () => clearInterval(timer)
+  }, [])
 
   const availableYears = useMemo(() => {
     const years = new Set([currentDate.getFullYear()])
@@ -170,6 +177,7 @@ export default function OverviewDashboard({ products, onNavigate }) {
       order.delivery_type === 'pickup'
       && ['reserved', ...ACTIVE_STATUSES].includes(order.status)
     )
+    const preparationOverdue = orders.filter((order) => isPreparationOverdue(order, preparationClock))
     // Ya no se cuentan unidades. Lo único accionable del catálogo es cuánto
     // está publicado sin poder despacharse enseguida: no es un error, pero le
     // dice al dueño cuánto de su vidriera depende del proveedor.
@@ -219,7 +227,7 @@ export default function OverviewDashboard({ products, onNavigate }) {
     ]
 
     return {
-      periodSales, periodOrders, revenue, averageTicket, ordersToShip, pickupsToManage,
+      periodSales, periodOrders, revenue, averageTicket, ordersToShip, pickupsToManage, preparationOverdue,
       aReposicion, chartValues, chartLabels, statusGroups,
       revenueTrend: percentageChange(revenue, previousRevenue),
       ordersTrend: percentageChange(periodSales.length, previousSales.length),
@@ -228,7 +236,7 @@ export default function OverviewDashboard({ products, onNavigate }) {
       categorySales: [...categoryMap.entries()].map(([category, amount]) => ({ category, amount })).sort((a, b) => b.amount - a.amount).slice(0, 5),
       recentOrders: [...periodOrders].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 6),
     }
-  }, [orders, products, periodMode, selectedYear, selectedMonth, availableYears])
+  }, [orders, products, periodMode, selectedYear, selectedMonth, availableYears, preparationClock])
 
   const chartWidth = 900
   const chartHeight = 230
@@ -372,6 +380,14 @@ export default function OverviewDashboard({ products, onNavigate }) {
 
         <Panel title="Atención requerida" subtitle="Pendientes operativos y disponibilidad">
           <div className="adm-attention-list">
+            {data.preparationOverdue.length > 0 && (
+              <AttentionItem
+                label={`Pagados hace más de ${PREPARATION_ALERT_HOURS} h`}
+                value={data.preparationOverdue.length}
+                tone={C.red}
+                onClick={() => onNavigate('orders')}
+              />
+            )}
             <AttentionItem label="Pedidos a enviar" value={data.ordersToShip.length} tone={C.blue} onClick={() => onNavigate('orders')} />
             <AttentionItem label="Retiros en el local" value={data.pickupsToManage.length} tone={C.amber} onClick={() => onNavigate('orders')} />
             <AttentionItem label="Productos a reposición" value={data.aReposicion.length} tone={C.amberDark} onClick={() => onNavigate('products')} />
