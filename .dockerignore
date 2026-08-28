@@ -1,0 +1,11 @@
+.git
+.gitignore
+.env
+**/.env
+node_modules
+backend/node_modules
+dist
+backend/private
+backend/public/uploads
+coverage
+*.log
