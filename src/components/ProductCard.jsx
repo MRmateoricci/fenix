@@ -30,6 +30,9 @@ const fmt = (n) =>
 
 const INSTALLMENTS = 3
 
+const sameColorName = (left, right) =>
+  String(left || '').localeCompare(String(right || ''), 'es-AR', { sensitivity: 'base' }) === 0
+
 // Rating/reseñas de ejemplo, estables por producto (no hay datos reales de
 // reseñas agregadas conectados a la tarjeta todavía — ver src/pages/ProductDetail.jsx
 // para el sistema de reseñas real, que vive en la ficha de producto).
@@ -70,7 +73,10 @@ export default function ProductCard({ product }) {
   const [selectedTone, setSelectedTone] = useState(product.tones?.[0] || null)
 
   const favorite = isFavorite(product.id)
-  const displayImage = selectedColor?.image || product.image
+  const selectedColorVariantImage = product.variantRules?.find((rule) =>
+    rule.image && sameColorName(rule.color, selectedColor?.name)
+  )?.image
+  const displayImage = selectedColor?.image || selectedColorVariantImage || product.image
   const displayPrice = product.variantRules?.length
     ? product.price
     : selectedTone?.price != null
@@ -253,44 +259,32 @@ export default function ProductCard({ product }) {
           </h3>
         </Link>
 
-        {/* Color thumbnails — tone is only shown on the product detail page.
-            Always reserves one row of height so the price line lands in the
-            same place whether or not a product has color variants. The
-            selected color shows as a larger bordered thumbnail, the rest as
-            small plain photos. Products with no color variants (or whose
-            colors have no photo assigned) still show a single bordered
-            thumbnail of the product itself, for the same look — a flat hex
-            swatch with no picture reads as a UI glitch, not a color option. */}
-        <div className="fnx-product-card__variants" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, minHeight: 32 }}>
-          {product.colors?.some((c) => c.image)
-            ? product.colors.filter((c) => c.image).map((c) => {
-                const isSelected = selectedColor?.name === c.name
-                const size = isSelected ? 44 : 32
-                return (
-                  <button
-                    key={`color-${c.name}`}
-                    type="button"
-                    onClick={(e) => handleSelectColor(e, c)}
-                    title={c.name}
-                    aria-label={c.name}
-                    aria-pressed={isSelected}
-                    style={{
-                      width: size, height: size, borderRadius: 4,
-                      padding: 0, cursor: 'pointer', overflow: 'hidden',
-                      background: c.image ? `${T.surface2} url(${c.image}) center/cover no-repeat` : (c.hex || T.surface2),
-                      border: isSelected ? `2px solid ${T.ink}` : 'none',
-                      transition: 'width .15s, height .15s, border-color .15s',
-                    }}
-                  />
-                )
-              })
-            : product.image && (
-                <div style={{
-                  width: 44, height: 44, borderRadius: 4, overflow: 'hidden',
-                  background: `${T.surface2} url(${product.image}) center/cover no-repeat`,
-                  border: `2px solid ${T.ink}`,
-                }} />
-              )}
+        {/* Muestras compactas de todos los colores. Al elegir una, la tarjeta
+            actualiza la foto y el precio cuando esa opción los tiene. */}
+        <div className="fnx-product-card__variants" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 5, minHeight: 20 }}>
+          {(product.colors || []).map((c) => {
+            const isSelected = selectedColor?.name === c.name
+            return (
+              <button
+                key={`color-${c.name}`}
+                type="button"
+                onClick={(e) => handleSelectColor(e, c)}
+                title={c.name}
+                aria-label={`Color ${c.name}`}
+                aria-pressed={isSelected}
+                style={{
+                  width: 18, height: 18, flex: '0 0 18px', borderRadius: '50%',
+                  padding: 0, cursor: 'pointer',
+                  backgroundColor: c.hex || '#CCCCCC',
+                  border: isSelected ? `2px solid ${T.ink}` : `1px solid ${T.hairlineStrong}`,
+                  outline: isSelected ? `2px solid ${T.paper}` : 'none',
+                  outlineOffset: isSelected ? '-4px' : 0,
+                  boxShadow: isSelected ? `0 0 0 1px ${T.ink}` : 'none',
+                  transition: 'box-shadow .15s, border-color .15s, transform .15s',
+                }}
+              />
+            )
+          })}
         </div>
 
         {/* Badges */}
@@ -334,20 +328,6 @@ export default function ProductCard({ product }) {
             Precio sin impuestos nacionales: {fmt(precioSinIva(displayPrice))}
           </span>
         </div>
-
-        {/* Recuento de colores en texto. Sólo se ve en mobile: ahí las
-            miniaturas de color no entran a dos columnas, pero perder el dato
-            de que el producto viene en varios colores sí se nota. En desktop
-            manda la fila de miniaturas, que además deja elegir. */}
-        {product.colors?.length > 1 && (
-          <span className="fnx-product-card__variant-count" style={{
-            fontFamily: "'Inter', system-ui, sans-serif",
-            fontSize: 10, fontWeight: 500, letterSpacing: '.06em',
-            textTransform: 'uppercase', color: T.text3,
-          }}>
-            {product.colors.length} colores disponibles
-          </span>
-        )}
 
         <div className="fnx-product-card__reviews" style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 'auto' }}>
           <StarRow value={rating} />

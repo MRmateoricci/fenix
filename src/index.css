@@ -1397,9 +1397,8 @@
 .fnx-promo-arrow--previous { left: 8px; }
 .fnx-promo-arrow--next { right: 8px; }
 
-/* Recuento de colores en texto: reemplaza a las miniaturas en mobile, donde
-   no entran a dos columnas. En desktop mandan las miniaturas, que además
-   dejan elegir el color desde la tarjeta. */
+/* Se conserva por compatibilidad con tarjetas cacheadas de versiones
+   anteriores. Las tarjetas actuales muestran muestras de color compactas. */
 .fnx-product-card__variant-count {
   display: none;
 }
@@ -1536,16 +1535,9 @@
     line-height: 1.35 !important;
   }
 
-  /* Las miniaturas de color no entran a dos columnas; en su lugar aparece el
-     recuento en texto, que en desktop está oculto. */
-  :where(.fnx-promo-slide, .fnx-products-grid) .fnx-product-card__variants,
   :where(.fnx-promo-slide, .fnx-products-grid) .fnx-product-card__badges,
   :where(.fnx-promo-slide, .fnx-products-grid) .fnx-product-card__reviews {
     display: none !important;
-  }
-
-  :where(.fnx-promo-slide, .fnx-products-grid) .fnx-product-card__variant-count {
-    display: block !important;
   }
 
   :where(.fnx-promo-slide, .fnx-products-grid) .fnx-product-card__tax {
