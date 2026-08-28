@@ -6,7 +6,7 @@ WORKDIR /app
 # cambien las dependencias. El postinstall raiz instala tambien las del backend.
 COPY package.json package-lock.json ./
 COPY backend/package.json backend/package-lock.json ./backend/
-RUN npm ci --no-audit --no-fund
+RUN npm install --no-audit --no-fund
 
 COPY . .
 RUN npm run build
