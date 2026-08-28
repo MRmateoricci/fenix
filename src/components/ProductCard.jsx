@@ -144,7 +144,9 @@ export default function ProductCard({ product }) {
           <div className="fnx-product-card__image" style={{
             position: 'relative',
             aspectRatio: '1 / 1',
-            background: T.surface2,
+            // El blanco funciona como base para PNG/WebP transparentes y no
+            // altera las fotos que ya traen su propio fondo opaco.
+            background: '#fff',
             border: `1px solid ${cardHovered ? T.hairlineStrong : T.hairline}`,
             borderRadius: 3,
             overflow: 'hidden',

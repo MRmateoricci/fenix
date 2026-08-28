@@ -351,7 +351,7 @@ export default function ProductDetail() {
               <div style={{
                 borderRadius: 12,
                 overflow: 'hidden',
-                backgroundColor: 'var(--color-surface-2)',
+                backgroundColor: '#fff',
               }}>
                 {(!activeImage || imgError) ? (
                   <div className="fnx-pd-image-fallback">
@@ -381,7 +381,7 @@ export default function ProductDetail() {
                         style={{
                           width: 64, height: 64, padding: 0, flexShrink: 0,
                           borderRadius: 8, overflow: 'hidden', cursor: 'pointer',
-                          backgroundColor: 'var(--color-surface-2)',
+                          backgroundColor: '#fff',
                           border: isActive ? '2px solid var(--color-text)' : '1.5px solid var(--color-border)',
                           opacity: isActive ? 1 : 0.7,
                           transition: 'opacity .15s, border-color .15s',
