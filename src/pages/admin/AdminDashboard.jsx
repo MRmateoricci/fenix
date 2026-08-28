@@ -2374,12 +2374,10 @@ function StoreTab({ products, onUpdate, onDelete }) {
 }
 
 // ── CategoriesTab ─────────────────────────────────────────────────────────────
-// Administra los dos niveles que cuelgan de cada categoría del header:
-// subcategoría (ej. "Cables Normalizados" dentro de Electricidad) y tipo/
-// clasificación (ej. "Unipolares" dentro de esa subcategoría). Lo que se crea
-// acá se guarda en las tablas `subcategories`/`product_types` y se refleja en
-// vivo en el mega-menú del header y en los filtros de /products (ver
-// `categoryTree` en AdminContext y `buildCategoryTree` en data/categoryTree.js).
+// Administra los tres niveles que forman la navegación del catálogo: categoría
+// principal, subcategoría y tipo. Lo que se crea acá se refleja en vivo en el
+// mega-menú del header y en los filtros de /products (ver `categoryTree` en
+// AdminContext y `buildCategoryTree` en data/categoryTree.js).
 function CategoriesTab() {
   const {
     categoryTree,
@@ -2389,6 +2387,8 @@ function CategoriesTab() {
   } = useAdmin()
 
   const categoryOptions = categoryTree.map(node => ({ value: getCategoryValue(node), label: node.label }))
+  const [categoryName, setCategoryName] = useState('')
+  const [savingCategory, setSavingCategory] = useState(false)
   const [subCategory, setSubCategory] = useState(categoryOptions[0]?.value || '')
   const [subName, setSubName]         = useState('')
   const [savingSub, setSavingSub]     = useState(false)
@@ -2421,6 +2421,30 @@ function CategoriesTab() {
     const identities = categoryTree.map(node => node._taxonomy?.category || getCategoryValue(node))
     if (openCategory && !identities.includes(openCategory)) setOpenCategory(identities[0] || '')
   }, [categoryTree, openCategory])
+
+  const handleAddCategory = async (event) => {
+    event.preventDefault()
+    const trimmed = categoryName.trim()
+    if (!trimmed) return
+    if (categoryTree.some(node => node.label.toLocaleLowerCase('es') === trimmed.toLocaleLowerCase('es'))) {
+      notify('Ya existe una categoría principal con ese nombre', 'error')
+      return
+    }
+    setSavingCategory(true)
+    try {
+      await saveCategoryCustomization({
+        level: 'category', category: trimmed,
+        subcategory: '', name: '', label: trimmed, hidden: false,
+      })
+      setCategoryName('')
+      setOpenCategory(trimmed)
+      notify(`Categoría principal “${trimmed}” creada`)
+    } catch (err) {
+      notify(err.message, 'error')
+    } finally {
+      setSavingCategory(false)
+    }
+  }
 
   const handleAddSub = async (e) => {
     e.preventDefault()
@@ -2544,9 +2568,10 @@ function CategoriesTab() {
     const changed = value.trim() !== node.label && Boolean(value.trim())
     return (
       <form
+        className={`fnx-category-name${compact ? ' fnx-category-name--compact' : ''}`}
         onSubmit={event => handleSaveEdit(event, node)}
         onClick={event => event.stopPropagation()}
-        style={{ display: 'inline-flex', alignItems: 'center', gap: 4, flex: compact ? '0 1 auto' : 1, minWidth: 0 }}
+        style={{ display: 'inline-flex', alignItems: 'center', gap: 5, flex: compact ? '0 1 auto' : 1, minWidth: 0 }}
       >
         <input
           aria-label={`Editar ${node.label}`}
@@ -2564,13 +2589,13 @@ function CategoriesTab() {
               event.currentTarget.blur()
             }
           }}
-          onFocus={event => { event.currentTarget.style.borderBottomColor = '#64748b' }}
-          onBlur={event => { event.currentTarget.style.borderBottomColor = 'transparent' }}
+          onFocus={event => { event.currentTarget.style.borderColor = '#94a3b8' }}
+          onBlur={event => { event.currentTarget.style.borderColor = compact ? 'transparent' : C.hairline }}
           style={{
             minWidth: compact ? 50 : 120, width: compact ? 'auto' : '100%', maxWidth: compact ? 280 : 520,
-            border: 'none', borderBottom: '1px solid transparent', borderRadius: 0,
-            outline: 'none', background: 'transparent', color: C.ink,
-            padding: compact ? '2px 1px' : '3px 2px', font: 'inherit',
+            border: `1px solid ${compact ? 'transparent' : C.hairline}`, borderRadius: 6,
+            outline: 'none', background: compact ? 'transparent' : '#fff', color: C.ink,
+            padding: compact ? '2px 1px' : '6px 8px', font: 'inherit',
             fontSize: compact ? 12 : 13, fontWeight: 700,
           }}
         />
@@ -2593,26 +2618,74 @@ function CategoriesTab() {
     )
   }
 
-  const renderActions = node => (
+  const renderActions = (node, compact = false) => (
     <button
+      className={`fnx-category-delete${compact ? ' fnx-category-delete--compact' : ''}`}
       type="button"
       onClick={event => handleDelete(event, node)}
       title={`Eliminar ${node.label}`}
       aria-label={`Eliminar ${node.label}`}
       style={{
-        border: 'none', background: 'transparent', color: '#dc2626', cursor: 'pointer',
-        width: 22, height: 22, padding: 0, fontSize: 17, fontWeight: 900,
+        border: 'none', borderRadius: 6, background: C.redLight, color: '#b91c1c', cursor: 'pointer',
+        width: compact ? 24 : 'auto', height: compact ? 24 : 'auto',
+        padding: compact ? 0 : '6px 9px', fontSize: compact ? 16 : 11.5, fontWeight: 700,
         lineHeight: 1, flexShrink: 0,
       }}
     >
-      ×
+      {compact ? '×' : 'Eliminar'}
     </button>
   )
 
   const hiddenItems = categoryCustomizations.filter(item => item.hidden)
 
   return (
-    <div style={{ maxWidth: 1320 }}>
+    <div className="fnx-categories-tab" style={{ maxWidth: 1320 }}>
+      <style>{`
+        .fnx-category-create-grid,
+        .fnx-subcategory-list { scrollbar-width: thin; scrollbar-color: #cbd5e1 transparent; }
+        .fnx-category-create-card input,
+        .fnx-category-create-card select { padding: 6px 8px !important; }
+        .fnx-mobile-swipe-hint { display: none; }
+        @media (max-width: 720px) {
+          .fnx-category-create { max-width: none !important; margin-bottom: 16px !important; }
+          .fnx-category-create-header { padding: 11px 12px !important; }
+          .fnx-category-create-header p { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+          .fnx-mobile-swipe-hint {
+            display: block; color: #475569; font-size: 11px; font-weight: 700; margin-top: 5px;
+          }
+          .fnx-category-create-grid {
+            display: flex !important; overflow-x: auto; overscroll-behavior-x: contain;
+            scroll-snap-type: x mandatory; padding: 10px !important; gap: 9px !important;
+          }
+          .fnx-category-create-card {
+            flex: 0 0 min(82vw, 300px); scroll-snap-align: start; padding: 10px !important;
+          }
+          .fnx-category-create-card__heading { margin-bottom: 8px !important; }
+          .fnx-category-tree-header { align-items: center !important; }
+          .fnx-category-tree-header p { display: none; }
+          .fnx-category-summary { padding: 9px 10px !important; }
+          .fnx-category-summary__content { width: calc(100% - 17px) !important; gap: 5px !important; }
+          .fnx-category-summary__main { gap: 5px !important; }
+          .fnx-category-summary__folder { display: none !important; }
+          .fnx-category-name:not(.fnx-category-name--compact) input {
+            min-width: 0 !important; padding: 5px 6px !important;
+          }
+          .fnx-category-count { padding: 3px 6px !important; font-size: 10px !important; white-space: nowrap; }
+          .fnx-category-delete:not(.fnx-category-delete--compact) {
+            width: 26px !important; height: 26px !important; padding: 0 !important;
+            overflow: hidden; font-size: 0 !important;
+          }
+          .fnx-category-delete:not(.fnx-category-delete--compact)::after { content: '×'; font-size: 17px; }
+          .fnx-category-children { padding: 8px !important; }
+          .fnx-subcategory-list {
+            display: grid !important; grid-auto-flow: column; grid-auto-columns: min(82vw, 310px);
+            overflow-x: auto; overscroll-behavior-x: contain; scroll-snap-type: x mandatory;
+            gap: 8px !important; padding-bottom: 4px;
+          }
+          .fnx-subcategory-card { scroll-snap-align: start; align-self: start; }
+          .fnx-subcategory-label { display: none !important; }
+        }
+      `}</style>
       {toast && (
         <div role="status" aria-live="polite" style={{
           position: 'fixed', top: 18, right: 20, zIndex: 2500, maxWidth: 'min(390px, calc(100vw - 40px))',
@@ -2626,72 +2699,124 @@ function CategoriesTab() {
         </div>
       )}
 
-      <details style={{ background: C.white, border: `1px solid ${C.border}`, borderRadius: 10, marginBottom: 16 }}>
-        <summary style={{ padding: '13px 16px', cursor: 'pointer', fontWeight: 700, fontSize: 13.5 }}>Agregar subcategoría o tipo</summary>
-        <div style={{ borderTop: `1px solid ${C.hairline}`, padding: 14, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(390px, 1fr))', gap: 14 }}>
-          <form onSubmit={handleAddSub} style={{ border: `1px solid ${C.hairline}`, borderRadius: 8, padding: 12 }}>
-            <strong style={{ display: 'block', fontSize: 13, marginBottom: 10 }}>Nueva subcategoría</strong>
-            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(140px, .65fr) minmax(180px, 1fr) auto', gap: 8 }}>
-              <select value={subCategory} onChange={e => setSubCategory(e.target.value)} style={inp}>{categoryOptions.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}</select>
-              <input value={subName} onChange={e => setSubName(e.target.value)} placeholder="Nombre" style={inp} />
-              <button type="submit" disabled={savingSub || !subName.trim()} style={{ ...solidBtn, background: subName.trim() ? C.red : '#9ca3af' }}>{savingSub ? '...' : 'Agregar'}</button>
+      <section className="fnx-category-create" style={{ width: '100%', maxWidth: 1040, background: C.white, border: `1px solid ${C.border}`, borderRadius: 11, marginBottom: 18, overflow: 'hidden', boxShadow: '0 1px 2px rgba(15,23,42,.04)' }}>
+        <div className="fnx-category-create-header" style={{ padding: '12px 14px', borderBottom: `1px solid ${C.hairline}` }}>
+          <h3 style={{ ...sectionTitle, margin: 0 }}>Agregar al catálogo</h3>
+          <p style={{ fontSize: 12.5, color: C.muted, margin: '4px 0 0', lineHeight: 1.45 }}>
+            Elegí el nivel que necesitás. Para crear una subcategoría o un tipo, primero seleccioná dónde debe aparecer.
+          </p>
+          <span className="fnx-mobile-swipe-hint">Deslizá para ver los 3 niveles →</span>
+        </div>
+        <div className="fnx-category-create-grid" style={{ padding: 10, display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', alignItems: 'start', gap: 10, background: '#f8fafc' }}>
+          <form className="fnx-category-create-card" onSubmit={handleAddCategory} style={{ background: '#fff', border: `1px solid ${C.border}`, borderTop: `3px solid ${C.red}`, borderRadius: 8, padding: 11 }}>
+            <div className="fnx-category-create-card__heading" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 9 }}>
+              <span style={{ display: 'grid', placeItems: 'center', width: 24, height: 24, borderRadius: '50%', background: C.red, color: '#fff', fontSize: 12, fontWeight: 800 }}>1</span>
+              <div><strong style={{ display: 'block', fontSize: 13.5 }}>Categoría principal</strong><span style={{ color: C.muted, fontSize: 11.5 }}>Primer nivel del menú</span></div>
             </div>
+            <label style={{ display: 'block', fontSize: 11.5, color: C.text3, fontWeight: 700, marginBottom: 5 }}>Nombre de la categoría</label>
+            <input value={categoryName} onChange={event => setCategoryName(event.target.value)} placeholder="Ej. Domótica" maxLength={100} style={{ ...inp, width: '100%', boxSizing: 'border-box', marginBottom: 10 }} />
+            <button type="submit" disabled={savingCategory || !categoryName.trim()} style={{ ...solidBtn, width: '100%', justifyContent: 'center', background: categoryName.trim() ? C.red : '#9ca3af' }}>{savingCategory ? 'Guardando...' : 'Agregar categoría'}</button>
           </form>
-          <form onSubmit={handleAddType} style={{ border: `1px solid ${C.hairline}`, borderRadius: 8, padding: 12 }}>
-            <strong style={{ display: 'block', fontSize: 13, marginBottom: 10 }}>Nuevo tipo / clasificación</strong>
-            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(120px, .55fr) minmax(140px, .7fr) minmax(150px, 1fr) auto', gap: 8 }}>
-              <select value={typeCategory} onChange={e => setTypeCategory(e.target.value)} style={inp}>{categoryOptions.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}</select>
-              <select value={typeSubcategory} onChange={e => setTypeSubcategory(e.target.value)} style={inp}>{typeSubcategoryOptions.map(s => <option key={s} value={s}>{s}</option>)}</select>
-              <input value={typeName} onChange={e => setTypeName(e.target.value)} placeholder="Nombre" style={inp} />
-              <button type="submit" disabled={savingType || !typeName.trim() || !typeSubcategory} style={{ ...solidBtn, background: typeName.trim() && typeSubcategory ? C.red : '#9ca3af' }}>{savingType ? '...' : 'Agregar'}</button>
+
+          <form className="fnx-category-create-card" onSubmit={handleAddSub} style={{ background: '#fff', border: `1px solid ${C.border}`, borderTop: '3px solid #475569', borderRadius: 8, padding: 11 }}>
+            <div className="fnx-category-create-card__heading" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 9 }}>
+              <span style={{ display: 'grid', placeItems: 'center', width: 24, height: 24, borderRadius: '50%', background: '#475569', color: '#fff', fontSize: 12, fontWeight: 800 }}>2</span>
+              <div><strong style={{ display: 'block', fontSize: 13.5 }}>Subcategoría</strong><span style={{ color: C.muted, fontSize: 11.5 }}>Segundo nivel del menú</span></div>
             </div>
+            <label style={{ display: 'block', fontSize: 11.5, color: C.text3, fontWeight: 700, marginBottom: 5 }}>Dentro de</label>
+            <select value={subCategory} onChange={event => setSubCategory(event.target.value)} style={{ ...inp, width: '100%', marginBottom: 9 }}>{categoryOptions.map(category => <option key={category.value} value={category.value}>{category.label}</option>)}</select>
+            <label style={{ display: 'block', fontSize: 11.5, color: C.text3, fontWeight: 700, marginBottom: 5 }}>Nombre de la subcategoría</label>
+            <input value={subName} onChange={event => setSubName(event.target.value)} placeholder="Ej. Sensores" maxLength={150} style={{ ...inp, width: '100%', boxSizing: 'border-box', marginBottom: 10 }} />
+            <button type="submit" disabled={savingSub || !subName.trim() || !subCategory} style={{ ...solidBtn, width: '100%', justifyContent: 'center', background: subName.trim() && subCategory ? C.red : '#9ca3af' }}>{savingSub ? 'Guardando...' : 'Agregar subcategoría'}</button>
+          </form>
+
+          <form className="fnx-category-create-card" onSubmit={handleAddType} style={{ background: '#fff', border: `1px solid ${C.border}`, borderTop: '3px solid #94a3b8', borderRadius: 8, padding: 11 }}>
+            <div className="fnx-category-create-card__heading" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 9 }}>
+              <span style={{ display: 'grid', placeItems: 'center', width: 24, height: 24, borderRadius: '50%', background: '#64748b', color: '#fff', fontSize: 12, fontWeight: 800 }}>3</span>
+              <div><strong style={{ display: 'block', fontSize: 13.5 }}>Tipo o clasificación</strong><span style={{ color: C.muted, fontSize: 11.5 }}>Tercer nivel del menú</span></div>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 8 }}>
+              <label style={{ display: 'block', fontSize: 11.5, color: C.text3, fontWeight: 700 }}>Categoría<select value={typeCategory} onChange={event => setTypeCategory(event.target.value)} style={{ ...inp, width: '100%', marginTop: 5 }}>{categoryOptions.map(category => <option key={category.value} value={category.value}>{category.label}</option>)}</select></label>
+              <label style={{ display: 'block', fontSize: 11.5, color: C.text3, fontWeight: 700 }}>Subcategoría<select value={typeSubcategory} onChange={event => setTypeSubcategory(event.target.value)} style={{ ...inp, width: '100%', marginTop: 5 }}><option value="" disabled>{typeSubcategoryOptions.length ? 'Elegí una' : 'Sin opciones'}</option>{typeSubcategoryOptions.map(subcategory => <option key={subcategory} value={subcategory}>{subcategory}</option>)}</select></label>
+            </div>
+            <label style={{ display: 'block', fontSize: 11.5, color: C.text3, fontWeight: 700, margin: '9px 0 5px' }}>Nombre del tipo</label>
+            <input value={typeName} onChange={event => setTypeName(event.target.value)} placeholder="Ej. Movimiento" maxLength={150} style={{ ...inp, width: '100%', boxSizing: 'border-box', marginBottom: 10 }} />
+            <button type="submit" disabled={savingType || !typeName.trim() || !typeSubcategory} style={{ ...solidBtn, width: '100%', justifyContent: 'center', background: typeName.trim() && typeSubcategory ? C.red : '#9ca3af' }}>{savingType ? 'Guardando...' : 'Agregar tipo'}</button>
           </form>
         </div>
-      </details>
+      </section>
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', marginBottom: 10 }}>
-        <div><h3 style={{ ...sectionTitle, margin: 0 }}>Árbol de categorías</h3><p style={{ fontSize: 12, color: C.muted, margin: '3px 0 0' }}>Escribí directamente sobre un nombre; guardalo con Enter o con el tilde que aparecerá.</p></div>
-        {hiddenItems.length > 0 && <details style={{ position: 'relative' }}><summary style={{ cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>Eliminados ({hiddenItems.length})</summary><div style={{ position: 'absolute', right: 0, top: 28, zIndex: 20, width: 320, background: '#fff', border: `1px solid ${C.border}`, borderRadius: 8, boxShadow: '0 12px 28px rgba(15,23,42,.18)', padding: 8 }}>{hiddenItems.map(item => <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 7, borderBottom: `1px solid ${C.hairline}` }}><span style={{ flex: 1, fontSize: 12 }}>{item.label || item.name || item.category}</span><button type="button" onClick={() => restoreCustomization(item)} style={actionButton('#1f2937', '#fff')}>Restaurar</button></div>)}</div></details>}
+      <div className="fnx-category-tree-header" style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, alignItems: 'flex-end', marginBottom: 12 }}>
+        <div>
+          <h3 style={{ ...sectionTitle, margin: 0 }}>Organización del catálogo</h3>
+          <p style={{ fontSize: 12.5, color: C.muted, margin: '4px 0 0', lineHeight: 1.45 }}>Abrí una categoría para ver su contenido. Podés cambiar cualquier nombre y guardar con Enter o con ✓.</p>
+        </div>
+        {hiddenItems.length > 0 && (
+          <details style={{ position: 'relative' }}>
+            <summary style={{ cursor: 'pointer', fontSize: 12, fontWeight: 700, color: C.text2, padding: '7px 10px', border: `1px solid ${C.border}`, borderRadius: 7, background: '#fff' }}>Ver eliminados ({hiddenItems.length})</summary>
+            <div style={{ position: 'absolute', right: 0, top: 38, zIndex: 20, width: 'min(360px, calc(100vw - 48px))', background: '#fff', border: `1px solid ${C.border}`, borderRadius: 9, boxShadow: '0 12px 28px rgba(15,23,42,.18)', padding: 8 }}>
+              {hiddenItems.map(item => (
+                <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 8, borderBottom: `1px solid ${C.hairline}` }}>
+                  <span style={{ flex: 1, minWidth: 0 }}><strong style={{ display: 'block', fontSize: 12 }}>{item.label || item.name || item.category}</strong><small style={{ color: C.muted, textTransform: 'capitalize' }}>{item.level === 'type' ? 'Tipo' : item.level === 'subcategory' ? 'Subcategoría' : 'Categoría principal'}</small></span>
+                  <button type="button" onClick={() => restoreCustomization(item)} style={actionButton('#1f2937', '#fff')}>Restaurar</button>
+                </div>
+              ))}
+            </div>
+          </details>
+        )}
       </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         {categoryTree.map(catNode => {
           const cat = getCategoryValue(catNode)
           const categoryIdentity = catNode._taxonomy?.category || cat
           const subNodes = catNode.children || []
+          const typeCount = subNodes.reduce((total, subNode) => total + (subNode.children?.length || 0), 0)
+          const isOpen = openCategory === categoryIdentity
           return (
-            <details key={categoryIdentity} open={openCategory === categoryIdentity} style={{ background: C.white, borderRadius: 9, border: `1px solid ${C.border}` }}>
+            <details key={categoryIdentity} open={isOpen} style={{ background: C.white, borderRadius: 10, border: `1px solid ${isOpen ? '#cbd5e1' : C.border}`, boxShadow: isOpen ? '0 3px 12px rgba(15,23,42,.06)' : 'none', overflow: 'hidden' }}>
               <summary
                 onClick={event => {
                   if (event.target.closest('input, button, form')) return
                   event.preventDefault()
                   setOpenCategory(current => current === categoryIdentity ? '' : categoryIdentity)
                 }}
-                style={{ padding: '11px 13px', cursor: 'pointer' }}
+                className="fnx-category-summary"
+                style={{ padding: '10px 12px', cursor: 'pointer', background: isOpen ? '#f8fafc' : '#fff' }}
               >
-                <span style={{ display: 'inline-flex', width: 'calc(100% - 18px)', alignItems: 'center', justifyContent: 'space-between', gap: 10, verticalAlign: 'middle' }}>
-                  {renderName(catNode)}{renderActions(catNode)}
+                <span className="fnx-category-summary__content" style={{ display: 'inline-flex', width: 'calc(100% - 20px)', alignItems: 'center', justifyContent: 'space-between', gap: 10, verticalAlign: 'middle' }}>
+                  <span className="fnx-category-summary__main" style={{ display: 'flex', flex: 1, minWidth: 0, alignItems: 'center', gap: 9 }}>
+                    <span className="fnx-category-summary__folder" style={{ color: C.red, display: 'grid', placeItems: 'center' }}><FolderIcon /></span>
+                    {renderName(catNode)}
+                    <span className="fnx-category-count" style={{ flexShrink: 0, color: C.muted, background: '#e2e8f0', borderRadius: 20, padding: '3px 8px', fontSize: 11, fontWeight: 700 }}>{subNodes.length} subcat. · {typeCount} tipos</span>
+                  </span>
+                  {renderActions(catNode)}
                 </span>
               </summary>
-              <div style={{ borderTop: `1px solid ${C.hairline}`, padding: '8px 10px 10px' }}>
-                {subNodes.length === 0 ? <span style={{ fontSize: 12, color: C.muted }}>Sin subcategorías.</span> : <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <div className="fnx-category-children" style={{ borderTop: `1px solid ${C.hairline}`, padding: '10px 12px 12px', background: '#fbfcfd' }}>
+                {subNodes.length === 0 ? <div style={{ fontSize: 12.5, color: C.muted, border: `1px dashed ${C.border}`, borderRadius: 8, padding: 14, textAlign: 'center', background: '#fff' }}>Esta categoría todavía no tiene subcategorías. Podés agregar la primera desde el bloque superior.</div> : <div className="fnx-subcategory-list" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   {subNodes.map(subNode => {
                     const typeNodes = subNode.children || []
                     return (
-                      <div key={`${subNode._taxonomy?.source}-${subNode._taxonomy?.id || subNode._taxonomy?.name}`} style={{ border: `1px solid ${C.hairline}`, borderRadius: 7, padding: '7px 9px' }}>
+                      <div className="fnx-subcategory-card" key={`${subNode._taxonomy?.source}-${subNode._taxonomy?.id || subNode._taxonomy?.name}`} style={{ border: `1px solid ${C.hairline}`, borderLeft: '3px solid #94a3b8', borderRadius: 8, padding: '9px 10px', background: '#fff' }}>
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                          {renderName(subNode)}{renderActions(subNode)}
+                          <span style={{ display: 'flex', flex: 1, minWidth: 0, alignItems: 'center', gap: 8 }}>
+                            <span className="fnx-subcategory-label" style={{ color: C.muted, fontSize: 10.5, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '.04em' }}>Subcategoría</span>
+                            {renderName(subNode)}
+                            <span style={{ flexShrink: 0, color: C.muted, fontSize: 11 }}>{typeNodes.length} {typeNodes.length === 1 ? 'tipo' : 'tipos'}</span>
+                          </span>
+                          {renderActions(subNode)}
                         </div>
-                        {typeNodes.length > 0 && (
-                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 7 }}>
+                        {typeNodes.length > 0 ? (
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7, marginTop: 9, paddingTop: 9, borderTop: `1px solid ${C.hairline}` }}>
                             {typeNodes.map(typeNode => {
                               return (
-                                <span key={`${typeNode._taxonomy?.source}-${typeNode._taxonomy?.id || `${typeNode._taxonomy?.subcategory}-${typeNode._taxonomy?.name}`}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: '#e5e7eb', color: '#111827', borderRadius: 7, padding: '4px 5px 4px 9px' }}>
-                                  {renderName(typeNode, true)}{renderActions(typeNode)}
+                                <span key={`${typeNode._taxonomy?.source}-${typeNode._taxonomy?.id || `${typeNode._taxonomy?.subcategory}-${typeNode._taxonomy?.name}`}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: '#f1f5f9', color: '#111827', border: '1px solid #e2e8f0', borderRadius: 7, padding: '4px 5px 4px 9px' }}>
+                                  {renderName(typeNode, true)}{renderActions(typeNode, true)}
                                 </span>
                               )
                             })}
                           </div>
-                        )}
+                        ) : <div style={{ color: C.muted, fontSize: 11.5, marginTop: 7 }}>Sin tipos cargados.</div>}
                       </div>
                     )
                   })}
@@ -9351,13 +9476,39 @@ export default function AdminDashboard() {
   }
 
   return (
-    <div style={{
+    <div className="fnx-admin-shell" style={{
       display: 'flex', minHeight: '100vh',
       fontFamily: ADMIN_FONT,
       fontWeight: 400,
     }}>
+      <style>{`
+        .fnx-admin-nav { scrollbar-width: none; }
+        .fnx-admin-nav::-webkit-scrollbar { display: none; }
+        @media (max-width: 720px) {
+          .fnx-admin-shell { display: block !important; }
+          .fnx-admin-sidebar {
+            width: 100% !important; height: auto !important; position: sticky !important;
+            top: 0; z-index: 100; border-right: 0 !important; border-bottom: 1px solid #DDE3EA;
+          }
+          .fnx-admin-brand, .fnx-admin-bottom-actions { display: none !important; }
+          .fnx-admin-nav {
+            display: flex; overflow-x: auto; overscroll-behavior-x: contain;
+            gap: 4px; padding: 7px 8px !important; background: #fff;
+          }
+          .fnx-admin-nav button {
+            width: auto !important; flex: 0 0 auto; margin: 0 !important;
+            padding: 8px 12px !important; white-space: nowrap;
+          }
+          .fnx-admin-main {
+            width: 100%; min-width: 0; box-sizing: border-box;
+            padding: 16px 12px 24px !important; overflow: visible !important;
+          }
+          .fnx-admin-page-header { margin-bottom: 16px !important; }
+          .fnx-admin-page-header h1 { font-size: 23px !important; }
+        }
+      `}</style>
       {/* ── Sidebar ───────────────────────────────────────── */}
-      <aside style={{
+      <aside className="fnx-admin-sidebar" style={{
         width: C.sidebar,
         background: C.white,
         borderRight: `1px solid ${C.border}`,
@@ -9369,7 +9520,7 @@ export default function AdminDashboard() {
         flexShrink: 0,
       }}>
         {/* Brand */}
-        <div style={{ padding: '18px 16px 16px', borderBottom: `1px solid ${C.hairline}` }}>
+        <div className="fnx-admin-brand" style={{ padding: '18px 16px 16px', borderBottom: `1px solid ${C.hairline}` }}>
           <FenixLogo height={76} />
           <div style={{
             fontSize: 9,
@@ -9384,7 +9535,7 @@ export default function AdminDashboard() {
         </div>
 
         {/* Nav */}
-        <nav style={{ flex: 1, padding: '9px 7px' }}>
+        <nav className="fnx-admin-nav" style={{ flex: 1, padding: '9px 7px' }}>
           {NAV_ITEMS.map(item => (
             <button
               key={item.id}
@@ -9414,7 +9565,7 @@ export default function AdminDashboard() {
         </nav>
 
         {/* Bottom actions */}
-        <div style={{ padding: '9px 7px 18px', borderTop: `1px solid ${C.hairline}`, display: 'flex', flexDirection: 'column', gap: 2 }}>
+        <div className="fnx-admin-bottom-actions" style={{ padding: '9px 7px 18px', borderTop: `1px solid ${C.hairline}`, display: 'flex', flexDirection: 'column', gap: 2 }}>
           <button
             onClick={() => navigate('/')}
             style={{ ...sidebarAction, color: C.text3 }}
@@ -9431,7 +9582,7 @@ export default function AdminDashboard() {
       </aside>
 
       {/* ── Main content ─────────────────────────────────── */}
-      <main ref={mainRef} style={{
+      <main className="fnx-admin-main" ref={mainRef} style={{
         flex: 1,
         background: C.paper,
         minHeight: '100vh',
@@ -9439,7 +9590,7 @@ export default function AdminDashboard() {
         overflow: 'auto',
       }}>
         {/* Page header */}
-        <div style={{ marginBottom: 24 }}>
+        <div className="fnx-admin-page-header" style={{ marginBottom: 24 }}>
           <h1 style={{
             fontFamily: ADMIN_FONT,
             fontSize: 27,

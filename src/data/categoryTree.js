@@ -257,7 +257,8 @@ function taxonomyLink(category, subcategory = '', type = '', originalTo = '') {
 // tanto en el mega-menú del header como en los filtros de /products y el
 // panel de admin, para que lo agregado se vea reflejado en todos lados.
 export function buildCategoryTree(customSubcategories = [], customProductTypes = [], customizations = []) {
-  return CATEGORY_TREE.flatMap((sourceCatNode) => {
+  const factoryCategories = new Set(CATEGORY_TREE.map(getCategoryValue))
+  const factoryNodes = CATEGORY_TREE.flatMap((sourceCatNode) => {
     const sourceCategory = getCategoryValue(sourceCatNode)
     const categoryChange = customization(customizations, 'category', sourceCategory)
     if (categoryChange?.hidden) return []
@@ -339,6 +340,49 @@ export function buildCategoryTree(customSubcategories = [], customProductTypes =
 
     return [{ ...catNode, children: [...childrenWithExtraTypes, ...newSubcategories] }]
   })
+
+  // Una personalización de categoría cuya clave no existe en el árbol de
+  // fábrica representa una categoría principal creada desde el administrador.
+  // Usa la misma tabla que los renombres para no sumar otra fuente de verdad.
+  const customNodes = customizations
+    .filter(item => (
+      item.level === 'category' && !factoryCategories.has(item.category) && !item.hidden
+    ))
+    .map(item => {
+      const category = item.label || item.category
+      const categoryTo = taxonomyLink(category)
+      const children = customSubcategories
+        .filter(subcategory => subcategory.category === category)
+        .map(subcategory => {
+          const subcategoryTo = addParam(categoryTo, 'sub', subcategory.name)
+          const types = customProductTypes
+            .filter(type => type.category === category && type.subcategory === subcategory.name)
+            .map(type => ({
+              label: type.name,
+              to: addParam(subcategoryTo, 'type', type.name),
+              _taxonomy: { source: 'custom', level: 'type', id: type.id },
+            }))
+
+          return {
+            label: subcategory.name,
+            to: subcategoryTo,
+            children: types.length ? types : undefined,
+            _taxonomy: { source: 'custom', level: 'subcategory', id: subcategory.id },
+          }
+        })
+
+      return {
+        label: category,
+        to: categoryTo,
+        children,
+        _taxonomy: {
+          source: 'custom', level: 'category', category: item.category,
+          subcategory: '', name: '',
+        },
+      }
+    })
+
+  return [...factoryNodes, ...customNodes]
 }
 
 export function getCategoryNode(category, tree = CATEGORY_TREE) {

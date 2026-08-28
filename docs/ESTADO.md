@@ -7,7 +7,7 @@
 > Si el cambio merece un commit con mensaje propio, merece una entrada acá.
 > Un ajuste de padding, no.
 
-**Última actualización:** 26 de agosto de 2026
+**Última actualización:** 28 de agosto de 2026
 **Commit de referencia:** `f9b29fc` + cambios locales de esta tanda
 
 ---
@@ -36,6 +36,14 @@
 | Facturación electrónica ARCA | 🟡 Implementada, producción bloqueada | A/B para RI y C para Monotributo; falta confirmar habilitación A real de Fenix |
 
 ---
+
+## Categorías principales y administración más clara (2026-08-28)
+
+- El panel permite crear categorías principales además de subcategorías y tipos, reutilizando las personalizaciones persistidas del árbol.
+- Las categorías nuevas quedan disponibles de inmediato en el menú público, los filtros y los selectores del administrador.
+- La carga se presenta como un flujo explícito de tres niveles y el árbol muestra jerarquía, cantidades, campos editables y acciones con nombre.
+- En pantallas chicas, la navegación del administrador pasa a una barra superior y tanto las altas como las subcategorías abiertas usan carruseles horizontales con encastre, evitando columnas excesivamente largas.
+- Se agregaron pruebas del armado, renombre y ocultamiento de categorías principales personalizadas. Frontend compilado correctamente.
 
 ## Transferencia bancaria con validación manual (2026-08-26)
 
