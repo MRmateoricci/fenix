@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@napi-rs/canvas": "^1.0.2",
+    "archiver": "^8.0.0",
     "axios": "^1.19.0",
     "bcryptjs": "^3.0.3",
     "cookie-parser": "^1.4.7",
@@ -35,6 +36,7 @@
     "pg": "^8.12.0",
     "qrcode": "^1.5.4",
     "soap": "^1.10.0",
+    "unzipper": "^0.12.5",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
     "xml2js": "^0.6.2"
   }

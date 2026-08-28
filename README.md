@@ -292,6 +292,11 @@ Abrir:
 | `FRONTEND_BASE_URL` | Sí | Origen CORS permitido y base de las URLs de retorno de Mercado Pago. |
 | `UPLOADS_DIR` | No | Carpeta de imágenes. Predeterminado: `backend/public/uploads`. |
 | `TRANSFER_PROOFS_DIR` | En producción | Volumen privado para comprobantes; nunca debe estar bajo `/uploads`. |
+| `BACKUPS_DIR` | Para backups | Carpeta temporal/persistente de archivos `.fenix`; debe estar fuera de uploads y comprobantes. |
+| `BACKUP_ENCRYPTION_KEY` | Para backups | Clave de al menos 32 caracteres que cifra y autentica cada backup. Sin ella no se puede restaurar. |
+| `PG_DUMP_PATH` | No | Ejecutable `pg_dump`; predeterminado: `pg_dump`. |
+| `PSQL_PATH` | No | Ejecutable `psql`; predeterminado: `psql`. |
+| `BACKUP_MAX_UPLOAD_BYTES` | No | Tamaño máximo de un backup subido para restaurar; predeterminado: 10 GiB. |
 | `GMAIL_USER` | No | Cuenta emisora de Gmail/Workspace. |
 | `GMAIL_APP_PASSWORD` | No | Contraseña de aplicación de Google. |
 | `ADMIN_NOTIFICATION_EMAIL` | No | Destinatario interno de nuevas compras/reservas. |
@@ -625,6 +630,25 @@ Por defecto se guardan en `backend/public/uploads` y Express las publica bajo `/
 En un hosting con filesystem efímero, como varias configuraciones de Railway o Render, hay que montar un volumen persistente y apuntar `UPLOADS_DIR` a ese volumen. Sin persistencia, las imágenes subidas se pierden al redesplegar o reiniciar la instancia.
 
 Para una arquitectura escalable conviene reemplazar el disco local por almacenamiento de objetos como S3, Cloudinary o equivalente.
+
+## Backups administrativos
+
+El panel **Administración → Backups** genera archivos `.fenix` cifrados que incluyen:
+
+- Un dump SQL completo de PostgreSQL.
+- Las imágenes configuradas en `UPLOADS_DIR`.
+- Los comprobantes privados de `TRANSFER_PROOFS_DIR`.
+- Un manifiesto con tamaño y SHA-256 de cada archivo.
+
+La restauración se sube en partes de 8 MiB, valida el cifrado y todos los hashes, crea un backup preventivo del estado actual y recién entonces reemplaza archivos y base de datos. El SQL se aplica con `psql --single-transaction` y `ON_ERROR_STOP`, por lo que un error revierte la transacción. Durante el intercambio final la API entra temporalmente en mantenimiento.
+
+Para desarrollo se necesitan `pg_dump` y `psql` compatibles con el servidor PostgreSQL. Se puede generar una clave local con:
+
+```powershell
+node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"
+```
+
+La clave debe guardarse también fuera del servidor. Los backups almacenados en el mismo volumen son copias operativas, no copias externas: hay que descargarlos a otra computadora o almacenamiento independiente.
 
 ## Build y despliegue
 

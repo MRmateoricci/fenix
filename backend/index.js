@@ -20,6 +20,7 @@ import shippingRouter from './routes/shipping.js'
 import paymentsRouter from './routes/payments.js'
 import bankTransfersRouter from './routes/bankTransfers.js'
 import adminRouter from './routes/admin.js'
+import backupsRouter from './routes/backups.js'
 import newsletterRouter from './routes/newsletter.js'
 import couponsRouter from './routes/coupons.js'
 import arcaRouter from './routes/arca.js'
@@ -28,6 +29,7 @@ import { initializeArcaCredentials } from './config/arca.js'
 import { uploadsDir } from './config/uploads.js'
 import { createCorsOptionsDelegate } from './config/cors.js'
 import { startExpireReservationsJob } from './jobs/expireReservations.js'
+import { backupManager } from './services/backupManager.js'
 
 const app  = express()
 const PORT = process.env.PORT || 3001
@@ -66,10 +68,24 @@ app.use(express.json({ limit: '2mb' }))
 app.use(cookieParser())
 
 // ── Fotos de producto subidas por el admin (ver routes/products.js POST /:id/image) ─
-app.use('/uploads', express.static(uploadsDir))
+app.use('/uploads', (req, res, next) => {
+  if (!backupManager.isMaintenanceMode()) return next()
+  res.set('Retry-After', '30')
+  return res.status(503).json({ error: 'Los archivos están temporalmente en mantenimiento.' })
+}, express.static(uploadsDir))
 
 // ── Rutas ─────────────────────────────────────────────────────────────────────
 app.get('/api/health', (_req, res) => res.json({ ok: true, env: process.env.NODE_ENV || 'development' }))
+// Las rutas de control de backup permanecen disponibles durante una
+// restauración para que el panel pueda seguir mostrando el progreso. El resto
+// de la API entra en mantenimiento y no puede escribir datos a mitad del swap.
+app.use('/api/admin/backups', backupsRouter)
+app.use('/api', (req, res, next) => {
+  if (!backupManager.isMaintenanceMode()) return next()
+  if (req.path === '/admin/session') return next()
+  res.set('Retry-After', '30')
+  return res.status(503).json({ error: 'El sistema se está restaurando. Intentá nuevamente en unos minutos.' })
+})
 app.use('/api/admin', adminRouter)
 app.use('/api/arca', arcaRouter)
 app.use('/api/orders', invoicesRouter)

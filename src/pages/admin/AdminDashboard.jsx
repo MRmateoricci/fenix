@@ -4,6 +4,7 @@ import { useAdmin } from '../../context/AdminContext'
 import { getCategoryValue, getSubcategoryOptions, getProductTypeOptions } from '../../data/categoryTree'
 import FenixLogo from '../../assets/FenixLogo'
 import OverviewDashboard from './OverviewDashboard'
+import BackupsTab from './BackupsTab'
 import { isPreparationOverdue, PREPARATION_ALERT_HOURS } from '../../utils/orderPreparation'
 
 // ── Paleta ────────────────────────────────────────────────────────────────────
@@ -9333,6 +9334,7 @@ const NAV_ITEMS = [
   { id: 'offers',       label: 'Ofertas',        Icon: TagIcon },
   { id: 'coupons',      label: 'Cupones',        Icon: TicketIcon },
   { id: 'orders',       label: 'Pedidos',        Icon: ClipboardIcon },
+  { id: 'backups',      label: 'Backups',        Icon: FolderIcon },
 ]
 
 export default function AdminDashboard() {
@@ -9479,6 +9481,9 @@ export default function AdminDashboard() {
         )}
         {tab === 'orders' && (
           <OrdersTab />
+        )}
+        {tab === 'backups' && (
+          <BackupsTab />
         )}
       </main>
     </div>

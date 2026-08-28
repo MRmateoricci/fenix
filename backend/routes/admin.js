@@ -1,4 +1,3 @@
-import crypto from 'crypto'
 import jwt from 'jsonwebtoken'
 import { Router } from 'express'
 import {
@@ -6,6 +5,7 @@ import {
   adminSessionSecret,
   requireAdmin,
 } from '../middleware/requireAdmin.js'
+import { passwordsMatch } from '../utils/adminSecurity.js'
 
 const router = Router()
 const SESSION_MAX_AGE_MS = 8 * 60 * 60 * 1000
@@ -34,12 +34,6 @@ function activeFailures(key, now = Date.now()) {
     return null
   }
   return entry
-}
-
-export function passwordsMatch(received, expected) {
-  const left = crypto.createHash('sha256').update(String(received || '')).digest()
-  const right = crypto.createHash('sha256').update(String(expected || '')).digest()
-  return crypto.timingSafeEqual(left, right)
 }
 
 router.post('/session', (req, res) => {
