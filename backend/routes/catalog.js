@@ -149,12 +149,82 @@ export function mapRow(r) {
   }
 }
 
-router.get('/', async (_req, res) => {
-  try {
-    const { rows } = await pool.query(
-      `SELECT ${SELECT_FIELDS} FROM products WHERE published = TRUE ORDER BY updated_at DESC`
+// Arma el WHERE para el listado paginado del panel (sección Tienda). Siempre
+// filtra por published = TRUE; los demás filtros son opcionales. `conImagen`
+// separa lo que ya tiene foto cargada de lo que todavía no, para poder revisar
+// el catálogo por ese eje sin bajarlo entero.
+export function buildCatalogFilters({ search, category, conImagen } = {}) {
+  const conditions = ['published = TRUE']
+  const params = []
+  let idx = 1
+
+  const term = String(search || '').trim()
+  if (term) {
+    conditions.push(
+      `(name ILIKE $${idx} OR descripcion ILIKE $${idx} OR codigo ILIKE $${idx} OR category ILIKE $${idx} OR subcategory ILIKE $${idx})`
     )
-    res.json(rows.map(mapRow))
+    params.push(`%${term}%`)
+    idx++
+  }
+
+  const cat = String(category || '').trim()
+  if (cat) {
+    conditions.push(`category = $${idx++}`)
+    params.push(cat)
+  }
+
+  if (conImagen === 'true') {
+    conditions.push(`(image_url IS NOT NULL AND btrim(image_url) <> '')`)
+  } else if (conImagen === 'false') {
+    conditions.push(`(image_url IS NULL OR btrim(image_url) = '')`)
+  }
+
+  return { where: `WHERE ${conditions.join(' AND ')}`, params, nextIndex: idx }
+}
+
+router.get('/', async (req, res) => {
+  try {
+    // Sin `page` la respuesta sigue siendo el array completo que consume la
+    // tienda pública. Con `page` responde paginado para el panel de admin.
+    if (!('page' in req.query)) {
+      const { rows } = await pool.query(
+        `SELECT ${SELECT_FIELDS} FROM products WHERE published = TRUE ORDER BY updated_at DESC`
+      )
+      return res.json(rows.map(mapRow))
+    }
+
+    const pageSize = Math.min(100, Math.max(1, Number(req.query.pageSize) || 40))
+    const page = Math.max(1, Number(req.query.page) || 1)
+    const offset = (page - 1) * pageSize
+    const { where, params, nextIndex: idx } = buildCatalogFilters(req.query)
+
+    const [data, countResult, statsResult] = await Promise.all([
+      pool.query(
+        `SELECT ${SELECT_FIELDS} FROM products ${where}
+         ORDER BY updated_at DESC LIMIT $${idx} OFFSET $${idx + 1}`,
+        [...params, pageSize, offset]
+      ),
+      pool.query(`SELECT COUNT(*) FROM products ${where}`, params),
+      // Las píldoras de arriba cuentan sobre todo lo publicado, no sobre el
+      // filtro activo, para que sigan siendo una referencia global.
+      pool.query(
+        `SELECT
+           COUNT(*) FILTER (WHERE stock_inmediato) AS inmediatos,
+           COUNT(*) FILTER (WHERE original_price IS NOT NULL OR original_price_usd IS NOT NULL) AS con_oferta
+         FROM products WHERE published = TRUE`
+      ),
+    ])
+
+    const total = Number(countResult.rows[0].count)
+    res.json({
+      items: data.rows.map(mapRow),
+      total,
+      page,
+      pageSize,
+      hasMore: offset + data.rows.length < total,
+      inmediatos: Number(statsResult.rows[0].inmediatos),
+      conOferta: Number(statsResult.rows[0].con_oferta),
+    })
   } catch (err) {
     console.error('[GET /api/catalog]', err)
     res.status(500).json({ error: 'Error interno' })

@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mapRow } from './catalog.js'
+import { mapRow, buildCatalogFilters } from './catalog.js'
 
 function product(overrides = {}) {
   return {
@@ -54,4 +54,27 @@ test('el catalogo usa la descripcion o el codigo cuando name esta vacio', () => 
   assert.equal(mapRow(product({ name: '  ', descripcion: 'Nombre importado', codigo: 'ABC-1' })).name, 'Nombre importado')
   assert.equal(mapRow(product({ name: null, descripcion: '', codigo: 'ABC-1' })).name, 'ABC-1')
   assert.equal(mapRow(product({ name: null, descripcion: null, codigo: null })).name, 'Producto sin nombre')
+})
+
+test('buildCatalogFilters siempre filtra por published sin argumentos', () => {
+  const { where, params } = buildCatalogFilters()
+  assert.equal(where, 'WHERE published = TRUE')
+  assert.deepEqual(params, [])
+})
+
+test('buildCatalogFilters arma búsqueda, categoría y presencia de imagen', () => {
+  const { where, params, nextIndex } = buildCatalogFilters({
+    search: ' led ', category: 'Iluminación', conImagen: 'false',
+  })
+  assert.match(where, /name ILIKE \$1/)
+  assert.match(where, /category = \$2/)
+  assert.match(where, /image_url IS NULL OR btrim\(image_url\) = ''/)
+  assert.deepEqual(params, ['%led%', 'Iluminación'])
+  assert.equal(nextIndex, 3)
+})
+
+test('buildCatalogFilters con conImagen=true exige imagen no vacía', () => {
+  const { where, params } = buildCatalogFilters({ conImagen: 'true' })
+  assert.match(where, /image_url IS NOT NULL AND btrim\(image_url\) <> ''/)
+  assert.deepEqual(params, [])
 })

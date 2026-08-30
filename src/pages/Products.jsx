@@ -228,7 +228,12 @@ export default function Products() {
     let list = products
     if (filters.query) {
       const q = filters.query.toLowerCase()
-      list = list.filter(p => p.name.toLowerCase().includes(q) || p.description.toLowerCase().includes(q))
+      // `description` llega null desde /api/catalog cuando el producto no tiene
+      // descripción larga cargada — sin el guard, buscar tira y deja la página en blanco.
+      list = list.filter(p =>
+        (p.name || '').toLowerCase().includes(q) ||
+        (p.description || '').toLowerCase().includes(q)
+      )
     }
     if (filters.selectedCategories.length > 0)
       list = list.filter(p => filters.selectedCategories.some(c =>

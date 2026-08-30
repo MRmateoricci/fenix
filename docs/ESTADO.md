@@ -7,8 +7,8 @@
 > Si el cambio merece un commit con mensaje propio, merece una entrada acá.
 > Un ajuste de padding, no.
 
-**Última actualización:** 28 de agosto de 2026
-**Commit de referencia:** `f9b29fc` + cambios locales de esta tanda
+**Última actualización:** 30 de agosto de 2026
+**Commit de referencia:** `a509fd6` + cambios locales de esta tanda
 
 ---
 
@@ -36,6 +36,15 @@
 | Facturación electrónica ARCA | 🟡 Implementada, producción bloqueada | A/B para RI y C para Monotributo; falta confirmar habilitación A real de Fenix |
 
 ---
+
+## Sección Tienda del panel paginada + filtro por imagen (2026-08-30)
+
+- La sección **Tienda** del panel ya no baja los ~3600 productos publicados de una: `GET /api/catalog` acepta `?page=&pageSize=&search=&category=&conImagen=` y responde `{ items, total, page, pageSize, hasMore, inmediatos, conOferta }`. Sin `page` sigue devolviendo el array completo que usa la tienda pública — sin cambios ahí.
+- El panel trae 40 por página con controles Anterior/Siguiente y "mostrando X–Y de Z". Búsqueda (con debounce) y categoría pasan al servidor y vuelven a la página 1.
+- Nuevo filtro **Imagen: Todas / Con imagen / Sin imagen** (`image_url` no vacío) para revisar qué falta cargar.
+- Las píldoras de arriba (total, entrega inmediata, con oferta) se cuentan en el backend sobre todo lo publicado, no sobre el filtro activo.
+- `AdminContext` expone `fetchStoreProducts`; el catálogo público sigue cargándose entero (fuera de alcance esta tanda). Tests de `buildCatalogFilters` agregados. Frontend compila.
+- Pendiente: verificación en dispositivo móvil real.
 
 ## Categorías principales y administración más clara (2026-08-28)
 

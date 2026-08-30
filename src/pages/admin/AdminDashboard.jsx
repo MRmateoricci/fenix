@@ -2160,11 +2160,20 @@ function BankTransferSettingsCard() {
   )
 }
 
-function StoreTab({ products, onUpdate, onDelete }) {
-  const { fetchInventoryItem, fetchCatalog, categoryTree } = useAdmin()
+const STORE_PAGE_SIZE = 40
+
+function StoreTab({ onUpdate, onDelete }) {
+  const { fetchInventoryItem, fetchCatalog, fetchStoreProducts, categoryTree } = useAdmin()
   const categoryOptions = categoryTree.map(node => ({ value: getCategoryValue(node), label: node.label }))
   const [search, setSearch]     = useState('')
+  const [appliedSearch, setAppliedSearch] = useState('')
   const [catFilter, setCat]     = useState('Todas')
+  const [imgFilter, setImgFilter] = useState('') // '' | 'true' | 'false'
+  const [page, setPage]         = useState(1)
+  const [reloadNonce, setReloadNonce] = useState(0)
+  const [pageData, setPageData] = useState({ items: [], total: 0, hasMore: false, inmediatos: 0, conOferta: 0 })
+  const [listLoading, setListLoading] = useState(true)
+  const [listError, setListError] = useState('')
   const [editProduct, setEdit]  = useState(null)
   const [publishCandidate, setPublishCandidate] = useState(null)
   const [pickerOpen, setPickerOpen] = useState(false)
@@ -2173,22 +2182,38 @@ function StoreTab({ products, onUpdate, onDelete }) {
   const [confirmId, setConfirmId] = useState(null)
   const [hoveredRow, setHoveredRow] = useState(null)
 
-  const filtered = useMemo(() => {
-    let list = products
-    if (catFilter !== 'Todas') list = list.filter(p => p.category === catFilter)
-    if (search.trim()) {
-      const q = search.toLowerCase()
-      list = list.filter(p =>
-        p.name.toLowerCase().includes(q) ||
-        p.category.toLowerCase().includes(q) ||
-        (p.subcategory || '').toLowerCase().includes(q)
-      )
-    }
-    return list
-  }, [products, catFilter, search])
+  // Debounce de la búsqueda: recién dispara el fetch (y vuelve a la página 1)
+  // cuando el usuario deja de tipear.
+  useEffect(() => {
+    const t = setTimeout(() => { setAppliedSearch(search); setPage(1) }, 350)
+    return () => clearTimeout(t)
+  }, [search])
 
-  const withOffer  = products.filter(p => p.originalPrice).length
-  const inmediatos = products.filter(p => p.stockInmediato).length
+  useEffect(() => {
+    let cancelled = false
+    setListLoading(true)
+    setListError('')
+    fetchStoreProducts({
+      page,
+      pageSize: STORE_PAGE_SIZE,
+      search: appliedSearch,
+      category: catFilter === 'Todas' ? '' : catFilter,
+      conImagen: imgFilter,
+    })
+      .then(result => { if (!cancelled) setPageData(result) })
+      .catch(err => { if (!cancelled) setListError(err.message || 'No se pudieron cargar los productos') })
+      .finally(() => { if (!cancelled) setListLoading(false) })
+    return () => { cancelled = true }
+  }, [fetchStoreProducts, page, appliedSearch, catFilter, imgFilter, reloadNonce])
+
+  const reload = () => setReloadNonce(n => n + 1)
+  const changeCat = value => { setCat(value); setPage(1) }
+  const changeImgFilter = value => { setImgFilter(value); setPage(1) }
+
+  const items = pageData.items
+  const totalPages = Math.max(1, Math.ceil(pageData.total / STORE_PAGE_SIZE))
+  const rangeStart = pageData.total === 0 ? 0 : (page - 1) * STORE_PAGE_SIZE + 1
+  const rangeEnd = (page - 1) * STORE_PAGE_SIZE + items.length
 
   async function openStoreProduct(product) {
     if (loadingProductId) return
@@ -2215,9 +2240,9 @@ function StoreTab({ products, onUpdate, onDelete }) {
       {/* Stats bar + add button */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-          <span style={pill('#F3F4F6', C.text3)}>{products.length} productos</span>
-          {inmediatos > 0 && <span style={pill(C.greenLight, C.green)}>{inmediatos} con entrega inmediata</span>}
-          {withOffer > 0 && <span style={pill(C.amberLight, C.amberDark)}>{withOffer} con oferta</span>}
+          <span style={pill('#F3F4F6', C.text3)}>{pageData.total} productos</span>
+          {pageData.inmediatos > 0 && <span style={pill(C.greenLight, C.green)}>{pageData.inmediatos} con entrega inmediata</span>}
+          {pageData.conOferta > 0 && <span style={pill(C.amberLight, C.amberDark)}>{pageData.conOferta} con oferta</span>}
         </div>
         <button onClick={() => setPickerOpen(true)} style={{ ...solidBtn, background: C.red, color: '#fff' }}>
           + Publicar producto
@@ -2233,7 +2258,7 @@ function StoreTab({ products, onUpdate, onDelete }) {
       )}
 
       {/* Search + Filter */}
-      <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
         <input
           type="text"
           placeholder="Buscar producto..."
@@ -2245,7 +2270,7 @@ function StoreTab({ products, onUpdate, onDelete }) {
           {[{ value: 'Todas', label: 'Todas' }, ...categoryOptions].map(c => (
             <button
               key={c.value}
-              onClick={() => setCat(c.value)}
+              onClick={() => changeCat(c.value)}
               style={{
                 padding: '6px 14px', borderRadius: 20, border: 'none', cursor: 'pointer',
                 fontSize: 11, fontFamily: 'inherit', fontWeight: 600,
@@ -2261,21 +2286,50 @@ function StoreTab({ products, onUpdate, onDelete }) {
         </div>
       </div>
 
+      {/* Filtro por imagen cargada */}
+      <div style={{ display: 'flex', gap: 6, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+        <span style={{ fontSize: 11, color: C.text3, fontWeight: 600, letterSpacing: '0.04em' }}>IMAGEN</span>
+        {[{ value: '', label: 'Todas' }, { value: 'true', label: 'Con imagen' }, { value: 'false', label: 'Sin imagen' }].map(f => (
+          <button
+            key={f.value || 'all'}
+            onClick={() => changeImgFilter(f.value)}
+            style={{
+              padding: '6px 14px', borderRadius: 20, border: 'none', cursor: 'pointer',
+              fontSize: 11, fontFamily: 'inherit', fontWeight: 600, letterSpacing: '0.04em',
+              background: imgFilter === f.value ? C.red : C.hairline,
+              color: imgFilter === f.value ? '#fff' : C.text2,
+              transition: 'all 0.15s',
+            }}
+          >
+            {f.label}
+          </button>
+        ))}
+      </div>
+
+      {listError && (
+        <DismissibleErrorNotice key={listError} marginBottom={16} fontSize={12.5}>{listError}</DismissibleErrorNotice>
+      )}
+
       {/* Product list */}
-      <div style={{ background: C.white, borderRadius: 10, border: `1px solid ${C.border}`, overflow: 'hidden' }}>
-        {filtered.length === 0 && (
+      <div style={{ background: C.white, borderRadius: 10, border: `1px solid ${C.border}`, overflow: 'hidden', opacity: listLoading ? 0.6 : 1, transition: 'opacity 0.12s' }}>
+        {listLoading && items.length === 0 && (
+          <div style={{ padding: '40px 20px', textAlign: 'center', color: C.muted, fontSize: 14 }}>
+            Cargando productos…
+          </div>
+        )}
+        {!listLoading && items.length === 0 && (
           <div style={{ padding: '40px 20px', textAlign: 'center', color: C.muted, fontSize: 14 }}>
             No se encontraron productos.
           </div>
         )}
-        {filtered.map((p, i) => (
+        {items.map((p, i) => (
           <div
             key={p.id}
             onMouseEnter={() => setHoveredRow(p.id)}
             onMouseLeave={() => setHoveredRow(null)}
             style={{
               display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px',
-              borderBottom: i < filtered.length - 1 ? `1px solid ${C.hairline}` : 'none',
+              borderBottom: i < items.length - 1 ? `1px solid ${C.hairline}` : 'none',
               background: hoveredRow === p.id ? '#F9FAFB' : 'transparent',
               transition: 'background 0.12s',
             }}
@@ -2345,14 +2399,40 @@ function StoreTab({ products, onUpdate, onDelete }) {
         ))}
       </div>
 
+      {/* Paginación */}
+      {pageData.total > 0 && (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginTop: 14, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 12, color: C.text3 }}>
+            Mostrando {rangeStart}–{rangeEnd} de {pageData.total}
+          </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <button
+              onClick={() => setPage(p => Math.max(1, p - 1))}
+              disabled={page <= 1 || listLoading}
+              style={{ ...solidBtn, background: C.hairline, color: C.text2, opacity: page <= 1 || listLoading ? 0.5 : 1 }}
+            >
+              ‹ Anterior
+            </button>
+            <span style={{ fontSize: 12, color: C.text3, fontWeight: 600 }}>Página {page} de {totalPages}</span>
+            <button
+              onClick={() => setPage(p => p + 1)}
+              disabled={!pageData.hasMore || listLoading}
+              style={{ ...solidBtn, background: C.hairline, color: C.text2, opacity: !pageData.hasMore || listLoading ? 0.5 : 1 }}
+            >
+              Siguiente ›
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Modals */}
       {(editProduct || publishCandidate) && (
         <ProductModal
           product={publishCandidate || editProduct}
           publishOnSave={Boolean(publishCandidate)}
           onSave={publishCandidate
-            ? (data) => onUpdate(publishCandidate.id, { ...data, published: true })
-            : (data) => onUpdate(editProduct.id, data)}
+            ? (formData) => onUpdate(publishCandidate.id, { ...formData, published: true }).then(() => { setPage(1); reload() })
+            : (formData) => onUpdate(editProduct.id, formData).then(reload)}
           onVariantsChanged={fetchCatalog}
           onClose={() => { setEdit(null); setPublishCandidate(null) }}
         />
@@ -2364,8 +2444,14 @@ function StoreTab({ products, onUpdate, onDelete }) {
 
       {confirmId !== null && (
         <ConfirmModal
-          message={`¿Quitar "${products.find(p => p.id === confirmId)?.name}" de la tienda? Deja de verse en el catálogo, pero se mantiene en el Inventario y podés volver a publicarlo cuando quieras.`}
-          onConfirm={() => { onDelete(confirmId); setConfirmId(null) }}
+          message={`¿Quitar "${items.find(p => p.id === confirmId)?.name}" de la tienda? Deja de verse en el catálogo, pero se mantiene en el Inventario y podés volver a publicarlo cuando quieras.`}
+          onConfirm={async () => {
+            const wasLastOnPage = items.length === 1 && page > 1
+            await onDelete(confirmId)
+            setConfirmId(null)
+            if (wasLastOnPage) setPage(p => Math.max(1, p - 1))
+            else reload()
+          }}
           onCancel={() => setConfirmId(null)}
         />
       )}
@@ -9616,7 +9702,6 @@ export default function AdminDashboard() {
         )}
         {tab === 'store' && (
           <StoreTab
-            products={products}
             onUpdate={updateProduct}
             onDelete={deleteProduct}
           />

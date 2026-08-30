@@ -133,6 +133,20 @@ export function AdminProvider({ children }) {
 
   useEffect(() => { fetchCatalog() }, [fetchCatalog])
 
+  // ── fetchStoreProducts — listado paginado del panel (sección Tienda) ──────
+  // Independiente de `products`: la tienda pública sigue bajando el catálogo
+  // entero, pero el panel trae sólo la página que muestra. Devuelve el objeto
+  // { items, total, page, pageSize, hasMore, inmediatos, conOferta }.
+  const fetchStoreProducts = useCallback(async ({ page = 1, pageSize = 40, search = '', category = '', conImagen = '' } = {}) => {
+    const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) })
+    if (search.trim()) params.set('search', search.trim())
+    if (category) params.set('category', category)
+    if (conImagen) params.set('conImagen', conImagen)
+    const res = await adminFetch(`${API_BASE}/api/catalog?${params.toString()}`)
+    if (!res.ok) throw new Error('Error al cargar los productos de la tienda')
+    return res.json()
+  }, [])
+
   const login = async (pwd) => {
     const response = await adminFetch(`${API_BASE}/api/admin/session`, {
       method: 'POST',
@@ -1135,7 +1149,7 @@ export function AdminProvider({ children }) {
 
   return (
     <AdminContext.Provider value={{
-      isAdmin, adminAuthLoading, products, productsLoading, productsError, fetchCatalog,
+      isAdmin, adminAuthLoading, products, productsLoading, productsError, fetchCatalog, fetchStoreProducts,
       login, logout,
       updateProduct, addProduct, deleteProduct,
       orders, ordersTotal, invoiceSummary, ordersLoading, ordersError,
