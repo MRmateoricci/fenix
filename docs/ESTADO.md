@@ -26,7 +26,7 @@
 | Cotización de envío | 🟡 Provisorio | Tarifario manual por zona · plazos de tránsito propios (Shipnow) |
 | Envío gratis por monto | ✅ Funcionando | Umbral por env var |
 | Cupones de descuento | ✅ Funcionando | |
-| Cuentas de cliente | ✅ Funcionando | Email + OAuth Google/Facebook |
+| Cuentas de cliente | ✅ Funcionando | Email; OAuth Google/Facebook oculto hasta configurarlo |
 | Pedidos y seguimiento | ✅ Funcionando | Con notificaciones por mail |
 | Reseñas | ✅ Funcionando | Propias + Google Places |
 | Alertas de stock | ⚪ Fuera de uso | Tabla y endpoints intactos, formulario retirado de la ficha |
@@ -36,6 +36,17 @@
 | Facturación electrónica ARCA | 🟡 Implementada, producción bloqueada | A/B para RI y C para Monotributo; falta confirmar habilitación A real de Fenix |
 
 ---
+
+## Acceso de clientes reorganizado (2026-08-31)
+
+- La pantalla separa en dos columnas a clientes registrados y nuevos clientes, con contexto sobre cada acción y un acceso destacado al registro.
+- El formulario incorporó etiquetas visibles, indicación de campos obligatorios, opción para mostrar la contraseña y recuperación junto al botón principal.
+- La creación de cuenta comparte la misma jerarquía visual, divide datos personales y credenciales, y valida la confirmación de la contraseña antes de enviarla.
+- El registro admite DNI opcional (7 u 8 dígitos) y una casilla de suscripción al newsletter desmarcada por defecto. El backend persiste el DNI y, con consentimiento, agrega el correo a `newsletter_subscribers` sin duplicarlo y dentro de la misma transacción que crea la cuenta.
+- La disposición pasa a una sola columna en pantallas angostas; la comprobación en un dispositivo móvil real queda pendiente.
+- La pantalla muestra únicamente el acceso con correo y contraseña.
+- Se ocultaron el separador y los botones de Google y Facebook hasta que sus credenciales OAuth estén configuradas. Las rutas del backend permanecen intactas para una futura habilitación.
+- Requiere ejecutar la migración idempotente de `backend/db/schema.sql`. Frontend compilado y suite backend aprobada: 180 pruebas, 1 integración PostgreSQL omitida sin `TEST_DATABASE_URL`.
 
 ## Variante de portada elegible (2026-08-31)
 

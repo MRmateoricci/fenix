@@ -26,12 +26,12 @@ export function AuthProvider({ children }) {
       .finally(() => setAuthLoading(false))
   }, [refreshUser])
 
-  const register = useCallback(async ({ email, password, firstName, lastName, phone }) => {
+  const register = useCallback(async ({ email, password, firstName, lastName, phone, dni, subscribeNewsletter }) => {
     const res = await fetch(`${API_BASE}/api/auth/register`, {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password, firstName, lastName, phone }),
+      body: JSON.stringify({ email, password, firstName, lastName, phone, dni, subscribeNewsletter }),
     })
     if (!res.ok) throw new Error(await parseError(res))
     const { user } = await res.json()

@@ -19,7 +19,6 @@ const T = {
   red:            '#CC0000',
   green:          '#1E8A4C',
   amber:          '#E08A1E',
-  star:           '#F5A623',
 }
 
 const fmt = (n) =>
@@ -33,35 +32,6 @@ const INSTALLMENTS = 3
 
 const sameColorName = (left, right) =>
   String(left || '').localeCompare(String(right || ''), 'es-AR', { sensitivity: 'base' }) === 0
-
-// Rating/reseñas de ejemplo, estables por producto (no hay datos reales de
-// reseñas agregadas conectados a la tarjeta todavía — ver src/pages/ProductDetail.jsx
-// para el sistema de reseñas real, que vive en la ficha de producto).
-function placeholderReviews(id) {
-  const str = String(id)
-  let hash = 0
-  for (let i = 0; i < str.length; i++) hash = (hash * 31 + str.charCodeAt(i)) >>> 0
-  const seed = Math.abs(Math.sin(hash)) * 10000
-  const rating = 4 + Math.floor(seed % 10) / 10 // 4.0–4.9
-  const reviews = 3 + Math.floor(seed % 45) // 3–47
-  return { rating, reviews }
-}
-
-function StarRow({ value, size = 12 }) {
-  const rounded = Math.round(value)
-  return (
-    <span style={{ display: 'inline-flex', gap: 1 }}>
-      {[1, 2, 3, 4, 5].map((n) => (
-        <svg key={n} width={size} height={size} viewBox="0 0 24 24"
-          fill={n <= rounded ? T.star : 'none'}
-          stroke={n <= rounded ? T.star : T.hairlineStrong}
-          strokeWidth="1.5">
-          <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
-        </svg>
-      ))}
-    </span>
-  )
-}
 
 export default function ProductCard({ product }) {
   const { addItem } = useCart()
@@ -91,8 +61,6 @@ export default function ProductCard({ product }) {
     : selectedColor?.price != null
       ? Number(selectedColor.price)
       : product.price
-  const { rating, reviews } = placeholderReviews(product.id)
-
   function handleAdd(e) {
     e.preventDefault()
     e.stopPropagation()
@@ -345,12 +313,6 @@ export default function ProductCard({ product }) {
           </span>
         </div>
 
-        <div className="fnx-product-card__reviews" style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 'auto' }}>
-          <StarRow value={rating} />
-          <span style={{ fontFamily: "'Inter', system-ui, sans-serif", fontSize: 11.5, color: T.text3 }}>
-            {reviews} {reviews === 1 ? 'reseña' : 'reseñas'}
-          </span>
-        </div>
       </div>
     </div>
   )

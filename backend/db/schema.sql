@@ -1008,3 +1008,12 @@ CREATE TABLE IF NOT EXISTS bank_transfer_guest_tokens (
 );
 CREATE INDEX IF NOT EXISTS idx_bank_transfer_guest_tokens_order
   ON bank_transfer_guest_tokens(order_id, expires_at);
+
+-- El DNI opcional queda asociado a la cuenta para no volver a solicitarlo en
+-- futuras experiencias que necesiten identificar al cliente.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS dni VARCHAR(8);
+COMMENT ON COLUMN users.dni IS
+  'Conserva el DNI que el cliente decide informar al crear su cuenta para reutilizar su identificacion.';
+ALTER TABLE users DROP CONSTRAINT IF EXISTS users_dni_check;
+ALTER TABLE users ADD CONSTRAINT users_dni_check
+  CHECK (dni IS NULL OR dni ~ '^[0-9]{7,8}$');
