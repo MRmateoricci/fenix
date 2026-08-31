@@ -40,7 +40,7 @@
 ## Imagen hover general del producto (2026-08-30)
 
 - La imagen hover se configura una sola vez en **Información general compartida**; dejó de presentarse como un dato individual de cada variante.
-- En las tarjetas del catálogo reemplaza a la imagen activa al pasar el cursor aunque el producto tenga color, tono o medida seleccionados. Al salir, vuelve a la imagen principal de esa variante.
+- En las tarjetas del catálogo reemplaza a la imagen activa al pasar el cursor aunque el producto tenga variantes. Si el cliente elige un color mientras mantiene el cursor dentro, la foto principal de ese color toma prioridad hasta que salga de la tarjeta; al volver a entrar se habilita nuevamente el hover general.
 - No se modificaron las imágenes principales por variante ni la galería de la ficha. Frontend compilado y suite backend verificada: 180 pruebas aprobadas, 1 integración PostgreSQL omitida sin `TEST_DATABASE_URL`.
 - Pendiente: verificación del gesto y la presentación en un dispositivo móvil real.
 

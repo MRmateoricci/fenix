@@ -69,6 +69,7 @@ export default function ProductCard({ product }) {
   const navigate = useNavigate()
   const [added, setAdded] = useState(false)
   const [cardHovered, setCardHovered] = useState(false)
+  const [hoverImageSuppressed, setHoverImageSuppressed] = useState(false)
   const [selectedColor, setSelectedColor] = useState(product.colors?.[0] || null)
   const [selectedTone, setSelectedTone] = useState(product.tones?.[0] || null)
 
@@ -77,6 +78,7 @@ export default function ProductCard({ product }) {
     rule.image && sameColorName(rule.color, selectedColor?.name)
   )?.image
   const displayImage = selectedColor?.image || selectedColorVariantImage || product.image
+  const showHoverImage = Boolean(cardHovered && product.hoverImage && !hoverImageSuppressed)
   const displayPrice = product.variantRules?.length
     ? product.price
     : selectedTone?.price != null
@@ -125,6 +127,9 @@ export default function ProductCard({ product }) {
     e.preventDefault()
     e.stopPropagation()
     setSelectedColor(color)
+    // Si el cursor sigue dentro de la tarjeta, el hover no debe tapar la
+    // imagen que el usuario acaba de pedir al elegir esta variante.
+    setHoverImageSuppressed(cardHovered)
   }
 
   return (
@@ -136,7 +141,10 @@ export default function ProductCard({ product }) {
         transition: 'transform .38s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
       }}
       onMouseEnter={() => setCardHovered(true)}
-      onMouseLeave={() => setCardHovered(false)}
+      onMouseLeave={() => {
+        setCardHovered(false)
+        setHoverImageSuppressed(false)
+      }}
     >
       {/* Image + floating add-to-cart button (wrapper stays overflow-visible so the button can overlap the image edge) */}
       <div style={{ position: 'relative' }}>
@@ -165,7 +173,7 @@ export default function ProductCard({ product }) {
                       width: '100%', height: '100%', objectFit: 'cover',
                       transform: cardHovered ? 'scale(1.07)' : 'scale(1)',
                       transition: 'transform .6s cubic-bezier(0.25, 0.46, 0.45, 0.94), opacity .4s ease',
-                      opacity: (cardHovered && product.hoverImage) ? 0 : 1,
+                      opacity: showHoverImage ? 0 : 1,
                     }}
                     loading="lazy"
                   />
@@ -178,7 +186,7 @@ export default function ProductCard({ product }) {
                         width: '100%', height: '100%', objectFit: 'cover',
                         transform: cardHovered ? 'scale(1.07)' : 'scale(1)',
                         transition: 'transform .6s cubic-bezier(0.25, 0.46, 0.45, 0.94), opacity .4s ease',
-                        opacity: cardHovered ? 1 : 0,
+                        opacity: showHoverImage ? 1 : 0,
                       }}
                       loading="lazy"
                     />
