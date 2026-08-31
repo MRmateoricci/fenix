@@ -165,11 +165,11 @@ export default function ProductCard({ product }) {
                       width: '100%', height: '100%', objectFit: 'cover',
                       transform: cardHovered ? 'scale(1.07)' : 'scale(1)',
                       transition: 'transform .6s cubic-bezier(0.25, 0.46, 0.45, 0.94), opacity .4s ease',
-                      opacity: (cardHovered && product.hoverImage && !selectedColor) ? 0 : 1,
+                      opacity: (cardHovered && product.hoverImage) ? 0 : 1,
                     }}
                     loading="lazy"
                   />
-                  {product.hoverImage && !selectedColor && (
+                  {product.hoverImage && (
                     <img
                       src={product.hoverImage}
                       alt={product.name}

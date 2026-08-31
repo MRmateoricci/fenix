@@ -656,7 +656,6 @@ function VariantDetailsModal({ code, codeLocked = false, value, onChange, onClos
           <label style={{ ...lbl, gridColumn: 'span 2' }}>Descripción individual<textarea value={data.description} onChange={event => set('description', event.target.value)} rows={4} style={{ ...inp, marginTop: 5, resize: 'vertical' }} /></label>
           <label style={{ ...lbl, gridColumn: 'span 2' }}>Descripción de inventario<textarea value={data.inventoryDescription} onChange={event => set('inventoryDescription', event.target.value)} rows={2} style={{ ...inp, marginTop: 5, resize: 'vertical' }} /></label>
           {fields.map(([label, field, type]) => <label key={field} style={lbl}>{label}<input type={type || 'text'} min={type === 'number' ? 0 : undefined} step="any" value={data[field] ?? ''} onChange={event => set(field, event.target.value)} style={{ ...inp, marginTop: 5 }} /></label>)}
-          <div style={{ gridColumn: 'span 2' }}><ImageFileField label="Imagen hover de la variante (opcional)" value={data.hoverImage} onChange={value => set('hoverImage', value)} /></div>
         </div>
       </div>
     </div>
@@ -1155,7 +1154,9 @@ function ProductModal({ product, onSave, onClose, onVariantsChanged, publishOnSa
     out.stock = variantSummary.stock
 
     out.image = primaryRule?.image || form.image || null
-    out.hoverImage = primaryData.hoverImage || form.hoverImage || null
+    // El hover identifica visualmente al producto en el listado. Las variantes
+    // conservan su imagen principal propia, pero comparten esta segunda imagen.
+    out.hoverImage = form.hoverImage || null
     out.originalPrice = form.originalPrice ? Number(form.originalPrice) : null
     if (publishOnSave) out.published = true
     out.colors = form.colors.filter(c => c.name?.trim()).map(c => ({ ...c, price: c.price === '' || c.price == null ? null : Number(c.price) }))
@@ -1285,6 +1286,18 @@ function ProductModal({ product, onSave, onClose, onVariantsChanged, publishOnSa
               rows={3}
               style={{ ...inp, resize: 'vertical' }}
             />
+          </div>
+
+          <div style={{ gridColumn: 'span 2' }}>
+            <ImageFileField
+              label="Imagen hover del producto (opcional)"
+              value={form.hoverImage}
+              onChange={value => set('hoverImage', value)}
+              productId={product?.id}
+            />
+            <p style={{ fontSize: 11, color: C.muted, margin: '5px 0 0', lineHeight: 1.45 }}>
+              Reemplaza la imagen activa al pasar el cursor sobre la tarjeta del producto, sin importar qué variante esté seleccionada.
+            </p>
           </div>
 
           <div style={{ gridColumn: 'span 2' }}>
