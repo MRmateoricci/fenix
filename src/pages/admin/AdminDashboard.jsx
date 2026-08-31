@@ -2484,6 +2484,7 @@ function CategoriesTab() {
   const [savingType, setSavingType] = useState(false)
   const [nameDrafts, setNameDrafts] = useState({})
   const [savingEdit, setSavingEdit] = useState('')
+  const [savingHeader, setSavingHeader] = useState('')
   const [toast, setToast] = useState(null)
   const [openCategory, setOpenCategory] = useState(
     categoryTree[0]?._taxonomy?.category || getCategoryValue(categoryTree[0]) || ''
@@ -2643,6 +2644,26 @@ function CategoriesTab() {
     }
   }
 
+  const handleHeaderVisibility = async (event, node) => {
+    event.preventDefault()
+    event.stopPropagation()
+    const key = nodeKey(node)
+    const showInHeader = event.target.checked
+    setSavingHeader(key)
+    try {
+      const meta = node._taxonomy
+      await saveCategoryCustomization({
+        level: 'category', category: meta.category || getCategoryValue(node),
+        subcategory: '', name: '', showInHeader,
+      })
+      notify(`“${node.label}” ${showInHeader ? 'se mostrará' : 'ya no se mostrará'} en el header`)
+    } catch (err) {
+      notify(err.message, 'error')
+    } finally {
+      setSavingHeader('')
+    }
+  }
+
   const actionButton = (background, color) => ({
     border: 'none', borderRadius: 6, background, color, cursor: 'pointer',
     fontSize: 11.5, fontWeight: 700, padding: '6px 9px', lineHeight: 1,
@@ -2705,7 +2726,24 @@ function CategoriesTab() {
   }
 
   const renderActions = (node, compact = false) => (
-    <button
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: compact ? 5 : 10, flexShrink: 0 }}>
+      {node._taxonomy?.level === 'category' && (
+        <label
+          title="Mostrar esta categoría como acceso rápido en el header de la tienda"
+          onClick={event => event.stopPropagation()}
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: C.text2, fontSize: 11.5, fontWeight: 700, cursor: savingHeader === nodeKey(node) ? 'wait' : 'pointer', whiteSpace: 'nowrap' }}
+        >
+          <input
+            type="checkbox"
+            checked={Boolean(node.showInHeader)}
+            disabled={savingHeader === nodeKey(node)}
+            onChange={event => handleHeaderVisibility(event, node)}
+            style={{ width: 15, height: 15, margin: 0, accentColor: C.red, cursor: 'pointer' }}
+          />
+          En header
+        </label>
+      )}
+      <button
       className={`fnx-category-delete${compact ? ' fnx-category-delete--compact' : ''}`}
       type="button"
       onClick={event => handleDelete(event, node)}
@@ -2719,7 +2757,8 @@ function CategoriesTab() {
       }}
     >
       {compact ? '×' : 'Eliminar'}
-    </button>
+      </button>
+    </span>
   )
 
   const hiddenItems = categoryCustomizations.filter(item => item.hidden)

@@ -32,3 +32,31 @@ test('respeta el renombre y ocultamiento de una categoría principal personaliza
   }])
   assert.ok(!hidden.some(node => getCategoryValue(node) === 'Casa inteligente'))
 })
+
+test('mantiene los accesos historicos del header hasta que el admin los cambia', () => {
+  const defaultTree = buildCategoryTree()
+  assert.deepEqual(
+    defaultTree.filter(node => node.showInHeader).map(getCategoryValue),
+    ['Electricidad', 'Herramientas', 'Iluminación', 'Automatización Industrial']
+  )
+
+  const customizedTree = buildCategoryTree([], [], [{
+    level: 'category', category: 'Electricidad', subcategory: '', name: '',
+    label: null, hidden: false, show_in_header: false,
+  }])
+  assert.equal(customizedTree.find(node => getCategoryValue(node) === 'Electricidad')?.showInHeader, false)
+})
+
+test('las categorias personalizadas solo aparecen en el header al marcarlas', () => {
+  const unmarked = buildCategoryTree([], [], [{
+    level: 'category', category: 'Domótica', subcategory: '', name: '',
+    label: 'Domótica', hidden: false, show_in_header: null,
+  }])
+  assert.equal(unmarked.find(node => getCategoryValue(node) === 'Domótica')?.showInHeader, false)
+
+  const marked = buildCategoryTree([], [], [{
+    level: 'category', category: 'Domótica', subcategory: '', name: '',
+    label: 'Domótica', hidden: false, show_in_header: true,
+  }])
+  assert.equal(marked.find(node => getCategoryValue(node) === 'Domótica')?.showInHeader, true)
+})

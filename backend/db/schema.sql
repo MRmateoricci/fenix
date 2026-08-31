@@ -569,10 +569,16 @@ CREATE TABLE IF NOT EXISTS category_tree_customizations (
   name        VARCHAR(150) NOT NULL DEFAULT '',
   label       VARCHAR(150),
   hidden      BOOLEAN      NOT NULL DEFAULT FALSE,
+  show_in_header BOOLEAN,
   created_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
   updated_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
   UNIQUE (level, category, subcategory, name)
 );
+
+-- NULL conserva el comportamiento historico del header para las categorias
+-- incluidas de fabrica; TRUE/FALSE representa la eleccion explicita del admin.
+ALTER TABLE category_tree_customizations
+  ADD COLUMN IF NOT EXISTS show_in_header BOOLEAN;
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- Cupones de descuento (código ingresado en el checkout). El código se guarda
