@@ -4,6 +4,7 @@ import { useCart } from '../context/CartContext'
 import { useAuth } from '../context/AuthContext'
 import { useFavorites } from '../context/FavoritesContext'
 import { precioSinIva } from '../config/tax'
+import { getPublicCoverVariantRule } from '../utils/productVariants'
 
 const T = {
   paper:          '#F7F4EF',
@@ -67,17 +68,21 @@ export default function ProductCard({ product }) {
   const { isAuthenticated } = useAuth()
   const { isFavorite, toggleFavorite } = useFavorites()
   const navigate = useNavigate()
+  const coverVariant = getPublicCoverVariantRule(product.variantRules)
+  const coverColor = product.colors?.find(color => sameColorName(color?.name, coverVariant?.color))
+  const coverTone = product.tones?.find(tone => sameColorName(tone?.name, coverVariant?.tone))
   const [added, setAdded] = useState(false)
   const [cardHovered, setCardHovered] = useState(false)
   const [hoverImageSuppressed, setHoverImageSuppressed] = useState(false)
-  const [selectedColor, setSelectedColor] = useState(product.colors?.[0] || null)
-  const [selectedTone, setSelectedTone] = useState(product.tones?.[0] || null)
+  const [variantSelectedByUser, setVariantSelectedByUser] = useState(false)
+  const [selectedColor, setSelectedColor] = useState(coverColor || product.colors?.[0] || null)
+  const [selectedTone, setSelectedTone] = useState(coverTone || product.tones?.[0] || null)
 
   const favorite = isFavorite(product.id)
   const selectedColorVariantImage = product.variantRules?.find((rule) =>
     rule.image && sameColorName(rule.color, selectedColor?.name)
   )?.image
-  const displayImage = selectedColor?.image || selectedColorVariantImage || product.image
+  const displayImage = (!variantSelectedByUser && coverVariant?.image) || selectedColor?.image || selectedColorVariantImage || product.image
   const showHoverImage = Boolean(cardHovered && product.hoverImage && !hoverImageSuppressed)
   const displayPrice = product.variantRules?.length
     ? product.price
@@ -127,6 +132,7 @@ export default function ProductCard({ product }) {
     e.preventDefault()
     e.stopPropagation()
     setSelectedColor(color)
+    setVariantSelectedByUser(true)
     // Si el cursor sigue dentro de la tarjeta, el hover no debe tapar la
     // imagen que el usuario acaba de pedir al elegir esta variante.
     setHoverImageSuppressed(cardHovered)

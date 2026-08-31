@@ -7,8 +7,8 @@
 > Si el cambio merece un commit con mensaje propio, merece una entrada acá.
 > Un ajuste de padding, no.
 
-**Última actualización:** 30 de agosto de 2026
-**Commit de referencia:** `1295519` + cambios locales de esta tanda
+**Última actualización:** 31 de agosto de 2026
+**Commit de referencia:** `3141b7f` + cambios locales de esta tanda
 
 ---
 
@@ -36,6 +36,14 @@
 | Facturación electrónica ARCA | 🟡 Implementada, producción bloqueada | A/B para RI y C para Monotributo; falta confirmar habilitación A real de Fenix |
 
 ---
+
+## Variante de portada elegible (2026-08-31)
+
+- Cada producto agrupado permite marcar una única fila como **Portada** desde la tabla de variantes. La elección se persiste en `product_variant_rules.is_cover`, protegida por un índice único parcial por producto.
+- La tienda abre tanto la tarjeta como la ficha con la foto y los selectores de esa variante. Al guardar también se sincroniza `products.image_url`, para que buscador, SEO y vistas sin resolución de variantes usen la misma portada.
+- Los productos existentes conservan su comportamiento hasta volver a guardarlos; el editor propone como portada la primera variante que tenga foto cuando todavía no existe una elección persistida.
+- La etiqueta **Variante base** no se cambió: hoy significa solamente “primera regla recibida”, ordenada por `created_at`. No se ordena por precio. Puede cambiar al borrar, separar, unir o recrear reglas; el precio “desde” sí se calcula aparte como el mínimo, lo que puede hacer parecer que ambos conceptos están relacionados.
+- Requiere ejecutar la migración idempotente de `backend/db/schema.sql`. Frontend compilado; suite backend y tests públicos de variantes aprobados.
 
 ## Imagen hover general del producto (2026-08-30)
 

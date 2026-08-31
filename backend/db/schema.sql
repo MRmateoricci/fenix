@@ -331,6 +331,13 @@ ALTER TABLE product_variant_rules ADD COLUMN IF NOT EXISTS product_data JSONB NO
 -- productos o editar variantes ya agrupadas, y el tono quedaba siempre gris.
 ALTER TABLE product_variant_rules ADD COLUMN IF NOT EXISTS tone_hex VARCHAR(7);
 
+-- La portada debe ser una elección editorial estable: no puede depender de la
+-- primera fila, del precio mínimo ni del orden en que se importaron variantes.
+ALTER TABLE product_variant_rules ADD COLUMN IF NOT EXISTS is_cover BOOLEAN NOT NULL DEFAULT FALSE;
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_product_variant_rules_cover
+  ON product_variant_rules(product_id) WHERE is_cover;
+
 CREATE INDEX IF NOT EXISTS idx_product_variant_rules_product
   ON product_variant_rules(product_id);
 

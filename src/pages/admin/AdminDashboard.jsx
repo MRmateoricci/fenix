@@ -702,6 +702,16 @@ function splitVariantRulesBySupplierCode(rules, colorOptions = [], product = {})
   })
 }
 
+function ensureCoverVariant(rules) {
+  const list = Array.isArray(rules) ? rules : []
+  if (!list.length) return list
+  const explicitIndex = list.findIndex(rule => rule.isCover)
+  const coverIndex = explicitIndex >= 0
+    ? explicitIndex
+    : Math.max(0, list.findIndex(rule => rule.image))
+  return list.map((rule, index) => ({ ...rule, isCover: index === coverIndex }))
+}
+
 function legacyVariantRulesFromProduct(product = {}) {
   const colors = (product.colors || []).filter(option => option?.name)
   const sizes = (product.sizes || []).filter(option => option?.label)
@@ -743,6 +753,7 @@ function baseVariantRuleFromProduct(product = {}) {
   return {
     id: `base-${Date.now()}`,
     isBase: true,
+    isCover: true,
     supplierCodes: [],
     color: '', colorHex: '#CCCCCC', tone: '', toneHex: '#CCCCCC',
     size: product.medida || '', sizeValue: measure.value, sizeUnit: measure.unit,
@@ -898,7 +909,7 @@ function ProductModal({ product, onSave, onClose, onVariantsChanged, publishOnSa
     if (isNew) return { ...EMPTY, variantRules: [baseVariantRuleFromProduct()] }
     const storedRules = splitVariantRulesBySupplierCode(product.variantRules, product.colors, product)
     const legacyRules = legacyVariantRulesFromProduct(product)
-    const variantRules = storedRules.length ? storedRules : legacyRules.length ? legacyRules : [baseVariantRuleFromProduct(product)]
+    const variantRules = ensureCoverVariant(storedRules.length ? storedRules : legacyRules.length ? legacyRules : [baseVariantRuleFromProduct(product)])
     if (variantRules.length && product.image && !variantRules.some(rule => rule.image)) {
       variantRules[0] = { ...variantRules[0], image: product.image }
     }
@@ -1065,6 +1076,7 @@ function ProductModal({ product, onSave, onClose, onVariantsChanged, publishOnSa
     variantRules: [...current.variantRules, {
       id: `manual-${Date.now()}`, supplierCodes: [], color: '', colorHex: '#CCCCCC', size: '', sizeValue: '', sizeUnit: '', tone: '', toneHex: '#CCCCCC',
       productData: { ...inheritingVariantProductData(product || current), codigo: '' }, image: '',
+      isCover: false,
       precio_costo: '', precio_venta: '', precio_iva: '', stock: 0,
       priceSourceIndex: null, priceSourcePercent: 0,
     }],
@@ -1073,10 +1085,10 @@ function ProductModal({ product, onSave, onClose, onVariantsChanged, publishOnSa
     ...current,
     variantRules: current.variantRules.length <= 1
       ? current.variantRules
-      : remapPriceSourceIndexes(
+      : ensureCoverVariant(remapPriceSourceIndexes(
         current.variantRules.filter((_, ruleIndex) => ruleIndex !== index),
         index
-      ),
+      )),
   }))
   const variantStockTotal = Object.values(form.variantStock)
     .flatMap(row => Object.values(row || {}))
@@ -1137,6 +1149,7 @@ function ProductModal({ product, onSave, onClose, onVariantsChanged, publishOnSa
     setSaving(true)
     setSaveError('')
     const primaryRule = form.variantRules[0]
+    const coverRule = form.variantRules.find(rule => rule.isCover) || primaryRule
     const primaryData = primaryRule?.productData || {}
     const out = { ...form }
     out.codigo = form.codigo.trim() || variantCode(primaryRule)
@@ -1153,7 +1166,7 @@ function ProductModal({ product, onSave, onClose, onVariantsChanged, publishOnSa
     out.priceWithTax = variantSummary.tax === '' ? null : variantSummary.tax
     out.stock = variantSummary.stock
 
-    out.image = primaryRule?.image || form.image || null
+    out.image = coverRule?.image || primaryRule?.image || form.image || null
     // El hover identifica visualmente al producto en el listado. Las variantes
     // conservan su imagen principal propia, pero comparten esta segunda imagen.
     out.hoverImage = form.hoverImage || null
@@ -1612,7 +1625,7 @@ function ProductModal({ product, onSave, onClose, onVariantsChanged, publishOnSa
               <div>
                 <label style={{ ...lbl, color: C.ink }}>Variantes</label>
                 <p style={{ fontSize: 11, color: C.muted, margin: '4px 0 0', lineHeight: 1.4 }}>
-                  La tienda sólo permite combinaciones cubiertas por estas filas. Cada variante concentra código, Color + Tono + Medida, ficha individual, precio, foto y stock; “Cualquiera” funciona como comodín para ese atributo.
+                  La tienda sólo permite combinaciones cubiertas por estas filas. Cada variante concentra código, Color + Tono + Medida, ficha individual, precio, foto y stock; “Cualquiera” funciona como comodín para ese atributo. Marcá “Portada” en la variante que debe verse primero en el listado y en la ficha.
                 </p>
               </div>
               <button type="button" onClick={addGroupedRule} style={{ ...outlineBtn, padding: '5px 10px', fontSize: 10.5, whiteSpace: 'nowrap' }}>+ Agregar variante</button>
@@ -1646,7 +1659,22 @@ function ProductModal({ product, onSave, onClose, onVariantsChanged, publishOnSa
                                 aria-label={`Código de variante ${index + 1}`}
                                 style={{ ...inp, minWidth: 0, height: 26, padding: '3px 6px', fontSize: 10 }}
                               />}
-                          <small style={{ color: index === 0 || specificity === 3 ? C.green : C.muted, fontSize: 9, fontWeight: 600 }}>{index === 0 ? 'Variante base' : specificity === 3 ? 'Exacta' : `Fallback · ${specificity}/3`}</small>
+                          <span style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 7 }}>
+                            <small style={{ color: index === 0 || specificity === 3 ? C.green : C.muted, fontSize: 9, fontWeight: 600 }}>{index === 0 ? 'Variante base' : specificity === 3 ? 'Exacta' : `Fallback · ${specificity}/3`}</small>
+                            <label title="Esta variante será la imagen inicial del listado y de la ficha" style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color: rule.isCover ? C.red : C.text3, fontSize: 9, fontWeight: 700, cursor: 'pointer' }}>
+                              <input
+                                type="radio"
+                                name={`cover-variant-${product?.id || 'new'}`}
+                                checked={Boolean(rule.isCover)}
+                                onChange={() => setForm(current => ({
+                                  ...current,
+                                  variantRules: current.variantRules.map((item, ruleIndex) => ({ ...item, isCover: ruleIndex === index })),
+                                }))}
+                                style={{ margin: 0 }}
+                              />
+                              Portada
+                            </label>
+                          </span>
                           <button type="button" onClick={() => setVariantDetailsIndex(index)} style={{ border: 'none', background: 'none', padding: 0, color: '#2563EB', cursor: 'pointer', textAlign: 'left', fontSize: 9.5 }}>Editar detalles</button>
                           {!hasSupplierCode && (
                             <PriceFollowField

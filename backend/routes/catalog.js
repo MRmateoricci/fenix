@@ -28,7 +28,7 @@ const SELECT_FIELDS = `
   COALESCE((
     SELECT jsonb_agg(jsonb_build_object(
       'id', vr.id, 'color', vr.color_name, 'colorHex', vr.color_hex, 'size', vr.size_label, 'tone', vr.tone_name, 'toneHex', vr.tone_hex,
-      'image', vr.image_url, 'productData', vr.product_data,
+      'image', vr.image_url, 'isCover', vr.is_cover, 'productData', vr.product_data,
       'price', vr.precio_venta, 'priceUsd', vr.precio_venta_usd,
       'priceWithTax', vr.precio_iva, 'priceWithTaxUsd', vr.precio_iva_usd,
       'currency', vr.price_currency
@@ -59,6 +59,7 @@ export function mapRow(r) {
     tone: rule.tone || null,
     toneHex: rule.toneHex || null,
     image: rule.image || null,
+    isCover: Boolean(rule.isCover),
     productData: rule.productData && typeof rule.productData === 'object' ? rule.productData : {},
     price: resolvePublicPrice({
       priceWithTax: rule.priceWithTax,
