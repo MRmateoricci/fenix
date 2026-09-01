@@ -311,76 +311,127 @@
 /* Checkout */
 .fnx-login-page {
   min-height: 520px;
-  display: grid;
-  place-items: center;
-  padding: 50px 24px;
+  padding: 58px 24px 72px;
   background: var(--color-bg);
 }
 
 .fnx-login-card {
-  width: min(560px, 100%);
-  padding: 46px 50px 54px;
+  width: min(1180px, 100%);
+  margin: 0 auto;
+  padding: 42px 48px 52px;
   border: 1px solid var(--color-border);
   background: var(--color-surface);
 }
 
 .fnx-login-card h1 {
-  margin: 0 0 24px;
-  color: #111;
-  font-size: 14px;
-  font-weight: 700;
-  letter-spacing: .08em;
-  text-align: center;
-  text-transform: uppercase;
+  margin: 0 0 34px;
+  color: var(--color-text);
+  font-family: var(--font-serif);
+  font-size: clamp(27px, 3vw, 34px);
+  font-weight: 500;
+  letter-spacing: -.01em;
 }
 
-.fnx-login-card form { display: flex; flex-direction: column; gap: 15px; }
+.fnx-login-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: clamp(52px, 8vw, 110px);
+}
+
+.fnx-login-section h2 {
+  margin: 0;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text);
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.fnx-login-intro {
+  min-height: 44px;
+  margin: 17px 0 23px;
+  color: var(--color-text-muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.fnx-login-card form { display: flex; flex-direction: column; }
+.fnx-login-card form > label:not(.fnx-login-show-password) {
+  margin-bottom: 8px;
+  color: var(--color-text);
+  font-size: 12px;
+  font-weight: 600;
+}
+.fnx-login-card form > label:not(.fnx-login-show-password) span,
+.fnx-login-required { color: var(--color-primary); }
 .fnx-login-card form > input,
 .fnx-auth-simple-page input {
   width: 100%;
-  height: 40px;
-  padding: 0 11px;
-  border: 1px solid #b8b8b8;
-  border-radius: 1px;
-  background: #fff;
-  color: #111;
-  font-size: 12px;
+  height: 44px;
+  padding: 0 13px;
+  border: 1px solid var(--color-border);
+  border-radius: 2px;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-size: 13px;
   outline: none;
 }
+.fnx-login-card form > input { margin-bottom: 19px; }
 .fnx-login-card form > input:focus,
 .fnx-auth-simple-page input:focus { border-color: var(--color-primary); }
-.fnx-login-error { margin: -4px 0 0; color: var(--color-primary); font-size: 11px; }
+.fnx-login-show-password {
+  width: fit-content;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  margin: 2px 0 21px;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-size: 12px;
+}
+.fnx-login-show-password input {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--color-primary);
+}
+.fnx-login-error { margin: -7px 0 17px; color: var(--color-primary); font-size: 11px; }
+.fnx-login-actions { display: flex; align-items: center; gap: 20px; }
 .fnx-login-submit,
+.fnx-login-create,
 .fnx-auth-simple-page form > button {
-  min-height: 38px;
+  min-height: 40px;
   border: 0;
-  border-radius: 1px;
+  border-radius: 2px;
   background: var(--color-primary);
   color: #fff;
   cursor: pointer;
   font-size: 11px;
   font-weight: 700;
   letter-spacing: .05em;
+  text-decoration: none;
   text-transform: uppercase;
+}
+.fnx-login-submit { min-width: 180px; padding: 0 24px; }
+.fnx-login-create {
+  width: fit-content;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 27px;
 }
 .fnx-login-submit:disabled,
 .fnx-auth-simple-page form > button:disabled { cursor: wait; opacity: .6; }
 .fnx-login-submit:hover:not(:disabled),
+.fnx-login-create:hover,
 .fnx-auth-simple-page form > button:hover:not(:disabled) { background: var(--color-primary-hover); }
-
-.fnx-login-links { display: flex; align-items: center; justify-content: center; gap: 14px; margin: 28px 0 20px; }
-.fnx-login-links a { color: #111; font-size: 10.5px; font-weight: 600; letter-spacing: .05em; text-decoration: none; text-transform: uppercase; }
-.fnx-login-links span { color: #999; }
-.fnx-login-divider { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; color: #111; font-size: 11px; text-transform: uppercase; }
-.fnx-login-divider::before,
-.fnx-login-divider::after { content: ''; flex: 1; height: 1px; background: #222; }
-
-.fnx-social-login { display: flex; flex-direction: column; gap: 8px; }
-.fnx-social-login button { position: relative; min-height: 37px; border: 0; border-radius: 3px; color: #fff; cursor: pointer; font-size: 11px; }
-.fnx-social-login button b { position: absolute; left: 9px; top: 50%; font: 700 23px/1 Arial,sans-serif; transform: translateY(-50%); }
-.fnx-social-login .google { background: #4285f4; }
-.fnx-social-login .facebook { background: #4267b2; }
-.fnx-social-login .facebook b { width: 20px; height: 20px; display: grid; place-items: end center; border-radius: 50%; background: #fff; color: #4267b2; font-size: 18px; }
+.fnx-login-actions a {
+  color: var(--color-text);
+  font-size: 12px;
+  text-decoration: none;
+}
+.fnx-login-actions a:hover { color: var(--color-primary); text-decoration: underline; }
+.fnx-login-required { display: block; margin-top: 30px; font-size: 11px; }
 
 .fnx-login-info {
   display: grid;
@@ -405,6 +456,123 @@
 .fnx-login-newsletter small { color: #166534; font-size: 10.5px; }
 .fnx-login-newsletter small.error { color: var(--color-primary); }
 
+.fnx-register-page {
+  min-height: 70vh;
+  padding: 58px 24px 76px;
+  background: var(--color-bg);
+}
+.fnx-register-card {
+  width: min(680px, 100%);
+  margin: 0 auto;
+  padding: 42px 48px 52px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+.fnx-register-card h1 {
+  margin: 0 0 29px;
+  color: var(--color-text);
+  font-family: var(--font-serif);
+  font-size: clamp(25px, 3vw, 31px);
+  font-weight: 500;
+  letter-spacing: -.01em;
+}
+.fnx-register-section {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.fnx-register-section + .fnx-register-section { margin-top: 35px; }
+.fnx-register-section legend {
+  width: 100%;
+  margin-bottom: 19px;
+  padding: 0 0 13px;
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text);
+  font-size: 17px;
+  font-weight: 500;
+}
+.fnx-register-field { margin-bottom: 18px; }
+.fnx-register-field label {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--color-text);
+  font-size: 12px;
+  font-weight: 600;
+}
+.fnx-register-field label span,
+.fnx-register-required { color: var(--color-primary); }
+.fnx-register-field input {
+  width: 100%;
+  height: 44px;
+  padding: 0 13px;
+  border: 1px solid var(--color-border);
+  border-radius: 2px;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-size: 13px;
+  outline: none;
+}
+.fnx-register-field input:focus { border-color: var(--color-primary); }
+.fnx-register-field.has-error input { border-color: var(--color-primary); }
+.fnx-register-field small {
+  display: block;
+  margin-top: 6px;
+  color: var(--color-text-muted);
+  font-size: 10.5px;
+}
+.fnx-register-field small.error,
+.fnx-register-submit-error { color: var(--color-primary); }
+.fnx-register-show-password,
+.fnx-register-newsletter {
+  width: fit-content;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-size: 12px;
+}
+.fnx-register-newsletter {
+  margin: 1px 0 20px;
+  line-height: 1.45;
+}
+.fnx-register-show-password input,
+.fnx-register-newsletter input {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
+  margin: 0;
+  accent-color: var(--color-primary);
+}
+.fnx-register-submit-error { margin: 21px 0 0; font-size: 11px; }
+.fnx-register-required { display: block; margin-top: 27px; font-size: 11px; }
+.fnx-register-actions {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  margin-top: 49px;
+}
+.fnx-register-actions button {
+  min-width: 190px;
+  min-height: 40px;
+  padding: 0 25px;
+  border: 0;
+  border-radius: 2px;
+  background: var(--color-primary);
+  color: #fff;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+.fnx-register-actions button:hover:not(:disabled) { background: var(--color-primary-hover); }
+.fnx-register-actions button:disabled { cursor: wait; opacity: .6; }
+.fnx-register-actions p { margin: 0; color: var(--color-text-muted); font-size: 12px; }
+.fnx-register-actions a { color: var(--color-text); font-weight: 600; text-decoration: none; }
+.fnx-register-actions a:hover { color: var(--color-primary); text-decoration: underline; }
+
 .fnx-auth-simple-page { min-height: 70vh; display: grid; place-items: center; padding: 50px 24px; background: var(--color-bg); }
 .fnx-auth-simple-page > section { width: min(460px, 100%); padding: 42px; background: #fff; }
 .fnx-auth-simple-page h1 { margin: 0 0 24px; color: #111; font-size: 19px; text-align: center; }
@@ -419,11 +587,21 @@
   .fnx-login-info { grid-template-columns: repeat(2, 1fr); }
 }
 
+@media (max-width: 760px) {
+  .fnx-login-columns { grid-template-columns: 1fr; gap: 48px; }
+  .fnx-login-intro { min-height: 0; }
+}
+
 @media (max-width: 560px) {
   .fnx-login-page { padding: 24px 14px; }
-  .fnx-login-card { padding: 34px 22px 40px; }
-  .fnx-login-links { align-items: center; flex-direction: column; gap: 8px; }
-  .fnx-login-links span { display: none; }
+  .fnx-login-card { padding: 30px 22px 38px; }
+  .fnx-login-card h1 { margin-bottom: 28px; }
+  .fnx-login-actions { align-items: flex-start; flex-direction: column; gap: 16px; }
+  .fnx-login-submit { width: 100%; }
+  .fnx-register-page { padding: 24px 14px 50px; }
+  .fnx-register-card { padding: 30px 22px 38px; }
+  .fnx-register-actions { align-items: flex-start; flex-direction: column; gap: 17px; margin-top: 38px; }
+  .fnx-register-actions button { width: 100%; }
   .fnx-login-info { grid-template-columns: 1fr; gap: 32px; padding: 38px 26px 50px; }
   .fnx-auth-simple-page > section { padding: 32px 22px; }
 }
@@ -1535,8 +1713,7 @@
     line-height: 1.35 !important;
   }
 
-  :where(.fnx-promo-slide, .fnx-products-grid) .fnx-product-card__badges,
-  :where(.fnx-promo-slide, .fnx-products-grid) .fnx-product-card__reviews {
+  :where(.fnx-promo-slide, .fnx-products-grid) .fnx-product-card__badges {
     display: none !important;
   }
 

@@ -671,7 +671,6 @@ function VariantDetailsModal({ code, codeLocked = false, value, onChange, onClos
           <label style={{ ...lbl, gridColumn: 'span 2' }}>Descripción individual<textarea value={data.description} onChange={event => set('description', event.target.value)} rows={4} style={{ ...inp, marginTop: 5, resize: 'vertical' }} /></label>
           <label style={{ ...lbl, gridColumn: 'span 2' }}>Descripción de inventario<textarea value={data.inventoryDescription} onChange={event => set('inventoryDescription', event.target.value)} rows={2} style={{ ...inp, marginTop: 5, resize: 'vertical' }} /></label>
           {fields.map(([label, field, type]) => <label key={field} style={lbl}>{label}<input type={type || 'text'} min={type === 'number' ? 0 : undefined} step="any" value={data[field] ?? ''} onChange={event => set(field, event.target.value)} style={{ ...inp, marginTop: 5 }} /></label>)}
-          <div style={{ gridColumn: 'span 2' }}><ImageFileField label="Imagen hover de la variante (opcional)" value={data.hoverImage} onChange={value => set('hoverImage', value)} /></div>
         </div>
       </div>
     </div>
@@ -718,6 +717,16 @@ function splitVariantRulesBySupplierCode(rules, colorOptions = [], product = {})
   })
 }
 
+function ensureCoverVariant(rules) {
+  const list = Array.isArray(rules) ? rules : []
+  if (!list.length) return list
+  const explicitIndex = list.findIndex(rule => rule.isCover)
+  const coverIndex = explicitIndex >= 0
+    ? explicitIndex
+    : Math.max(0, list.findIndex(rule => rule.image))
+  return list.map((rule, index) => ({ ...rule, isCover: index === coverIndex }))
+}
+
 function legacyVariantRulesFromProduct(product = {}) {
   const colors = (product.colors || []).filter(option => option?.name)
   const sizes = (product.sizes || []).filter(option => option?.label)
@@ -759,6 +768,7 @@ function baseVariantRuleFromProduct(product = {}) {
   return {
     id: `base-${Date.now()}`,
     isBase: true,
+    isCover: true,
     supplierCodes: [],
     color: '', colorHex: '#CCCCCC', tone: '', toneHex: '#CCCCCC',
     size: product.medida || '', sizeValue: measure.value, sizeUnit: measure.unit,
@@ -914,7 +924,7 @@ function ProductModal({ product, onSave, onClose, onVariantsChanged, publishOnSa
     if (isNew) return { ...EMPTY, variantRules: [baseVariantRuleFromProduct()] }
     const storedRules = splitVariantRulesBySupplierCode(product.variantRules, product.colors, product)
     const legacyRules = legacyVariantRulesFromProduct(product)
-    const variantRules = storedRules.length ? storedRules : legacyRules.length ? legacyRules : [baseVariantRuleFromProduct(product)]
+    const variantRules = ensureCoverVariant(storedRules.length ? storedRules : legacyRules.length ? legacyRules : [baseVariantRuleFromProduct(product)])
     if (variantRules.length && product.image && !variantRules.some(rule => rule.image)) {
       variantRules[0] = { ...variantRules[0], image: product.image }
     }
@@ -1081,6 +1091,7 @@ function ProductModal({ product, onSave, onClose, onVariantsChanged, publishOnSa
     variantRules: [...current.variantRules, {
       id: `manual-${Date.now()}`, supplierCodes: [], color: '', colorHex: '#CCCCCC', size: '', sizeValue: '', sizeUnit: '', tone: '', toneHex: '#CCCCCC',
       productData: { ...inheritingVariantProductData(product || current), codigo: '' }, image: '',
+      isCover: false,
       precio_costo: '', precio_venta: '', precio_iva: '', stock: 0,
       priceSourceIndex: null, priceSourcePercent: 0,
     }],
@@ -1089,10 +1100,10 @@ function ProductModal({ product, onSave, onClose, onVariantsChanged, publishOnSa
     ...current,
     variantRules: current.variantRules.length <= 1
       ? current.variantRules
-      : remapPriceSourceIndexes(
+      : ensureCoverVariant(remapPriceSourceIndexes(
         current.variantRules.filter((_, ruleIndex) => ruleIndex !== index),
         index
-      ),
+      )),
   }))
   const variantStockTotal = Object.values(form.variantStock)
     .flatMap(row => Object.values(row || {}))
@@ -1153,6 +1164,7 @@ function ProductModal({ product, onSave, onClose, onVariantsChanged, publishOnSa
     setSaving(true)
     setSaveError('')
     const primaryRule = form.variantRules[0]
+    const coverRule = form.variantRules.find(rule => rule.isCover) || primaryRule
     const primaryData = primaryRule?.productData || {}
     const out = { ...form }
     out.codigo = form.codigo.trim() || variantCode(primaryRule)
@@ -1169,8 +1181,10 @@ function ProductModal({ product, onSave, onClose, onVariantsChanged, publishOnSa
     out.priceWithTax = variantSummary.tax === '' ? null : variantSummary.tax
     out.stock = variantSummary.stock
 
-    out.image = primaryRule?.image || form.image || null
-    out.hoverImage = primaryData.hoverImage || form.hoverImage || null
+    out.image = coverRule?.image || primaryRule?.image || form.image || null
+    // El hover identifica visualmente al producto en el listado. Las variantes
+    // conservan su imagen principal propia, pero comparten esta segunda imagen.
+    out.hoverImage = form.hoverImage || null
     out.originalPrice = form.originalPrice ? Number(form.originalPrice) : null
     if (publishOnSave) out.published = true
     out.colors = form.colors.filter(c => c.name?.trim()).map(c => ({ ...c, price: c.price === '' || c.price == null ? null : Number(c.price) }))
@@ -1300,6 +1314,18 @@ function ProductModal({ product, onSave, onClose, onVariantsChanged, publishOnSa
               rows={3}
               style={{ ...inp, resize: 'vertical' }}
             />
+          </div>
+
+          <div style={{ gridColumn: 'span 2' }}>
+            <ImageFileField
+              label="Imagen hover del producto (opcional)"
+              value={form.hoverImage}
+              onChange={value => set('hoverImage', value)}
+              productId={product?.id}
+            />
+            <p style={{ fontSize: 11, color: C.muted, margin: '5px 0 0', lineHeight: 1.45 }}>
+              Reemplaza la imagen activa al pasar el cursor sobre la tarjeta del producto, sin importar qué variante esté seleccionada.
+            </p>
           </div>
 
           <div style={{ gridColumn: 'span 2' }}>
@@ -1614,7 +1640,7 @@ function ProductModal({ product, onSave, onClose, onVariantsChanged, publishOnSa
               <div>
                 <label style={{ ...lbl, color: C.ink }}>Variantes</label>
                 <p style={{ fontSize: 11, color: C.muted, margin: '4px 0 0', lineHeight: 1.4 }}>
-                  La tienda sólo permite combinaciones cubiertas por estas filas. Cada variante concentra código, Color + Tono + Medida, ficha individual, precio, foto y stock; “Cualquiera” funciona como comodín para ese atributo.
+                  La tienda sólo permite combinaciones cubiertas por estas filas. Cada variante concentra código, Color + Tono + Medida, ficha individual, precio, foto y stock; “Cualquiera” funciona como comodín para ese atributo. Marcá “Portada” en la variante que debe verse primero en el listado y en la ficha.
                 </p>
               </div>
               <button type="button" onClick={addGroupedRule} style={{ ...outlineBtn, padding: '5px 10px', fontSize: 10.5, whiteSpace: 'nowrap' }}>+ Agregar variante</button>
@@ -1648,7 +1674,22 @@ function ProductModal({ product, onSave, onClose, onVariantsChanged, publishOnSa
                                 aria-label={`Código de variante ${index + 1}`}
                                 style={{ ...inp, minWidth: 0, height: 26, padding: '3px 6px', fontSize: 10 }}
                               />}
-                          <small style={{ color: index === 0 || specificity === 3 ? C.green : C.muted, fontSize: 9, fontWeight: 600 }}>{index === 0 ? 'Variante base' : specificity === 3 ? 'Exacta' : `Fallback · ${specificity}/3`}</small>
+                          <span style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 7 }}>
+                            <small style={{ color: index === 0 || specificity === 3 ? C.green : C.muted, fontSize: 9, fontWeight: 600 }}>{index === 0 ? 'Variante base' : specificity === 3 ? 'Exacta' : `Fallback · ${specificity}/3`}</small>
+                            <label title="Esta variante será la imagen inicial del listado y de la ficha" style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color: rule.isCover ? C.red : C.text3, fontSize: 9, fontWeight: 700, cursor: 'pointer' }}>
+                              <input
+                                type="radio"
+                                name={`cover-variant-${product?.id || 'new'}`}
+                                checked={Boolean(rule.isCover)}
+                                onChange={() => setForm(current => ({
+                                  ...current,
+                                  variantRules: current.variantRules.map((item, ruleIndex) => ({ ...item, isCover: ruleIndex === index })),
+                                }))}
+                                style={{ margin: 0 }}
+                              />
+                              Portada
+                            </label>
+                          </span>
                           <button type="button" onClick={() => setVariantDetailsIndex(index)} style={{ border: 'none', background: 'none', padding: 0, color: '#2563EB', cursor: 'pointer', textAlign: 'left', fontSize: 9.5 }}>Editar detalles</button>
                           {!hasSupplierCode && (
                             <PriceFollowField
@@ -2499,6 +2540,7 @@ function CategoriesTab() {
   const [savingType, setSavingType] = useState(false)
   const [nameDrafts, setNameDrafts] = useState({})
   const [savingEdit, setSavingEdit] = useState('')
+  const [savingHeader, setSavingHeader] = useState('')
   const [toast, setToast] = useState(null)
   const [openCategory, setOpenCategory] = useState(
     categoryTree[0]?._taxonomy?.category || getCategoryValue(categoryTree[0]) || ''
@@ -2658,6 +2700,26 @@ function CategoriesTab() {
     }
   }
 
+  const handleHeaderVisibility = async (event, node) => {
+    event.preventDefault()
+    event.stopPropagation()
+    const key = nodeKey(node)
+    const showInHeader = event.target.checked
+    setSavingHeader(key)
+    try {
+      const meta = node._taxonomy
+      await saveCategoryCustomization({
+        level: 'category', category: meta.category || getCategoryValue(node),
+        subcategory: '', name: '', showInHeader,
+      })
+      notify(`“${node.label}” ${showInHeader ? 'se mostrará' : 'ya no se mostrará'} en el header`)
+    } catch (err) {
+      notify(err.message, 'error')
+    } finally {
+      setSavingHeader('')
+    }
+  }
+
   const actionButton = (background, color) => ({
     border: 'none', borderRadius: 6, background, color, cursor: 'pointer',
     fontSize: 11.5, fontWeight: 700, padding: '6px 9px', lineHeight: 1,
@@ -2720,7 +2782,24 @@ function CategoriesTab() {
   }
 
   const renderActions = (node, compact = false) => (
-    <button
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: compact ? 5 : 10, flexShrink: 0 }}>
+      {node._taxonomy?.level === 'category' && (
+        <label
+          title="Mostrar esta categoría como acceso rápido en el header de la tienda"
+          onClick={event => event.stopPropagation()}
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: C.text2, fontSize: 11.5, fontWeight: 700, cursor: savingHeader === nodeKey(node) ? 'wait' : 'pointer', whiteSpace: 'nowrap' }}
+        >
+          <input
+            type="checkbox"
+            checked={Boolean(node.showInHeader)}
+            disabled={savingHeader === nodeKey(node)}
+            onChange={event => handleHeaderVisibility(event, node)}
+            style={{ width: 15, height: 15, margin: 0, accentColor: C.red, cursor: 'pointer' }}
+          />
+          En header
+        </label>
+      )}
+      <button
       className={`fnx-category-delete${compact ? ' fnx-category-delete--compact' : ''}`}
       type="button"
       onClick={event => handleDelete(event, node)}
@@ -2734,7 +2813,8 @@ function CategoriesTab() {
       }}
     >
       {compact ? '×' : 'Eliminar'}
-    </button>
+      </button>
+    </span>
   )
 
   const hiddenItems = categoryCustomizations.filter(item => item.hidden)

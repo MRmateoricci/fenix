@@ -294,7 +294,7 @@ export async function loadMergePreview(client, rawIds) {
        COALESCE((
          SELECT jsonb_agg(jsonb_build_object(
            'id', vr.id, 'color', vr.color_name, 'colorHex', vr.color_hex, 'size', vr.size_label, 'tone', vr.tone_name, 'toneHex', vr.tone_hex,
-           'image', vr.image_url, 'productData', vr.product_data, 'precio_venta', vr.precio_venta, 'precio_iva', vr.precio_iva,
+            'image', vr.image_url, 'isCover', vr.is_cover, 'productData', vr.product_data, 'precio_venta', vr.precio_venta, 'precio_iva', vr.precio_iva,
            'stock', vr.stock,
            'supplierCodes', COALESCE((
              SELECT jsonb_agg(m.source_code ORDER BY m.source_code)
@@ -395,6 +395,7 @@ export async function mergeProducts(client, payload) {
       size_label: cleanLabel(assignment.size),
       tone_name: cleanLabel(assignment.tone),
       tone_hex: cleanHex(assignment.toneHex),
+      is_cover: !base.isGrouped && product.id === baseId,
       product_data: normalizeVariantProductData(assignment.productData, product),
       values: mergeRuleValues(product, assignment),
     }
@@ -443,11 +444,11 @@ export async function mergeProducts(client, payload) {
     tones = appendOption(tones, 'name', rule.tone_name, { hex: rule.tone_hex || '#CCCCCC' })
     const { rows } = await client.query(
       `INSERT INTO product_variant_rules
-         (product_id,color_name,color_hex,size_label,tone_name,tone_hex,image_url,product_data,precio_costo,precio_venta,precio_iva,
+         (product_id,color_name,color_hex,size_label,tone_name,tone_hex,image_url,is_cover,product_data,precio_costo,precio_venta,precio_iva,
           precio_costo_usd,precio_venta_usd,precio_iva_usd,price_currency,price_exchange_rate,stock)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING id`,
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING id`,
       [baseId, rule.color_name, rule.color_hex, rule.size_label, rule.tone_name, rule.tone_hex, rule.product.image_url || null,
-        JSON.stringify(rule.product_data), rule.product.precio_costo, rule.values.saleArs, rule.values.taxArs,
+        Boolean(rule.is_cover), JSON.stringify(rule.product_data), rule.product.precio_costo, rule.values.saleArs, rule.values.taxArs,
         rule.product.precio_costo_usd, rule.values.saleUsd, rule.values.taxUsd,
         rule.product.price_currency || 'ARS', rule.product.price_exchange_rate, rule.values.stock]
     )
@@ -628,6 +629,17 @@ export async function detachVariantRule(client, productId, ruleId) {
     await applyRuleToProduct(productId, remainingRule, remainingMappings[0], group.published)
     await client.query('DELETE FROM product_variant_rules WHERE id=$1', [remainingRule.id])
     return { detached, groupRemoved: true, remaining: 1 }
+  }
+
+  if (targetRule.is_cover) {
+    await client.query(
+      'UPDATE product_variant_rules SET is_cover=TRUE WHERE id=$1 AND product_id=$2',
+      [remainingRules[0].id, productId]
+    )
+    await client.query(
+      'UPDATE products SET image_url=COALESCE($1,image_url) WHERE id=$2',
+      [remainingRules[0].image_url, productId]
+    )
   }
 
   await rebuildGroupedAxes(client, productId)

@@ -8,7 +8,7 @@
 > Un ajuste de padding, no.
 
 **Última actualización:** 1 de septiembre de 2026
-**Commit de referencia:** `015f5ae` + cambios locales de esta tanda
+**Commit de referencia:** `053fb0f` + merge de `main` remoto (`ac3cb33`) + cambios locales de esta tanda
 
 ---
 
@@ -26,7 +26,7 @@
 | Cotización de envío | 🟡 Provisorio | Tarifario Andreani manual: zona × peso + seguro + IVA · plazos de tránsito propios (Shipnow) · falta cargar peso real en productos |
 | Envío gratis por monto | ✅ Funcionando | Umbral por env var |
 | Cupones de descuento | ✅ Funcionando | |
-| Cuentas de cliente | ✅ Funcionando | Email + OAuth Google/Facebook · sección **Cuentas** (solo lectura) en el panel |
+| Cuentas de cliente | ✅ Funcionando | Email · OAuth Google/Facebook oculto hasta configurarlo · sección **Cuentas** (solo lectura) en el panel |
 | Pedidos y seguimiento | ✅ Funcionando | Con notificaciones por mail |
 | Reseñas | ✅ Funcionando | Propias + Google Places |
 | Alertas de stock | ⚪ Fuera de uso | Tabla y endpoints intactos, formulario retirado de la ficha |
@@ -150,6 +150,11 @@ hizo propio y queda dentro del panel.
 - Sin cambios en el menú mobile (tiene su propio drill-down por tap) ni en el
   buscador ni en el dropdown de cuenta. Frontend compila.
 - Pendiente: verificación en dispositivo móvil real.
+- **Merge con `main` remoto:** los atajos del header ya no son la lista fija
+  `NAV_ITEMS` sino las categorías con `showInHeader` (checkbox del panel,
+  `headerCategories()` + `visibleHeaderCategories`). El gesto sigue siendo solo
+  click: se descartó el `onMouseEnter` que traía esa rama en cada atajo y en el
+  link de Contacto.
 
 ## Tarifario de envío Andreani: zona × peso + seguro + IVA (2026-09-01)
 
@@ -203,6 +208,32 @@ servicio) por el esquema de Andreani.
   `demo.fenix.test`, pedidos `DEMO-C-*`); `--clean` las borra. No siembra reseñas
   (son públicas).
 - Pendiente: verificación en dispositivo móvil real.
+
+## Acceso de clientes reorganizado (2026-08-31)
+
+- La pantalla separa en dos columnas a clientes registrados y nuevos clientes, con contexto sobre cada acción y un acceso destacado al registro.
+- El formulario incorporó etiquetas visibles, indicación de campos obligatorios, opción para mostrar la contraseña y recuperación junto al botón principal.
+- La creación de cuenta comparte la misma jerarquía visual, divide datos personales y credenciales, y valida la confirmación de la contraseña antes de enviarla.
+- El registro admite DNI opcional (7 u 8 dígitos) y una casilla de suscripción al newsletter desmarcada por defecto. El backend persiste el DNI y, con consentimiento, agrega el correo a `newsletter_subscribers` sin duplicarlo y dentro de la misma transacción que crea la cuenta.
+- La disposición pasa a una sola columna en pantallas angostas; la comprobación en un dispositivo móvil real queda pendiente.
+- La pantalla muestra únicamente el acceso con correo y contraseña.
+- Se ocultaron el separador y los botones de Google y Facebook hasta que sus credenciales OAuth estén configuradas. Las rutas del backend permanecen intactas para una futura habilitación.
+- Requiere ejecutar la migración idempotente de `backend/db/schema.sql`. Frontend compilado y suite backend aprobada: 180 pruebas, 1 integración PostgreSQL omitida sin `TEST_DATABASE_URL`.
+
+## Variante de portada elegible (2026-08-31)
+
+- Cada producto agrupado permite marcar una única fila como **Portada** desde la tabla de variantes. La elección se persiste en `product_variant_rules.is_cover`, protegida por un índice único parcial por producto.
+- La tienda abre tanto la tarjeta como la ficha con la foto y los selectores de esa variante. Al guardar también se sincroniza `products.image_url`, para que buscador, SEO y vistas sin resolución de variantes usen la misma portada.
+- Los productos existentes conservan su comportamiento hasta volver a guardarlos; el editor propone como portada la primera variante que tenga foto cuando todavía no existe una elección persistida.
+- La etiqueta **Variante base** no se cambió: hoy significa solamente “primera regla recibida”, ordenada por `created_at`. No se ordena por precio. Puede cambiar al borrar, separar, unir o recrear reglas; el precio “desde” sí se calcula aparte como el mínimo, lo que puede hacer parecer que ambos conceptos están relacionados.
+- Requiere ejecutar la migración idempotente de `backend/db/schema.sql`. Frontend compilado; suite backend y tests públicos de variantes aprobados.
+
+## Imagen hover general del producto (2026-08-30)
+
+- La imagen hover se configura una sola vez en **Información general compartida**; dejó de presentarse como un dato individual de cada variante.
+- En las tarjetas del catálogo reemplaza a la imagen activa al pasar el cursor aunque el producto tenga variantes. Si el cliente elige un color mientras mantiene el cursor dentro, la foto principal de ese color toma prioridad hasta que salga de la tarjeta; al volver a entrar se habilita nuevamente el hover general.
+- No se modificaron las imágenes principales por variante ni la galería de la ficha. Frontend compilado y suite backend verificada: 180 pruebas aprobadas, 1 integración PostgreSQL omitida sin `TEST_DATABASE_URL`.
+- Pendiente: verificación del gesto y la presentación en un dispositivo móvil real.
 
 ## Sección Tienda del panel paginada + filtro por imagen (2026-08-30)
 

@@ -26,13 +26,14 @@ test('el catálogo prioriza el precio con IVA cargado', () => {
 test('el catálogo muestra IVA explícito o calculado en las variantes combinadas', () => {
   const mapped = mapRow(product({
     variant_rules: [
-      { id: '10', size: '10 mm', price: 100, priceWithTax: 130, currency: 'ARS', image: '/10.jpg' },
+      { id: '10', size: '10 mm', price: 100, priceWithTax: 130, currency: 'ARS', image: '/10.jpg', isCover: true },
       { id: '20', size: '20 mm', price: 200, priceWithTax: null, currency: 'ARS' },
     ],
   }))
 
   assert.deepEqual(mapped.variantRules.map(rule => rule.price), [130, 242])
   assert.equal(mapped.variantRules[0].image, '/10.jpg')
+  assert.equal(mapped.variantRules[0].isCover, true)
 })
 
 test('el catálogo convierte proveedores USD a ARS, incluidas sus variantes', () => {

@@ -1,5 +1,9 @@
 const same = (left, right) => String(left || '').localeCompare(String(right || ''), 'es-AR', { sensitivity: 'base' }) === 0
 
+export function getPublicCoverVariantRule(rules) {
+  return (Array.isArray(rules) ? rules : []).find(rule => rule?.isCover) || null
+}
+
 export function publicRuleSpecificity(rule) {
   return ['color', 'size', 'tone'].reduce((total, key) => total + (rule?.[key] ? 1 : 0), 0)
 }

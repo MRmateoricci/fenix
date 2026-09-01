@@ -13,13 +13,14 @@ function values(body = {}) {
     name: String(body.name || '').trim(),
     label: body.label == null ? null : String(body.label).trim(),
     hidden: Boolean(body.hidden),
+    showInHeader: typeof body.showInHeader === 'boolean' ? body.showInHeader : null,
   }
 }
 
 router.get('/', async (_req, res) => {
   try {
     const { rows } = await pool.query(
-      `SELECT id, level, category, subcategory, name, label, hidden, created_at, updated_at
+      `SELECT id, level, category, subcategory, name, label, hidden, show_in_header, created_at, updated_at
        FROM category_tree_customizations ORDER BY level, category, subcategory, name`
     )
     res.json(rows)
@@ -94,14 +95,15 @@ router.put('/', requireAdmin, async (req, res) => {
     }
 
     const { rows } = await client.query(
-      `INSERT INTO category_tree_customizations (level, category, subcategory, name, label, hidden)
-       VALUES ($1, $2, $3, $4, $5, $6)
+      `INSERT INTO category_tree_customizations (level, category, subcategory, name, label, hidden, show_in_header)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
        ON CONFLICT (level, category, subcategory, name) DO UPDATE SET
          label = COALESCE(EXCLUDED.label, category_tree_customizations.label),
          hidden = EXCLUDED.hidden,
+         show_in_header = COALESCE(EXCLUDED.show_in_header, category_tree_customizations.show_in_header),
          updated_at = NOW()
-       RETURNING id, level, category, subcategory, name, label, hidden, created_at, updated_at`,
-      [input.level, input.category, input.subcategory, input.name, input.label, input.hidden]
+       RETURNING id, level, category, subcategory, name, label, hidden, show_in_header, created_at, updated_at`,
+      [input.level, input.category, input.subcategory, input.name, input.label, input.hidden, input.showInHeader]
     )
     await client.query('COMMIT')
     res.json(rows[0])

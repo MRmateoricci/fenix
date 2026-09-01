@@ -10,6 +10,7 @@ import FenixLogo from '../assets/FenixLogo'
 import { SEO as seoCfg } from '../config/seo'
 import {
   findCompatiblePublicSelection,
+  getPublicCoverVariantRule,
   hasMatchingPublicRule,
   hasPublicAxisFallback,
   resolvePublicVariantRule,
@@ -74,6 +75,7 @@ export default function ProductDetail() {
   const { isAuthenticated, user } = useAuth()
   const { isFavorite, toggleFavorite } = useFavorites()
   const product = products.find(p => p.id === id)
+  const coverVariantRule = getPublicCoverVariantRule(product?.variantRules)
   const reviewsData = useProductReviews(product?.id, `${isAuthenticated}-${user?.emailVerified}`)
 
   const [qty, setQty]     = useState(1)
@@ -169,7 +171,11 @@ export default function ProductDetail() {
     let nextColor = product?.colors?.[0] ?? null
     let nextSize = product?.sizes?.[0] ?? null
     let nextTone = product?.tones?.[0] ?? null
-    if (product?.variantRules?.length) {
+    if (coverVariantRule) {
+      nextColor = findPublicOption('color', coverVariantRule.color)
+      nextSize = findPublicOption('size', coverVariantRule.size)
+      nextTone = findPublicOption('tone', coverVariantRule.tone)
+    } else if (product?.variantRules?.length) {
       const colors = hasPublicAxisFallback(product.variantRules, 'color')
         ? [null, ...(product.colors || [])]
         : (product.colors?.length ? product.colors : [null])
@@ -186,7 +192,7 @@ export default function ProductDetail() {
     setSelectedSize(nextSize)
     setSelectedTone(nextTone)
     setImgError(false)
-  }, [product?.id])
+  }, [product?.id, coverVariantRule?.id])
 
   // Sin stock que consultar no hay tope real de cantidad. El tope de arriba es
   // sólo para atajar un tipeo (nadie compra 300 plafones por la web sin

@@ -331,6 +331,13 @@ ALTER TABLE product_variant_rules ADD COLUMN IF NOT EXISTS product_data JSONB NO
 -- productos o editar variantes ya agrupadas, y el tono quedaba siempre gris.
 ALTER TABLE product_variant_rules ADD COLUMN IF NOT EXISTS tone_hex VARCHAR(7);
 
+-- La portada debe ser una elección editorial estable: no puede depender de la
+-- primera fila, del precio mínimo ni del orden en que se importaron variantes.
+ALTER TABLE product_variant_rules ADD COLUMN IF NOT EXISTS is_cover BOOLEAN NOT NULL DEFAULT FALSE;
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_product_variant_rules_cover
+  ON product_variant_rules(product_id) WHERE is_cover;
+
 CREATE INDEX IF NOT EXISTS idx_product_variant_rules_product
   ON product_variant_rules(product_id);
 
@@ -569,10 +576,16 @@ CREATE TABLE IF NOT EXISTS category_tree_customizations (
   name        VARCHAR(150) NOT NULL DEFAULT '',
   label       VARCHAR(150),
   hidden      BOOLEAN      NOT NULL DEFAULT FALSE,
+  show_in_header BOOLEAN,
   created_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
   updated_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
   UNIQUE (level, category, subcategory, name)
 );
+
+-- NULL conserva el comportamiento historico del header para las categorias
+-- incluidas de fabrica; TRUE/FALSE representa la eleccion explicita del admin.
+ALTER TABLE category_tree_customizations
+  ADD COLUMN IF NOT EXISTS show_in_header BOOLEAN;
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- Cupones de descuento (código ingresado en el checkout). El código se guarda
@@ -995,6 +1008,15 @@ CREATE TABLE IF NOT EXISTS bank_transfer_guest_tokens (
 );
 CREATE INDEX IF NOT EXISTS idx_bank_transfer_guest_tokens_order
   ON bank_transfer_guest_tokens(order_id, expires_at);
+
+-- El DNI opcional queda asociado a la cuenta para no volver a solicitarlo en
+-- futuras experiencias que necesiten identificar al cliente.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS dni VARCHAR(8);
+COMMENT ON COLUMN users.dni IS
+  'Conserva el DNI que el cliente decide informar al crear su cuenta para reutilizar su identificacion.';
+ALTER TABLE users DROP CONSTRAINT IF EXISTS users_dni_check;
+ALTER TABLE users ADD CONSTRAINT users_dni_check
+  CHECK (dni IS NULL OR dni ~ '^[0-9]{7,8}$');
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- Analítica de visitas

@@ -6,18 +6,27 @@ import { useAuth } from '../context/AuthContext'
 import CartDrawer from './CartDrawer'
 import FenixLogo from '../assets/FenixLogo'
 import { NAVBAR_HEIGHT, ANNOUNCEMENT_BAR_HEIGHT, PAGE_CONTENT_OFFSET } from '../config/layout'
-import { getCategoryValue } from '../data/categoryTree'
+import { DEFAULT_HEADER_CATEGORY_VALUES, getCategoryValue } from '../data/categoryTree'
 
 const fmtPrice = (n) =>
   new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(n)
 
-const NAV_ITEMS = [
-  { label: 'Electricidad',   to: '/products?category=Electricidad',            category: 'Electricidad' },
-  { label: 'Iluminación',    to: '/products?category=Iluminación',             category: 'Iluminación' },
-  { label: 'Herramientas',   to: '/products?category=Herramientas',            category: 'Herramientas' },
-  { label: 'Automatización', to: '/products?category=Automatización Industrial', category: 'Automatización Industrial' },
-  { label: 'Contacto',      hash: 'contacto' },
-]
+const CONTACT_NAV_ITEM = { label: 'Contacto', hash: 'contacto' }
+
+function headerCategories(categoryTree) {
+  return categoryTree
+    .filter(category => category.showInHeader)
+    .sort((left, right) => {
+      const leftKey = left._taxonomy?.category || getCategoryValue(left)
+      const rightKey = right._taxonomy?.category || getCategoryValue(right)
+      const leftIndex = DEFAULT_HEADER_CATEGORY_VALUES.indexOf(leftKey)
+      const rightIndex = DEFAULT_HEADER_CATEGORY_VALUES.indexOf(rightKey)
+      if (leftIndex < 0 && rightIndex < 0) return 0
+      if (leftIndex < 0) return 1
+      if (rightIndex < 0) return -1
+      return leftIndex - rightIndex
+    })
+}
 
 function scrollTo(id) {
   document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' })
@@ -180,6 +189,7 @@ export default function Navbar() {
   const ink    = opaque ? '#16110B' : '#F7F4EF'
   const searchBorder = opaque ? 'rgba(22,17,11,0.3)' : 'rgba(247,244,239,0.4)'
   const activeCategory = categoryTree.find(c => c.label === activeCategoryLabel) || categoryTree[0]
+  const visibleHeaderCategories = headerCategories(categoryTree)
 
   return (
     <>
@@ -231,26 +241,21 @@ export default function Navbar() {
                 </svg>
               </button>
 
-              {NAV_ITEMS.map((item) => {
-                const category = item.category
-                  ? categoryTree.find((cat) => getCategoryValue(cat) === item.category)
-                  : null
-                const isActiveCategory = category && categoryOpen && activeCategoryLabel === category.label
-
+              {visibleHeaderCategories.map((category) => {
+                const isActiveCategory = categoryOpen && activeCategoryLabel === category.label
                 return (
                   <a
-                    key={item.label}
-                    href={item.to || `#${item.hash}`}
+                    key={category._taxonomy?.category || category.label}
+                    href={category.to}
                     onClick={(e) => {
                       // Un atajo de categoría abre el mega-menú en esa categoría
                       // (segundo click sobre el mismo lo cierra); "Ver todo" del
-                      // panel lleva a la sección. El resto (Contacto) hace scroll.
-                      if (!category) return handleLink(item, e)
+                      // panel lleva a la sección.
                       e.preventDefault()
                       if (isActiveCategory) setCategoryOpen(false)
                       else openCategoryMenu(category.label)
                     }}
-                    aria-expanded={category ? isActiveCategory : undefined}
+                    aria-expanded={isActiveCategory}
                     style={{
                       textDecoration: 'none',
                       fontFamily: "var(--font-sans)",
@@ -263,10 +268,21 @@ export default function Navbar() {
                       borderBottom: `1px solid ${isActiveCategory ? ink : 'transparent'}`,
                     }}
                   >
-                    {item.label}
+                    {category.label}
                   </a>
                 )
               })}
+              <a
+                href={`#${CONTACT_NAV_ITEM.hash}`}
+                onClick={(event) => handleLink(CONTACT_NAV_ITEM, event)}
+                style={{
+                  textDecoration: 'none', fontFamily: "var(--font-sans)", fontSize: 13.5,
+                  fontWeight: 400, color: ink, opacity: 0.82, transition: 'opacity .18s ease, color .3s ease',
+                  whiteSpace: 'nowrap', paddingBottom: 3, borderBottom: '1px solid transparent',
+                }}
+              >
+                {CONTACT_NAV_ITEM.label}
+              </a>
             </nav>
           </div>
 
@@ -667,6 +683,7 @@ function CartButton({ totalItems, onClick, ink }) {
 // ─── Mobile full-screen menu ───────────────────────────────────────────────────
 function MobileMenu({ open, onClose, onNavigate, navigate }) {
   const { categoryTree } = useAdmin()
+  const visibleHeaderCategories = headerCategories(categoryTree)
   const [catPath, setCatPath] = useState(null) // null = main menu · [] = category root · [...] = drilled in
 
   useEffect(() => { if (!open) setCatPath(null) }, [open])
@@ -793,9 +810,9 @@ function MobileMenu({ open, onClose, onNavigate, navigate }) {
           >
             Categoría
           </a>
-          {NAV_ITEMS.map((item) => (
+          {[...visibleHeaderCategories, CONTACT_NAV_ITEM].map((item) => (
             <a
-              key={item.label}
+              key={item._taxonomy?.category || item.label}
               href={item.to || `#${item.hash}`}
               onClick={(e) => onNavigate(item, e)}
               style={{

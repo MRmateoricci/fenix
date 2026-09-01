@@ -226,6 +226,18 @@ function addFilterLinks(nodes, inheritedTo) {
 
 export const CATEGORY_TREE = addFilterLinks(RAW_CATEGORY_TREE)
 
+// Mantiene la navegacion rapida que existia antes de que esta preferencia
+// pudiera editarse. Las categorias nuevas quedan fuera hasta que el admin las
+// marque expresamente.
+export const DEFAULT_HEADER_CATEGORY_VALUES = [
+  'Electricidad',
+  'Iluminación',
+  'Herramientas',
+  'Automatización Industrial',
+]
+
+const DEFAULT_HEADER_CATEGORIES = new Set(DEFAULT_HEADER_CATEGORY_VALUES)
+
 export function getCategoryValue(node) {
   const query = node?.to?.split('?')[1] || ''
   return new URLSearchParams(query).get('category')
@@ -263,10 +275,14 @@ export function buildCategoryTree(customSubcategories = [], customProductTypes =
     const categoryChange = customization(customizations, 'category', sourceCategory)
     if (categoryChange?.hidden) return []
     const category = categoryChange?.label || sourceCategory
+    const showInHeader = typeof categoryChange?.show_in_header === 'boolean'
+      ? categoryChange.show_in_header
+      : DEFAULT_HEADER_CATEGORIES.has(sourceCategory)
     const catNode = {
       ...sourceCatNode,
       label: categoryChange?.label || sourceCatNode.label,
       to: taxonomyLink(category),
+      showInHeader,
       _taxonomy: { source: 'factory', level: 'category', category: sourceCategory, subcategory: '', name: '' },
     }
     const existingChildren = (sourceCatNode.children || []).flatMap((sourceSubNode) => {
@@ -374,6 +390,7 @@ export function buildCategoryTree(customSubcategories = [], customProductTypes =
       return {
         label: category,
         to: categoryTo,
+        showInHeader: item.show_in_header === true,
         children,
         _taxonomy: {
           source: 'custom', level: 'category', category: item.category,

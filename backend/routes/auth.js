@@ -35,6 +35,7 @@ function toPublicUser(row) {
     email:      row.email,
     firstName:  row.first_name,
     lastName:   row.last_name,
+    dni:        row.dni,
     phone:      row.phone,
     address:    row.address,
     city:       row.city,
@@ -166,7 +167,7 @@ async function findOrCreateSocialUser(profile) {
 // ─────────────────────────────────────────────────────────────────────────────
 router.post('/register', async (req, res) => {
   try {
-    const { email, password, firstName, lastName, phone } = req.body
+    const { email, password, firstName, lastName, phone, dni, subscribeNewsletter } = req.body
 
     if (!isValidEmail(email))
       return res.status(400).json({ error: 'Email inválido' })
@@ -176,21 +177,50 @@ router.post('/register', async (req, res) => {
       return res.status(400).json({ error: 'Nombre y apellido son requeridos' })
 
     const normalizedEmail = normalizeEmail(email)
-
-    const existing = await pool.query('SELECT id FROM users WHERE email = $1', [normalizedEmail])
-    if (existing.rows.length)
-      return res.status(409).json({ error: 'Ya existe una cuenta con ese email' })
+    const rawDni = typeof dni === 'string' ? dni.trim() : ''
+    const normalizedDni = rawDni.replace(/\D/g, '')
+    if (rawDni && !/^\d{7,8}$/.test(normalizedDni))
+      return res.status(400).json({ error: 'El DNI debe tener 7 u 8 dígitos' })
 
     const passwordHash = await bcrypt.hash(password, 10)
+    const client = await pool.connect()
+    let user
+    try {
+      await client.query('BEGIN')
+      const { rows } = await client.query(
+        `INSERT INTO users (email, password_hash, first_name, last_name, phone, dni)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT (email) DO NOTHING
+         RETURNING *`,
+        [
+          normalizedEmail,
+          passwordHash,
+          firstName.trim(),
+          lastName.trim(),
+          phone?.trim() || null,
+          normalizedDni || null,
+        ]
+      )
+      if (!rows.length) {
+        await client.query('ROLLBACK')
+        return res.status(409).json({ error: 'Ya existe una cuenta con ese email' })
+      }
 
-    const { rows } = await pool.query(
-      `INSERT INTO users (email, password_hash, first_name, last_name, phone)
-       VALUES ($1, $2, $3, $4, $5)
-       RETURNING *`,
-      [normalizedEmail, passwordHash, firstName.trim(), lastName.trim(), phone?.trim() || null]
-    )
+      user = rows[0]
+      if (subscribeNewsletter === true) {
+        await client.query(
+          'INSERT INTO newsletter_subscribers (email) VALUES ($1) ON CONFLICT (email) DO NOTHING',
+          [normalizedEmail]
+        )
+      }
+      await client.query('COMMIT')
+    } catch (err) {
+      await client.query('ROLLBACK')
+      throw err
+    } finally {
+      client.release()
+    }
 
-    const user = rows[0]
     res.cookie(COOKIE_NAME, signToken(user.id), cookieOptions())
     const verificationEmailSent = await issueEmailVerification(user)
     res.status(201).json({ user: toPublicUser(user), verificationEmailSent })

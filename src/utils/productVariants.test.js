@@ -1,6 +1,15 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { hasPublicAxisFallback, resolvePublicVariantRule } from './productVariants.js'
+import { getPublicCoverVariantRule, hasPublicAxisFallback, resolvePublicVariantRule } from './productVariants.js'
+
+test('la portada se resuelve por la marca explícita y no por posición o precio', () => {
+  const rules = [
+    { id: 'barata', price: 100, image: '/barata.jpg' },
+    { id: 'portada', price: 300, image: '/portada.jpg', isCover: true },
+  ]
+
+  assert.equal(getPublicCoverVariantRule(rules)?.id, 'portada')
+})
 
 test('sin color usa la regla comodín de la medida', () => {
   const rules = [

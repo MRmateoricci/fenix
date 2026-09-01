@@ -832,7 +832,7 @@ router.get('/:id', async (req, res) => {
               COALESCE((
                 SELECT jsonb_agg(jsonb_build_object(
                   'id', vr.id, 'color', vr.color_name, 'colorHex', vr.color_hex, 'size', vr.size_label, 'tone', vr.tone_name, 'toneHex', vr.tone_hex,
-                  'image', vr.image_url, 'productData', vr.product_data,
+                  'image', vr.image_url, 'isCover', vr.is_cover, 'productData', vr.product_data,
                   'precio_costo', vr.precio_costo, 'precio_venta', vr.precio_venta, 'precio_iva', vr.precio_iva,
                   'precio_costo_usd', vr.precio_costo_usd, 'precio_venta_usd', vr.precio_venta_usd,
                   'precio_iva_usd', vr.precio_iva_usd, 'price_currency', vr.price_currency,
@@ -869,6 +869,7 @@ router.patch('/:id/variant-rules', async (req, res) => {
     tone_name: String(rule.tone || '').trim() || null,
     tone_hex: /^#[0-9a-f]{6}$/i.test(String(rule.toneHex || '').trim()) ? String(rule.toneHex).trim().toUpperCase() : null,
     image_url: String(rule.image || '').trim() || null,
+    is_cover: Boolean(rule.isCover),
     product_data: rule.productData && typeof rule.productData === 'object' && !Array.isArray(rule.productData)
       ? normalizeVariantProductData(rule.productData)
       : null,
@@ -885,6 +886,13 @@ router.patch('/:id/variant-rules', async (req, res) => {
     supplier_codes: [...new Set((Array.isArray(rule.supplierCodes) ? rule.supplierCodes : [])
       .map(code => String(code || '').trim()).filter(Boolean))],
   }))
+  const coverCount = normalized.filter(rule => rule.is_cover).length
+  if (coverCount > 1) {
+    return res.status(400).json({ error: 'Elegí una sola variante para la portada' })
+  }
+  // Clientes anteriores a esta opción no mandan la marca. Conservar la primera
+  // como fallback permite guardar sin romper productos existentes.
+  if (coverCount === 0) normalized[0].is_cover = true
   if (normalized.some(rule => [rule.precio_costo, rule.precio_venta, rule.precio_iva].some(value => value != null && value < 0) ||
       (rule.stock != null && (!Number.isInteger(rule.stock) || rule.stock < 0)))) {
     return res.status(400).json({ error: 'Hay precios o cantidades inválidas' })
@@ -961,6 +969,9 @@ router.patch('/:id/variant-rules', async (req, res) => {
     if (removableIds.length) {
       await client.query('DELETE FROM product_variant_rules WHERE product_id=$1 AND id=ANY($2::uuid[])', [req.params.id, removableIds])
     }
+    // Se limpia primero para que el índice único no choque al cambiar la portada
+    // de una variante existente a otra dentro de la misma transacción.
+    await client.query('UPDATE product_variant_rules SET is_cover=FALSE WHERE product_id=$1 AND is_cover=TRUE', [req.params.id])
     const rate = Number(product.usd_ars_rate) || 1510
     const savedRules = []
     for (const rule of normalized) {
@@ -995,6 +1006,11 @@ router.patch('/:id/variant-rules', async (req, res) => {
       }
       savedRules.push({ ...rule, id: savedRuleId })
     }
+    const coverRule = savedRules.find(rule => rule.is_cover) || savedRules[0]
+    await client.query(
+      'UPDATE product_variant_rules SET is_cover=TRUE WHERE id=$1 AND product_id=$2',
+      [coverRule.id, req.params.id]
+    )
     // El seguimiento se persiste en una segunda pasada: una variante nueva recién
     // acá tiene id, así que antes no se podía apuntar a ella.
     for (let index = 0; index < savedRules.length; index++) {
@@ -1035,8 +1051,9 @@ router.patch('/:id/variant-rules', async (req, res) => {
         hex: normalized.find(rule => rule.tone_name && String(rule.tone_name).localeCompare(tone.name, 'es-AR', { sensitivity: 'base' }) === 0)?.tone_hex || tone.hex || '#CCCCCC',
       }))
     await client.query(
-      'UPDATE products SET color_options=$1::jsonb,size_options=$2::jsonb,tone_options=$3::jsonb WHERE id=$4',
-      [JSON.stringify(colors), JSON.stringify(sizes), JSON.stringify(tones), req.params.id]
+      `UPDATE products SET color_options=$1::jsonb,size_options=$2::jsonb,tone_options=$3::jsonb,
+         image_url=COALESCE($4,image_url) WHERE id=$5`,
+      [JSON.stringify(colors), JSON.stringify(sizes), JSON.stringify(tones), coverRule.image_url, req.params.id]
     )
     // Editar a mano el precio de una variante seguida arrastra a las que la siguen,
     // igual que cuando el cambio viene de una lista de precios.
