@@ -35,7 +35,8 @@ Estilos mayormente inline con variables CSS (`var(--color-bg)`, `var(--font-seri
 **Backend** — Node 20+, Express 4, PostgreSQL (`pg`), ESM (`"type": "module"`).
 
 **Servicios externos** — Mercado Pago (Checkout Pro), Nodemailer/Gmail SMTP,
-Google Places API (reseñas), OAuth Google/Facebook, Correo Argentino (pendiente).
+Google Places API (reseñas), OAuth Google/Facebook, Andreani (tarifario manual,
+integración API pendiente).
 
 **Deploy** — Railway. Express sirve el `dist/` del frontend y la API desde un
 único servicio, por eso `APP_BASE_URL` y `FRONTEND_BASE_URL` comparten dominio
@@ -74,8 +75,9 @@ src/
     Cart.jsx  Checkout.jsx  OrderConfirmation.jsx  OrderTracking.jsx
     ProductosAPedido.jsx     Sección "a pedido"
     admin/AdminDashboard.jsx  ← 8.100+ líneas, leer con cuidado
+    admin/AnalyticsTab.jsx    Pestaña "Visitas" (analítica propia)
   config/ seo.js  shipping.js
-  utils/ productVariants.js
+  utils/ productVariants.js  analytics.js (beacon de visitas)
 
 backend/
   index.js                   Monta los routers, sirve dist/
@@ -84,17 +86,27 @@ backend/
   routes/                    orders, products, catalog, shipping, coupons,
                              auth, reviews, googleReviews, stockAlerts,
                              favorites, newsletter, webhooks, subcategories,
-                             productTypes, categoryCustomizations
+                             productTypes, categoryCustomizations, analytics
   services/                  mercadopago, publicPricing, productsRepo,
                              stockReservation, productVariants, shippingQuotes,
                              correoArgentino, excelImport, cleosCatalogImport,
                              pdfInvoiceImport, catalogImageImport,
                              folderImageImport, coupons, mailer,
-                             orderNotifications, reviewInvitations
+                             orderNotifications, reviewInvitations, analytics
+  jobs/                      expireReservations, prunePageViews
 ```
 
 Secciones del panel admin: Resumen · Productos · Categorías · Tienda · Ofertas ·
-Cupones · Pedidos.
+Cupones · Pedidos · Cuentas (solo lectura: cuentas de cliente + resumen de
+actividad, `routes/customers.js`) · Visitas.
+
+**Visitas** (`pages/admin/AnalyticsTab.jsx`, `routes/analytics.js`,
+`services/analytics.js`): analítica propia, sin Google Analytics ni Plausible. El
+frontend manda un beacon por cada cambio de ruta (`utils/analytics.js` +
+`<TrackPageView />` en `App.jsx`) y el backend lo guarda en `page_views`. No se
+guarda la IP: sólo un hash anónimo que rota cada día. Por eso **no existe
+"personas únicas del período"** — sumar días contaría dos veces a quien vuelve.
+`jobs/prunePageViews.js` borra lo de más de 180 días.
 
 ---
 
@@ -117,7 +129,9 @@ Los valores configurables viven en el **backend**, no hardcodeados en componente
 - Envío gratis → `FREE_SHIPPING_THRESHOLD` en `backend/config/shipping.js`,
   configurable con la env var `ENVIO_GRATIS_MINIMO`. El frontend lo recibe de
   `GET /api/shipping/config`.
-- Tarifas de envío → `SHIPPING_ZONES` en el mismo archivo.
+- Tarifas de envío → `SHIPPING_ZONES` + `SHIPPING_WEIGHT_TIERS` en el mismo
+  archivo (zona × peso). El checkout tiene un espejo en `src/config/shipping.js`:
+  todo cambio va en los dos.
 - Proveedor de envío → env var `SHIPPING_PROVIDER` (`manual` | `correo_argentino`).
 
 Si agregás un valor que el cliente pueda querer cambiar, va acá, no en el JSX.
@@ -159,13 +173,26 @@ Si agregás un valor que el cliente pueda querer cambiar, va acá, no en el JSX.
 ### 4.5 Envíos
 
 - Origen: City Bell, CP 1896.
-- 7 zonas por rango de CP cubriendo 1000–9999 sin huecos, más una tarifa plana de
-  paquete grande (60×40×30 cm).
-- Los campos físicos ya existen en `products`: `length_cm`, `width_cm`, `height_cm`,
-  `weight_kg`. Centímetros y kilogramos, sin excepción.
-- **Peso volumétrico es obligatorio** para cualquier cotizador real de esta categoría
-  de producto (artefactos de iluminación son livianos y voluminosos). Sin dimensiones
-  cargadas, ningún cotizador da un número confiable.
+- **Tarifario Andreani = zona × peso.** No hay zona "local": todo destino que
+  podría contar como misma localidad entra como mínimo en la zona rosa. Tres
+  zonas (`rosa` / `salmon` / `bordo`) resueltas por CP a nivel provincia
+  (`PRICING_ZONE_RANGES`, best-effort en bordes provinciales) y nueve tramos de
+  peso (`SHIPPING_WEIGHT_TIERS`). Los tramos **20–25 kg y más de 50 kg no
+  cotizan**: Andreani no informó tarifa, se deriva a WhatsApp.
+- **Fórmula:** `seguro = valor declarado × 0.02` (valor declarado = subtotal de
+  productos con IVA, pre-cupón) → `subtotal = tarifa base + seguro` →
+  `total = subtotal × 1.21`. El tarifario de Andreani viene sin IVA ni seguro.
+- **Sin peso cargado en los productos se cotiza el tramo más barato** (0–1 kg),
+  para no frenar la compra online. Cargar `weight_kg` real es tarea pendiente de
+  datos. **No se calcula peso volumétrico** hoy (el tarifario Andreani es solo
+  por peso real); sigue siendo deseable si se pasa a un cotizador propio —
+  artefactos de iluminación son livianos y voluminosos.
+- Los campos físicos ya existen en `products`: `length_cm`, `width_cm`,
+  `height_cm`, `weight_kg`. Centímetros y kilogramos, sin excepción.
+- **Días de tránsito ≠ zona de tarifa.** El precio va por las 3 zonas Andreani;
+  la ventana de entrega se resuelve aparte, por una banda de CP más fina
+  (`TRANSIT_BANDS` + `TRANSIT_OVERRIDES`), porque dentro de una misma zona una
+  capital no tarda lo mismo que el interior. Son dos ejes; no recombinarlos.
 - El carrito no puede prometer envío gratis por zona: en ese momento todavía no se
   conoce el domicilio de entrega.
 
@@ -202,7 +229,7 @@ Ejemplos de cosas que ya están hechas y podrían parecer pendientes:
 - Import masivo de imágenes de catálogo con revisión y autoguardado de borrador
 - Precio propio por color y por medida
 - Envío gratis por umbral
-- Cotización de envío por zona
+- Cotización de envío Andreani por zona y peso, con seguro e IVA
 
 ---
 

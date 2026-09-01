@@ -21,29 +21,28 @@ router.get('/config', (_req, res) => {
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
-// GET /api/shipping/estimate?postalCode=1900&subtotal=85000
-// Público — le da al Checkout el costo de zona + la fecha estimada de entrega
-// sin exponerle al cliente las credenciales de Correo Argentino. `subtotal` es
-// solo para la vista previa: la creación real de la orden (POST /api/orders)
-// vuelve a evaluar el envío gratis contra el subtotal recalculado en el
-// servidor, nunca contra este valor.
+// GET /api/shipping/estimate?postalCode=1900&subtotal=85000&weight=3.2
+// Público — le da al Checkout el costo (zona + peso + seguro + IVA) y la fecha
+// estimada de entrega. `subtotal` y `weight` son solo para la vista previa: la
+// creación real de la orden (POST /api/orders) vuelve a resolver zona, peso y
+// envío gratis contra la DB, nunca contra estos valores. `subtotal` es además
+// el valor declarado con el que se calcula el seguro (2 %).
 // ─────────────────────────────────────────────────────────────────────────────
 router.get('/estimate', async (req, res) => {
   try {
     const { postalCode } = req.query
     const service = String(req.query.service || 'clasico').toLowerCase()
-    const packageType = String(req.query.packageType || 'standard').toLowerCase()
     const subtotal = Number(req.query.subtotal) || 0
+    const weightKg = Number(req.query.weight) || 0
     if (!SHIPPING_SERVICES.includes(service)) {
       return res.status(400).json({ error: 'Servicio de envío inválido' })
     }
-    if (!['standard', 'large'].includes(packageType)) {
-      return res.status(400).json({ error: 'Tipo de paquete inválido' })
-    }
 
-    const quote = await quoteShipping({ postalCode, service, packageType })
+    const quote = await quoteShipping({ postalCode, service, weightKg, declaredValue: subtotal })
     if (!quote) {
-      return res.status(404).json({ error: 'No pudimos calcular el envío para ese código postal' })
+      return res.status(404).json({
+        error: 'No pudimos calcular el envío automáticamente — escribinos por WhatsApp y lo coordinamos',
+      })
     }
 
     const freeShipping = qualifiesForFreeShipping({ subtotal })

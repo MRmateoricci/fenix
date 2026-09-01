@@ -116,6 +116,11 @@ export function AdminProvider({ children }) {
   const [couponsError, setCouponsError] = useState(null)
   const [bankTransferSettings, setBankTransferSettings] = useState(null)
 
+  // ── Cuentas de cliente (sección Cuentas, solo lectura) ────────────────────
+  const [customers, setCustomers]           = useState([])
+  const [customersLoading, setCustomersLoading] = useState(false)
+  const [customersError, setCustomersError] = useState(null)
+
   // ── fetchCatalog — trae el catálogo público publicado (sin auth) ─────────
   const fetchCatalog = useCallback(async () => {
     setProductsLoading(true)
@@ -1147,6 +1152,25 @@ export function AdminProvider({ children }) {
     setCoupons(current => current.filter(c => c.id !== id))
   }, [])
 
+  // ── fetchCustomers — lista de cuentas con resumen de actividad ────────────
+  const fetchCustomers = useCallback(async ({ search = '' } = {}) => {
+    setCustomersLoading(true)
+    setCustomersError(null)
+    try {
+      const params = search.trim() ? `?search=${encodeURIComponent(search.trim())}` : ''
+      const res = await adminFetch(`${API_BASE}/api/customers${params}`)
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'No se pudieron cargar las cuentas')
+      setCustomers(data.customers || [])
+      return data
+    } catch (err) {
+      setCustomersError(err.message)
+      return { customers: [], total: 0 }
+    } finally {
+      setCustomersLoading(false)
+    }
+  }, [])
+
   return (
     <AdminContext.Provider value={{
       isAdmin, adminAuthLoading, products, productsLoading, productsError, fetchCatalog, fetchStoreProducts,
@@ -1167,6 +1191,7 @@ export function AdminProvider({ children }) {
       categoryCustomizations, saveCategoryCustomization,
       categoryTree,
       coupons, couponsLoading, couponsError, fetchCoupons, createCoupon, updateCoupon, deleteCoupon,
+      customers, customersLoading, customersError, fetchCustomers,
       fetchInventory, fetchInventoryItem, createInventoryItem, updateInventoryItem, updateProductCurrency, deleteInventoryItem,
       fetchInventorySelectionIds, applyInventoryBatch,
       previewProductMerge, mergeInventoryProducts, updateProductVariantRules, detachProductVariant,

@@ -109,6 +109,9 @@ export default function ProductCard({ product }) {
       // recalcula contra la DB, pero la fecha de la vista previa quedaba corta.
       stockInmediato: Boolean(product.stockInmediato),
       diasEntrega: Number(product.diasEntrega) || 3,
+      // Peso para la vista previa del envío por tramo. POST /api/orders lo
+      // vuelve a sumar contra la DB, igual que el precio.
+      weightKg: Number(product.weightKg) || 0,
     })
     setAdded(true)
     setTimeout(() => setAdded(false), 1500)

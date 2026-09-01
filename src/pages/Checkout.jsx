@@ -2,12 +2,20 @@ import { useState, Fragment, useMemo, useEffect } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useCart } from '../context/CartContext'
 import { useAuth } from '../context/AuthContext'
+import { useAdmin } from '../context/AdminContext'
 import PageSEO from '../components/SEO'
 import { getShippingForCP, SHIPPING_SERVICES } from '../config/shipping'
 import mercadoPagoLogo from '../assets/mercado-pago-horizontal.svg'
 import { POLICIES } from './Policy'
 import { applyInvoiceMode, documentKindForNumber } from '../utils/checkoutInvoice'
-import { plazoMaximo, rangoEntregaTexto } from '../utils/plazoEntrega'
+import {
+  plazoMaximo,
+  rangoEntregaTexto,
+  fechaRetiroMinima,
+  fechaISOLocal,
+  retiroDemasiadoTemprano,
+  textoRetiroDisponible,
+} from '../utils/plazoEntrega'
 
 const API_BASE = import.meta.env.VITE_API_URL || ''
 const CHECKOUT_PAYMENT_DRAFT_KEY = 'fenix_checkout_payment_draft'
@@ -98,7 +106,7 @@ function validateInvoiceRecipient(d, invoiceOptions) {
   return e
 }
 
-function validateStep2(d, shippingZone) {
+function validateStep2(d, shippingZone, handlingDays = 0) {
   const e = {}
   if (d.deliveryType === 'delivery') {
     if (!d.direccion.trim())    e.direccion    = 'La dirección es requerida'
@@ -111,6 +119,8 @@ function validateStep2(d, shippingZone) {
   }
   if (d.deliveryType === 'pickup' && !d.pickupDate) {
     e.pickupDate = 'Elegí una fecha de retiro'
+  } else if (d.deliveryType === 'pickup' && retiroDemasiadoTemprano(d.pickupDate, handlingDays)) {
+    e.pickupDate = textoRetiroDisponible(handlingDays)
   }
   if (d.deliveryType === 'pickup' && d.pickupByOtherPerson) {
     if (!String(d.pickupPersonName || '').trim()) e.pickupPersonName = 'Ingresá el nombre de quien retira'
@@ -135,8 +145,9 @@ function validateBilling(d) {
 export default function Checkout() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
-  const { items, totalPrice, clearCart, shippingConfig } = useCart()
+  const { items, totalPrice, totalWeight, clearCart, shippingConfig } = useCart()
   const { user, authLoading, updateProfile, logout } = useAuth()
+  const { products: catalogProducts } = useAdmin()
   const [paymentDraft] = useState(readCheckoutPaymentDraft)
   const paymentReturn = searchParams.get('payment')
   const returnedOrderId = searchParams.get('orderId')
@@ -199,9 +210,19 @@ export default function Checkout() {
   const [deliveryEstimateLoading, setDeliveryEstimateLoading] = useState(false)
 
   // Días hábiles de preparación del carrito: el mayor de sus items, porque se
-  // despacha todo junto. Se recalcula cuando cambia el carrito y vuelve a pedir
-  // la estimación, para que la fecha mostrada nunca quede de un carrito viejo.
-  const handlingDays = useMemo(() => plazoMaximo(items), [items])
+  // despacha todo junto. El plazo se re-lee del catálogo (`/api/catalog`, ya
+  // resuelto contra los settings actuales), no del snapshot del carrito: ese
+  // pudo quedar viejo si cambió "Plazos de entrega" o si el carrito venía de
+  // otra sesión. POST /api/orders igual lo revalida contra la DB.
+  const handlingDays = useMemo(() => {
+    const conPlazoActual = items.map((item) => {
+      const fresco = catalogProducts.find((p) => p.id === item.id)
+      return fresco?.diasEntrega != null
+        ? { ...item, diasEntrega: fresco.diasEntrega }
+        : item
+    })
+    return plazoMaximo(conPlazoActual)
+  }, [items, catalogProducts])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -385,8 +406,13 @@ export default function Checkout() {
 
   const localShippingZone = useMemo(() => {
     if (formData.deliveryType !== 'delivery') return null
-    return getShippingForCP(formData.codigoPostal, formData.shippingService)
-  }, [formData.deliveryType, formData.codigoPostal, formData.shippingService])
+    // El costo depende de la zona (CP), el peso total y el valor declarado
+    // (para el seguro). El backend vuelve a cotizar todo antes de crear la orden.
+    return getShippingForCP(formData.codigoPostal, formData.shippingService, {
+      weightKg: totalWeight,
+      declaredValue: totalPrice,
+    })
+  }, [formData.deliveryType, formData.codigoPostal, formData.shippingService, totalWeight, totalPrice])
 
   const normalizedPostalCode = formData.codigoPostal.trim().replace(/\s/g, '').toUpperCase()
   const deliveryEstimateMatches =
@@ -487,9 +513,11 @@ export default function Checkout() {
         const params = new URLSearchParams({
           postalCode: cp,
           service: formData.shippingService,
+          // `subtotal` es también el valor declarado con el que se calcula el
+          // seguro (2 %). `weight` elige el tramo de tarifa. Vista previa nada
+          // más: POST /api/orders vuelve a resolver todo contra la DB.
           subtotal: String(totalPrice),
-          // Vista previa nada más: POST /api/orders vuelve a resolver el plazo
-          // contra la DB, igual que hace con los precios.
+          weight: String(totalWeight),
           handlingDays: String(handlingDays),
         })
         const res = await fetch(`${API_BASE}/api/shipping/estimate?${params}`, {
@@ -507,7 +535,7 @@ export default function Checkout() {
       clearTimeout(t)
       controller.abort()
     }
-  }, [formData.deliveryType, formData.codigoPostal, formData.shippingService, totalPrice, handlingDays])
+  }, [formData.deliveryType, formData.codigoPostal, formData.shippingService, totalPrice, totalWeight, handlingDays])
 
   function setField(key, value) {
     const normalizedValue = key === 'invoiceDocNumber'
@@ -601,7 +629,7 @@ export default function Checkout() {
   }
 
   async function handleStep2() {
-    const e = validateStep2(formData, shippingZone)
+    const e = validateStep2(formData, shippingZone, handlingDays)
     if (Object.keys(e).length) { setErrors(e); return }
 
     if (user && formData.deliveryType === 'delivery') {
@@ -631,7 +659,7 @@ export default function Checkout() {
   async function handleConfirm() {
     const validationErrors = {
       ...validateStep1(formData),
-      ...validateStep2(formData, shippingZone),
+      ...validateStep2(formData, shippingZone, handlingDays),
       ...validateBilling(formData),
       ...validateInvoiceRecipient(formData, invoiceOptions),
     }
@@ -770,6 +798,7 @@ export default function Checkout() {
               formData={formData}
               errors={errors}
               setField={setField}
+              handlingDays={handlingDays}
               user={user}
               onLogout={logout}
               navigate={navigate}
@@ -1226,7 +1255,7 @@ function PaymentMethodSelector({ value, onChange, bankTransfer }) {
 }
 
 function SinglePageCheckout({
-  formData, errors, setField, user, onLogout, navigate, shippingZone,
+  formData, errors, setField, handlingDays, user, onLogout, navigate, shippingZone,
   deliveryEstimate, deliveryEstimateMatches, deliveryEstimateLoading,
   accountLoginRequired, profileError, submitError, submitting, onConfirm,
   paymentRejected,
@@ -1356,8 +1385,13 @@ function SinglePageCheckout({
           <>
             <div className="fnx-pickup-card"><MapPinIcon /><div><strong>Fénix City Bell</strong><span>473 entre 14C y 15, City Bell, La Plata</span></div><b>Gratis</b></div>
             <Field label="Fecha de retiro" error={errors.pickupDate}>
-              <DarkInput type="date" value={formData.pickupDate} onChange={(value) => setField('pickupDate', value)} hasError={!!errors.pickupDate} min={tomorrowISO()} />
+              <DarkInput type="date" value={formData.pickupDate} onChange={(value) => setField('pickupDate', value)} hasError={!!errors.pickupDate} min={fechaISOLocal(fechaRetiroMinima(handlingDays))} />
             </Field>
+            {!errors.pickupDate && (
+              <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: '0.375rem' }}>
+                {textoRetiroDisponible(handlingDays)}.
+              </p>
+            )}
           </>
         )}
 
@@ -1369,7 +1403,10 @@ function SinglePageCheckout({
             ) : (
               <>
                 {SHIPPING_SERVICES.map((service) => {
-                  const optionQuote = getShippingForCP(formData.codigoPostal, service.id)
+                  // Con un único servicio, `shippingZone` (ya combina la vista
+                  // previa local con la respuesta del backend, peso y seguro
+                  // incluidos) es la cotización de esa fila.
+                  const optionQuote = service.id === formData.shippingService ? shippingZone : null
                   const contenido = (
                     <>
                       <span><b>{service.label}</b>{optionQuote?.description && <small>{optionQuote.description}</small>}</span>

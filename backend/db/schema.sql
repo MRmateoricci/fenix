@@ -995,3 +995,32 @@ CREATE TABLE IF NOT EXISTS bank_transfer_guest_tokens (
 );
 CREATE INDEX IF NOT EXISTS idx_bank_transfer_guest_tokens_order
   ON bank_transfer_guest_tokens(order_id, expires_at);
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Analítica de visitas
+-- ─────────────────────────────────────────────────────────────────────────────
+-- El dueño pidió ver cuánta gente entra a la tienda por día. En vez de sumar un
+-- servicio externo (Google Analytics / Plausible), cada visita de página la
+-- registra el propio frontend con un beacon y queda en esta tabla.
+--
+-- No se guarda la IP. `visitor_hash` es un SHA-256 de (sal del día + IP +
+-- user-agent) y la sal rota cada día: alcanza para contar visitantes únicos
+-- dentro de una misma jornada sin poder identificar a nadie ni seguir a una
+-- persona de un día para otro. `is_bot` marca el tráfico automático (buscadores,
+-- monitores, unfurl de links) para poder excluirlo del resumen.
+--
+-- PK entera y no UUID: es una tabla de solo-append con muchas más inserciones
+-- que el resto; una clave monótona no fragmenta el índice como sí lo haría un
+-- UUID aleatorio. El job backend/jobs/prunePageViews.js la mantiene acotada.
+CREATE TABLE IF NOT EXISTS page_views (
+  id            BIGINT       GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  path          VARCHAR(255) NOT NULL,
+  referrer_host VARCHAR(255),
+  visitor_hash  CHAR(64)     NOT NULL,
+  is_bot        BOOLEAN      NOT NULL DEFAULT FALSE,
+  created_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+);
+
+-- El resumen del panel siempre consulta por rango de fechas y sin bots.
+CREATE INDEX IF NOT EXISTS idx_page_views_created_at
+  ON page_views(created_at DESC) WHERE is_bot = FALSE;

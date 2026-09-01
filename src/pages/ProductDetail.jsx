@@ -254,6 +254,8 @@ export default function ProductDetail() {
         // /api/orders lo vuelve a resolver contra la DB, igual que el precio.
         stockInmediato,
         diasEntrega,
+        // Peso para la vista previa del envío por tramo (se recalcula server-side).
+        weightKg: Number(product.weightKg) || 0,
       })
     }
     setAdded(true)

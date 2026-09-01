@@ -70,3 +70,31 @@ test('rechaza un origen externo aunque llegue al mismo backend', async () => {
   assert.equal(result.error.status, 403)
   assert.equal(result.allowed, undefined)
 })
+
+test('acepta cualquier puerto de localhost en desarrollo (Vite salta de puerto)', async () => {
+  const previous = process.env.NODE_ENV
+  delete process.env.NODE_ENV
+  try {
+    const req = fakeRequest({ host: 'localhost:3001' })
+    const result = await corsDecision(req, 'http://localhost:5174')
+    assert.equal(result.error, null)
+    assert.equal(result.allowed, true)
+  } finally {
+    if (previous == null) delete process.env.NODE_ENV
+    else process.env.NODE_ENV = previous
+  }
+})
+
+test('en producción un puerto de localhost fuera de la lista sigue rechazado', async () => {
+  const previous = process.env.NODE_ENV
+  process.env.NODE_ENV = 'production'
+  try {
+    const req = fakeRequest({ host: 'fenixelectricidadiluminacion.com', 'x-forwarded-proto': 'https' })
+    const result = await corsDecision(req, 'http://localhost:5174')
+    assert.equal(result.error.status, 403)
+    assert.equal(result.allowed, undefined)
+  } finally {
+    if (previous == null) delete process.env.NODE_ENV
+    else process.env.NODE_ENV = previous
+  }
+})

@@ -17,6 +17,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { getTransitBusinessDays } from '../config/shipping.js'
+import { addBusinessDays } from './businessDays.js'
 
 // Último recurso: sólo se usa si el CP no matchea ninguna zona, cosa que
 // getManualShippingQuote ya descarta antes de llegar acá.
@@ -28,21 +29,6 @@ const FALLBACK_TRANSIT = { min: 3, max: 7 }
 // pasa el caller: un producto que está en el local no debe arrastrar el margen
 // de reposición del proveedor.
 const DEFAULT_HANDLING_BUSINESS_DAYS = 3
-
-function isBusinessDay(date) {
-  const day = date.getDay()
-  return day !== 0 && day !== 6
-}
-
-function addBusinessDays(from, days) {
-  const result = new Date(from)
-  let added = 0
-  while (added < days) {
-    result.setDate(result.getDate() + 1)
-    if (isBusinessDay(result)) added++
-  }
-  return result
-}
 
 async function fetchCarrierTransit(postalCode) {
   const apiUrl       = process.env.CORREO_ARGENTINO_API_URL

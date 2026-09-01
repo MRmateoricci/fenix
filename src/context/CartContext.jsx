@@ -95,10 +95,14 @@ export function CartProvider({ children }) {
 
   const totalItems = items.reduce((sum, item) => sum + item.quantity, 0)
   const totalPrice = items.reduce((sum, item) => sum + item.price * item.quantity, 0)
+  // Peso total para la vista previa del envío. El carrito viejo (guardado antes
+  // de cargar weight_kg) suma 0 y el tarifario cae al tramo más barato; POST
+  // /api/orders vuelve a sumar el peso contra la DB, igual que el precio.
+  const totalWeight = items.reduce((sum, item) => sum + (Number(item.weightKg) || 0) * item.quantity, 0)
 
   return (
     <CartContext.Provider value={{
-      items, addItem, removeItem, updateQuantity, clearCart, totalItems, totalPrice,
+      items, addItem, removeItem, updateQuantity, clearCart, totalItems, totalPrice, totalWeight,
       lastAdded, dismissAddedNotification: () => setLastAdded(null),
       shippingConfig,
     }}>

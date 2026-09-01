@@ -53,3 +53,27 @@ test('rechaza una mutacion administrativa desde un origen externo', () => {
     else process.env.FRONTEND_BASE_URL = previousFrontend
   }
 })
+
+test('acepta una mutacion administrativa desde localhost en desarrollo', () => {
+  const previousSecret = process.env.ADMIN_SESSION_SECRET
+  const previousEnv = process.env.NODE_ENV
+  process.env.ADMIN_SESSION_SECRET = 'test-admin-session-secret'
+  delete process.env.NODE_ENV
+  try {
+    const token = jwt.sign({ role: 'admin' }, process.env.ADMIN_SESSION_SECRET)
+    const response = responseRecorder()
+    let continued = false
+    const headers = { origin: 'http://localhost:5174', host: 'localhost:3001' }
+    requireAdmin({
+      method: 'POST', protocol: 'http', cookies: { [ADMIN_COOKIE_NAME]: token },
+      get: name => headers[String(name).toLowerCase()],
+    }, response, () => { continued = true })
+    assert.equal(continued, true)
+    assert.equal(response.statusCode, 200)
+  } finally {
+    if (previousSecret == null) delete process.env.ADMIN_SESSION_SECRET
+    else process.env.ADMIN_SESSION_SECRET = previousSecret
+    if (previousEnv == null) delete process.env.NODE_ENV
+    else process.env.NODE_ENV = previousEnv
+  }
+})

@@ -1,77 +1,70 @@
-// Copia para la vista previa del checkout. El backend vuelve a cotizar siempre
-// antes de crear la orden y es la autoridad final sobre el costo.
+// Copia para la vista previa del checkout. backend/config/shipping.js es la
+// autoridad y vuelve a cotizar siempre antes de crear la orden. Si tocás
+// tarifas, zonas o la fórmula acá, replicá EXACTAMENTE el cambio en el backend.
 
-// `expreso` está fuera de circulación hasta tener una API de envíos real (ver
-// backend/config/shipping.js, que es la autoridad). Con un solo servicio el
-// checkout no muestra selector: elegir entre una opción no es elegir. Volver a
-// agregarlo acá y allá reactiva el selector solo.
-export const SHIPPING_SERVICES = [
-  { id: 'clasico', label: 'Clásico' },
-]
+// `expreso` está fuera de circulación. Con un solo servicio el checkout no
+// muestra selector: elegir entre una opción no es elegir.
+export const SHIPPING_SERVICES = [{ id: 'clasico', label: 'Clásico' }]
 
-// Zonas por rango de CP — misma tabla que backend/config/shipping.js. Si
-// cambiás precios/zonas acá, replicá el cambio ahí también.
-export const SHIPPING_ZONES = [
-  {
-    id: 'gran_la_plata',
-    label: 'Envío local · Gran La Plata',
-    description: 'La Plata y alrededores',
-    prices: { expreso: 13219, clasico: 12020 },
-    postalCodeRanges: [[1884, 1936]],
-  },
-  {
-    id: 'caba',
-    label: 'Envío CABA',
-    description: 'Ciudad Autónoma de Buenos Aires',
-    prices: { expreso: 18600, clasico: 13500 },
-    postalCodeRanges: [[1000, 1499]],
-  },
-  {
-    id: 'gba',
-    label: 'Envío GBA',
-    description: 'Gran Buenos Aires',
-    prices: { expreso: 19700, clasico: 14300 },
-    postalCodeRanges: [[1500, 1883], [1937, 1999]],
-  },
-  {
-    id: 'centro_litoral_cuyo',
-    label: 'Envío Centro, Litoral y Cuyo',
-    description: 'Córdoba, Santa Fe, Entre Ríos, Mendoza, San Juan, San Luis',
-    prices: { expreso: 21941, clasico: 15957 },
-    postalCodeRanges: [[2000, 3399], [5000, 5999]],
-  },
-  {
-    id: 'interior_ba_pampa',
-    label: 'Envío Interior de Buenos Aires y La Pampa',
-    description: 'Interior de la provincia de Buenos Aires y La Pampa',
-    prices: { expreso: 23000, clasico: 16700 },
-    postalCodeRanges: [[6000, 8199]],
-  },
-  {
-    id: 'norte',
-    label: 'Envío Norte (NOA y NEA)',
-    description: 'Salta, Jujuy, Tucumán, Catamarca, Santiago del Estero, Chaco, Formosa, Corrientes, Misiones',
-    prices: { expreso: 27400, clasico: 19900 },
-    postalCodeRanges: [[3400, 4999]],
-  },
-  {
-    id: 'patagonia',
-    label: 'Envío Patagonia',
-    description: 'La Pampa sur, Neuquén, Río Negro, Chubut, Santa Cruz, Tierra del Fuego',
-    prices: { expreso: 35100, clasico: 25500 },
-    postalCodeRanges: [[8200, 9999]],
-  },
-]
+// El tarifario de Andreani viene sin IVA ni seguro. Ambos se agregan acá para
+// mostrar, como en el resto del sitio, un importe final.
+export const SHIPPING_INSURANCE_RATE = 0.02 // seguro: 2 % del valor declarado
+export const SHIPPING_IVA_RATE = 0.21
 
-// Esta tarifa ya forma parte del contrato del cotizador. Se activará cuando el
-// catálogo o la API informen las dimensiones reales del paquete.
-export const LARGE_PACKAGE_RATE = {
-  id: 'nacional_grande',
-  label: 'Envío nacional grande',
-  description: 'Paquete de hasta 60 × 40 × 30 cm',
-  dimensions: { height: 60, width: 40, length: 30 },
-  prices: { expreso: 46546, clasico: 33069 },
+// Peso que se asume cuando el carrito no trae pesos cargados: tramo más barato.
+const FALLBACK_WEIGHT_KG = 0.5
+
+// Zonas de tarifa Andreani. No hay zona local: todo destino que podría contar
+// como misma localidad entra igual que la zona rosa.
+export const SHIPPING_ZONES = {
+  rosa: {
+    id: 'rosa',
+    label: 'Envío a domicilio',
+    description:
+      'Buenos Aires, CABA, Córdoba, Santa Fe, Entre Ríos, Santiago del Estero, San Luis y La Pampa',
+  },
+  salmon: {
+    id: 'salmon',
+    label: 'Envío a domicilio',
+    description:
+      'Formosa, Chaco, Corrientes, Misiones, Tucumán, Catamarca, La Rioja, San Juan, Mendoza, Neuquén y Río Negro',
+  },
+  bordo: {
+    id: 'bordo',
+    label: 'Envío a domicilio',
+    description: 'Jujuy, Salta, Chubut, Santa Cruz y Tierra del Fuego',
+  },
 }
+
+// CP → zona. Espejo de PRICING_ZONE_RANGES del backend. Cubre 1000–9999.
+const ZONE_RANGES = [
+  { from: 1000, to: 3299, zona: 'rosa' },
+  { from: 3300, to: 3999, zona: 'salmon' },
+  { from: 4000, to: 4199, zona: 'salmon' },
+  { from: 4200, to: 4399, zona: 'rosa' },
+  { from: 4400, to: 4699, zona: 'bordo' },
+  { from: 4700, to: 4999, zona: 'salmon' },
+  { from: 5000, to: 5299, zona: 'rosa' },
+  { from: 5300, to: 5699, zona: 'salmon' },
+  { from: 5700, to: 5999, zona: 'rosa' },
+  { from: 6000, to: 8299, zona: 'rosa' },
+  { from: 8300, to: 8999, zona: 'salmon' },
+  { from: 9000, to: 9999, zona: 'bordo' },
+]
+
+// Tarifas base por tramo de peso, SIN IVA ni seguro. `maxKg` es el límite
+// superior (inclusive). 20–25 kg y más de 50 kg no cotizan (se coordina a mano).
+const WEIGHT_TIERS = [
+  { maxKg: 1, rosa: 9147.01, salmon: 9992.54, bordo: 10488.06 },
+  { maxKg: 2, rosa: 9147.01, salmon: 9992.54, bordo: 10549.61 },
+  { maxKg: 3, rosa: 9819.28, salmon: 11074.37, bordo: 11814.71 },
+  { maxKg: 5, rosa: 14388.75, salmon: 16121.35, bordo: 17758.06 },
+  { maxKg: 10, rosa: 19607.98, salmon: 23357.18, bordo: 28041.35 },
+  { maxKg: 15, rosa: 28464.85, salmon: 34496.37, bordo: 41472.96 },
+  { maxKg: 20, rosa: 36046.27, salmon: 44511.54, bordo: 54312.92 },
+  { minKg: 25, maxKg: 35, rosa: 58207.0, salmon: 72747.02, bordo: 89582.17 },
+  { maxKg: 50, rosa: 75467.4, salmon: 96219.34, bordo: 120281.93 },
+]
 
 export const SHIPPING_FALLBACK = {
   id: 'unavailable',
@@ -84,16 +77,44 @@ export function normalizePostalCode(value) {
   return String(value || '').trim().replace(/\s/g, '').toUpperCase()
 }
 
-export function getShippingForCP(postalCode, service = 'clasico') {
+const roundMoney = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100
+
+function findZone(num) {
+  const range = ZONE_RANGES.find((r) => num >= r.from && num <= r.to)
+  return range ? SHIPPING_ZONES[range.zona] : null
+}
+
+function findTier(weightKg) {
+  const w = weightKg > 0 ? weightKg : FALLBACK_WEIGHT_KG
+  for (const tier of WEIGHT_TIERS) {
+    if (w <= tier.maxKg) {
+      if (tier.minKg && w < tier.minKg) return null
+      return tier
+    }
+  }
+  return null
+}
+
+// Devuelve { id, label, description, service, price } con el importe final
+// (base + seguro + IVA), o SHIPPING_FALLBACK si el CP no resuelve, o `price:
+// null` si el peso cae en un rango que Andreani no tarifó.
+export function getShippingForCP(postalCode, service = 'clasico', { weightKg = 0, declaredValue = 0 } = {}) {
   const normalized = normalizePostalCode(postalCode)
   if (normalized.length < 4) return null
   const num = Number(normalized)
-  if (Number.isNaN(num)) return SHIPPING_FALLBACK
+  if (Number.isNaN(num) || num < 1000 || num > 9999) return SHIPPING_FALLBACK
 
-  const zone = SHIPPING_ZONES.find(({ postalCodeRanges }) =>
-    postalCodeRanges.some(([from, to]) => num >= from && num <= to)
-  )
-  if (!zone || zone.prices[service] == null) return SHIPPING_FALLBACK
+  const zone = findZone(num)
+  if (!zone) return SHIPPING_FALLBACK
 
-  return { ...zone, service, price: zone.prices[service] }
+  const tier = findTier(Number(weightKg) || 0)
+  if (!tier) return { ...zone, service, price: null }
+
+  const base = tier[zone.id]
+  const insurance = roundMoney(Math.max(0, Number(declaredValue) || 0) * SHIPPING_INSURANCE_RATE)
+  const subtotal = roundMoney(base + insurance)
+  const iva = roundMoney(subtotal * SHIPPING_IVA_RATE)
+  const price = roundMoney(subtotal + iva)
+
+  return { ...zone, service, price }
 }

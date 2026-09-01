@@ -4,6 +4,7 @@ import { useAdmin } from '../../context/AdminContext'
 import { getCategoryValue, getSubcategoryOptions, getProductTypeOptions } from '../../data/categoryTree'
 import FenixLogo from '../../assets/FenixLogo'
 import OverviewDashboard from './OverviewDashboard'
+import AnalyticsTab from './AnalyticsTab'
 import BackupsTab from './BackupsTab'
 import { isPreparationOverdue, PREPARATION_ALERT_HOURS } from '../../utils/orderPreparation'
 
@@ -131,6 +132,20 @@ const TicketIcon = () => (
   <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" strokeWidth="1.4" style={{ flexShrink: 0 }}>
     <path d="M1.5 5.3c.9 0 1.6.7 1.6 1.7s-.7 1.7-1.6 1.7v2.6c0 .6.5 1.1 1.1 1.1h9.8c.6 0 1.1-.5 1.1-1.1V8.7c-.9 0-1.6-.7-1.6-1.7s.7-1.7 1.6-1.7V3.7c0-.6-.5-1.1-1.1-1.1H2.6c-.6 0-1.1.5-1.1 1.1z" strokeLinejoin="round"/>
     <line x1="6" y1="2.6" x2="6" y2="11.4" strokeDasharray="1.3 1.3" strokeLinecap="round"/>
+  </svg>
+)
+
+const UsersIcon = () => (
+  <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" strokeWidth="1.4" style={{ flexShrink: 0 }}>
+    <circle cx="5.6" cy="4.4" r="2.5"/>
+    <path d="M1 13.2c0-2.5 2.1-4.3 4.6-4.3s4.6 1.8 4.6 4.3" strokeLinecap="round"/>
+    <path d="M10.4 2.3c1.4.2 2.4 1.4 2.4 2.8s-1 2.6-2.4 2.8M11.2 8.9c1.7.3 2.9 1.7 2.9 3.6" strokeLinecap="round"/>
+  </svg>
+)
+
+const PulseIcon = () => (
+  <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" strokeWidth="1.4" style={{ flexShrink: 0 }}>
+    <path d="M0.8 7.5h3l2-4.5 2.5 9 2-4.5h3.1" strokeLinecap="round" strokeLinejoin="round"/>
   </svg>
 )
 
@@ -4019,6 +4034,173 @@ function CouponsTab() {
                 >
                   ✕
                 </button>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── CustomersTab ──────────────────────────────────────────────────────────────
+// Solo lectura: lista las cuentas creadas (registro con email + OAuth) y un
+// resumen de actividad por cuenta. Editar o borrar cuentas se hace desde la
+// base, no desde acá. El backend nunca manda el hash de contraseña.
+function customerFullName(c) {
+  return `${c.firstName || ''} ${c.lastName || ''}`.trim() || '(sin nombre)'
+}
+
+function CustomerDetailField({ label, children }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+      <span style={lbl}>{label}</span>
+      <span style={{ fontSize: 12.5, color: C.text2 }}>{children || '—'}</span>
+    </div>
+  )
+}
+
+function CustomersTab() {
+  const { customers, customersLoading, customersError, fetchCustomers } = useAdmin()
+  const [search, setSearch] = useState('')
+  const [expandedId, setExpandedId] = useState(null)
+
+  useEffect(() => { fetchCustomers() }, [fetchCustomers])
+
+  const term = search.trim().toLowerCase()
+  const visible = term
+    ? customers.filter(c =>
+        customerFullName(c).toLowerCase().includes(term) ||
+        (c.email || '').toLowerCase().includes(term) ||
+        (c.phone || '').toLowerCase().includes(term))
+    : customers
+
+  const stats = {
+    total: customers.length,
+    verificadas: customers.filter(c => c.emailVerified).length,
+    conPedido: customers.filter(c => c.ordersCount > 0).length,
+    newsletter: customers.filter(c => c.newsletterSubscribed).length,
+  }
+
+  const shortDate = (iso) => iso ? new Date(iso).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' }) : null
+
+  return (
+    <div>
+      <h3 style={sectionTitle}>
+        Cuentas{customers.length > 0 ? <span style={{ fontFamily: ADMIN_FONT }}> ({customers.length})</span> : ''}
+      </h3>
+
+      {!customersLoading && customers.length > 0 && (
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
+          {[
+            ['Total', stats.total],
+            ['Con email verificado', stats.verificadas],
+            ['Con al menos un pedido', stats.conPedido],
+            ['Suscriptas al newsletter', stats.newsletter],
+          ].map(([label, value]) => (
+            <div key={label} style={{
+              background: C.white, border: `1px solid ${C.border}`, borderRadius: 10,
+              padding: '10px 16px', minWidth: 130,
+            }}>
+              <div style={{ fontSize: 20, fontWeight: 600, color: C.ink }}>{value}</div>
+              <div style={{ fontSize: 10.5, color: C.muted, letterSpacing: '0.04em' }}>{label}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 5, maxWidth: 320, marginBottom: 16 }}>
+        <label htmlFor="customers-search" style={lbl}>Buscar por nombre, email o teléfono</label>
+        <input
+          id="customers-search"
+          type="text"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          placeholder="Ej: ana@..."
+          style={inp}
+        />
+      </div>
+
+      {customersError && <p style={{ color: C.red, fontSize: 12.5 }}>{customersError}</p>}
+
+      {customersLoading ? (
+        <p style={{ color: C.muted, fontSize: 13 }}>Cargando cuentas...</p>
+      ) : customers.length === 0 ? (
+        <div style={{
+          background: C.white, borderRadius: 10, border: `1px solid ${C.border}`,
+          padding: '32px 20px', textAlign: 'center', color: C.muted, fontSize: 14,
+        }}>
+          Todavía no hay cuentas creadas.
+        </div>
+      ) : visible.length === 0 ? (
+        <p style={{ color: C.muted, fontSize: 13 }}>Ninguna cuenta coincide con “{search}”.</p>
+      ) : (
+        <div style={{ background: C.white, borderRadius: 10, border: `1px solid ${C.border}`, overflow: 'hidden' }}>
+          {visible.map((c, i) => {
+            const open = expandedId === c.id
+            return (
+              <div key={c.id} style={{ borderBottom: i < visible.length - 1 ? `1px solid ${C.hairline}` : 'none' }}>
+                <button
+                  type="button"
+                  onClick={() => setExpandedId(open ? null : c.id)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 14, width: '100%',
+                    padding: '14px 20px', background: open ? C.hairline : 'transparent',
+                    border: 'none', cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit',
+                  }}
+                >
+                  <div style={{ flex: 1, minWidth: 160 }}>
+                    <div style={{ fontSize: 13.5, fontWeight: 600, color: C.ink }}>{customerFullName(c)}</div>
+                    <div style={{ fontSize: 12, color: C.text3, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                      {c.email}
+                      {c.emailVerified
+                        ? <span style={pill(C.greenLight, C.green)}>Verificada</span>
+                        : <span style={pill(C.amberLight, C.amberDark)}>Sin verificar</span>}
+                      {c.newsletterSubscribed && <span style={pill(C.hairline, C.text3)}>Newsletter</span>}
+                    </div>
+                  </div>
+                  <div style={{ fontSize: 12, color: C.text3, minWidth: 90, textAlign: 'right' }}>
+                    {c.phone || '—'}
+                  </div>
+                  <div style={{ fontSize: 12, color: C.text3, minWidth: 90, textAlign: 'right' }}>
+                    {c.city || '—'}
+                  </div>
+                  <div style={{ fontSize: 12, color: C.text3, minWidth: 80, textAlign: 'right' }}>
+                    Alta {shortDate(c.createdAt)}
+                  </div>
+                  <div style={{ fontSize: 12, color: C.text3, minWidth: 70, textAlign: 'right' }}>
+                    {c.ordersCount} pedido{c.ordersCount === 1 ? '' : 's'}
+                  </div>
+                  <span style={{ fontSize: 11, color: C.muted, width: 14, textAlign: 'center' }}>{open ? '▲' : '▼'}</span>
+                </button>
+
+                {open && (
+                  <div style={{
+                    padding: '16px 20px 20px', background: C.white,
+                    display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 14,
+                    borderTop: `1px solid ${C.hairline}`,
+                  }}>
+                    <CustomerDetailField label="Nombre">{customerFullName(c)}</CustomerDetailField>
+                    <CustomerDetailField label="Email">{c.email}</CustomerDetailField>
+                    <CustomerDetailField label="Teléfono">{c.phone}</CustomerDetailField>
+                    <CustomerDetailField label="Domicilio">{c.address}</CustomerDetailField>
+                    <CustomerDetailField label="Ciudad">{c.city}</CustomerDetailField>
+                    <CustomerDetailField label="Código postal">{c.postalCode}</CustomerDetailField>
+                    <CustomerDetailField label="Alta de la cuenta">{fmtDate(c.createdAt)}</CustomerDetailField>
+                    <CustomerDetailField label="Última actualización">{fmtDate(c.updatedAt)}</CustomerDetailField>
+                    <CustomerDetailField label="Email verificado">
+                      {c.emailVerified ? (c.emailVerifiedAt ? fmtDate(c.emailVerifiedAt) : 'Sí') : 'No'}
+                    </CustomerDetailField>
+                    <CustomerDetailField label="Newsletter">{c.newsletterSubscribed ? 'Suscripta' : 'No'}</CustomerDetailField>
+                    <CustomerDetailField label="Pedidos">
+                      {c.ordersCount} en total · {c.paidOrdersCount} pago{c.paidOrdersCount === 1 ? '' : 's'}
+                    </CustomerDetailField>
+                    <CustomerDetailField label="Total gastado (pedidos pagos)">{fmt(c.totalSpent)}</CustomerDetailField>
+                    <CustomerDetailField label="Última compra">{c.lastOrderAt ? fmtDate(c.lastOrderAt) : 'Sin pedidos'}</CustomerDetailField>
+                    <CustomerDetailField label="Favoritos">{c.favoritesCount}</CustomerDetailField>
+                    <CustomerDetailField label="Reseñas">{c.reviewsCount}</CustomerDetailField>
+                  </div>
+                )}
               </div>
             )
           })}
@@ -9545,6 +9727,8 @@ const NAV_ITEMS = [
   { id: 'offers',       label: 'Ofertas',        Icon: TagIcon },
   { id: 'coupons',      label: 'Cupones',        Icon: TicketIcon },
   { id: 'orders',       label: 'Pedidos',        Icon: ClipboardIcon },
+  { id: 'customers',    label: 'Cuentas',        Icon: UsersIcon },
+  { id: 'analytics',    label: 'Visitas',        Icon: PulseIcon },
   { id: 'backups',      label: 'Backups',        Icon: FolderIcon },
 ]
 
@@ -9717,6 +9901,12 @@ export default function AdminDashboard() {
         )}
         {tab === 'orders' && (
           <OrdersTab />
+        )}
+        {tab === 'customers' && (
+          <CustomersTab />
+        )}
+        {tab === 'analytics' && (
+          <AnalyticsTab />
         )}
         {tab === 'backups' && (
           <BackupsTab />

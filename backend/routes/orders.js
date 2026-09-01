@@ -8,6 +8,7 @@ import { attachUserIfPresent, requireAuth } from '../middleware/requireAuth.js'
 // juntas a propósito — si se reactiva una sin la otra, el stock se descuadra
 // solo en cada pedido cancelado.
 import { estimateDeliveryDate } from '../services/correoArgentino.js'
+import { addBusinessDays } from '../services/businessDays.js'
 import { SHIPPING_SERVICES, normalizeShippingService, qualifiesForFreeShipping } from '../config/shipping.js'
 import { quoteShipping } from '../services/shippingQuotes.js'
 import { sendBankTransferInstructions, sendOrderConfirmationNotifications } from '../services/orderNotifications.js'
@@ -352,7 +353,7 @@ router.post('/', attachUserIfPresent, async (req, res) => {
     const productIds = items.map((i) => i.id)
     const { rows: dbProducts } = await pool.query(
       `SELECT products.id, precio_venta, precio_iva, precio_venta_usd, precio_iva_usd, price_currency,
-              color_options, size_options, tone_options, variant_stock,
+              color_options, size_options, tone_options, variant_stock, weight_kg,
               COALESCE((SELECT usd_ars_rate FROM store_settings WHERE id=1),1510) AS usd_ars_rate,
               stock_inmediato,
               CASE WHEN stock_inmediato
@@ -414,6 +415,9 @@ router.post('/', attachUserIfPresent, async (req, res) => {
         // "este producto no estaba en el local, se repone del proveedor".
         aPedido: !dbProduct.stock_inmediato,
         diasEntregaPedido: Number(dbProduct.dias_entrega) || 3,
+        // Peso unitario para cotizar el envío por tramo. Sin dato, el tarifario
+        // cae al tramo más barato (ver backend/config/shipping.js).
+        weightKg: dbProduct.weight_kg != null ? Number(dbProduct.weight_kg) : 0,
       })
     }
     const productsTotal = roundMoney(itemsSnapshot.reduce((sum, i) => sum + i.subtotal, 0))
@@ -467,12 +471,17 @@ router.post('/', attachUserIfPresent, async (req, res) => {
     let estimatedDeliveryDate = null
     let estimatedDeliveryMaxDate = null
     if (deliveryType === 'delivery') {
+      // Valor declarado (para el seguro) = subtotal de productos con IVA, antes
+      // de cupón/descuento. Peso total = suma de weight_kg × cantidad.
+      const totalWeightKg = itemsSnapshot.reduce((sum, i) => sum + (i.weightKg || 0) * i.quantity, 0)
       const quote = await quoteShipping({
         postalCode: customer.codigoPostal,
         service: shippingService,
+        weightKg: totalWeightKg,
+        declaredValue: productsTotal,
       })
       if (!quote) {
-        return res.status(400).json({ error: 'No pudimos calcular el envío para ese código postal — consultanos por WhatsApp' })
+        return res.status(400).json({ error: 'No pudimos calcular el envío automáticamente — consultanos por WhatsApp y lo coordinamos' })
       }
       const freeShipping = qualifiesForFreeShipping({ subtotal: productsTotal })
       shippingCost = freeShipping ? 0 : quote.cost
@@ -485,6 +494,29 @@ router.post('/', attachUserIfPresent, async (req, res) => {
       const estimate = await estimateDeliveryDate(customer.codigoPostal, handlingBusinessDays)
       estimatedDeliveryDate    = estimate.minDate
       estimatedDeliveryMaxDate = estimate.maxDate
+    }
+
+    if (deliveryType === 'pickup') {
+      // El retiro no puede ofrecerse antes de que la mercadería esté lista: un
+      // producto que se repone del proveedor son varios días hábiles. Mismo
+      // piso que ve el cliente en el checkout (src/utils/plazoEntrega.js); se
+      // revalida acá porque el `min` del <input type="date"> se puede saltar.
+      const handlingBusinessDays = Math.max(
+        0,
+        ...itemsSnapshot.map((i) => Number(i.diasEntregaPedido) || 0),
+      )
+      const hoy = new Date()
+      const minPickup = addBusinessDays(
+        new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate()),
+        Math.max(1, handlingBusinessDays),
+      )
+      const [anio, mes, dia] = String(pickupDate).split('-').map(Number)
+      const fechaElegida = new Date(anio, (mes || 1) - 1, dia || 1)
+      if (Number.isNaN(fechaElegida.getTime()) || fechaElegida < minPickup) {
+        return res.status(400).json({
+          error: `La fecha de retiro más temprana es el ${minPickup.toLocaleDateString('es-AR', { day: '2-digit', month: 'long' })}: los productos del pedido necesitan ese tiempo de preparación.`,
+        })
+      }
     }
 
     const total = roundMoney(couponBase - discountAmount + shippingCost)

@@ -39,7 +39,6 @@ export default function Navbar() {
   const accountRef = useRef(null)
   const categoryRef = useRef(null)
   const categoryPanelRef = useRef(null)
-  const categoryCloseTimer = useRef(null)
   const navRef = useRef(null)
   const { pathname } = useLocation()
   const navigate = useNavigate()
@@ -70,8 +69,6 @@ export default function Navbar() {
     }
   }, [categoryOpen])
 
-  useEffect(() => () => clearTimeout(categoryCloseTimer.current), [])
-
   // La announcement bar (no sticky) vive arriba del navbar en el DOM. El navbar
   // sigue siendo `fixed` — convertirlo a `sticky` es un refactor propio, no un
   // efecto colateral de esto (ver docs/ESTADO.md) — así que simulamos el
@@ -100,20 +97,15 @@ export default function Navbar() {
   }, [])
 
   function goToCategory(to) {
-    clearTimeout(categoryCloseTimer.current)
     setCategoryOpen(false)
     navigate(to)
   }
 
+  // El mega-menú se abre solo por click (en "Categoría" o en un atajo del
+  // header). Si `label` viene, deja esa categoría activa en el panel.
   function openCategoryMenu(label) {
-    clearTimeout(categoryCloseTimer.current)
     if (label) setActiveCategoryLabel(label)
     setCategoryOpen(true)
-  }
-
-  function scheduleCategoryClose() {
-    clearTimeout(categoryCloseTimer.current)
-    categoryCloseTimer.current = setTimeout(() => setCategoryOpen(false), 180)
   }
 
   function goToAccountLink(to) {
@@ -177,7 +169,6 @@ export default function Navbar() {
 
   function handleLink(item, e) {
     e.preventDefault()
-    clearTimeout(categoryCloseTimer.current)
     setCategoryOpen(false)
     setMobileOpen(false)
     if (item.to) navigate(item.to)
@@ -215,11 +206,10 @@ export default function Navbar() {
             </Link>
             <nav className="fnx-desktop-nav" aria-label="Categorías" style={{
               display: 'flex', alignItems: 'center', gap: 28,
-            }} ref={categoryRef} onMouseLeave={scheduleCategoryClose}>
+            }} ref={categoryRef}>
               <button
                 type="button"
                 onClick={() => setCategoryOpen((o) => !o)}
-                onMouseEnter={() => openCategoryMenu(activeCategoryLabel)}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 6,
                   background: 'none', border: 'none', cursor: 'pointer', padding: 0,
@@ -251,8 +241,16 @@ export default function Navbar() {
                   <a
                     key={item.label}
                     href={item.to || `#${item.hash}`}
-                    onClick={(e) => handleLink(item, e)}
-                    onMouseEnter={() => category ? openCategoryMenu(category.label) : scheduleCategoryClose()}
+                    onClick={(e) => {
+                      // Un atajo de categoría abre el mega-menú en esa categoría
+                      // (segundo click sobre el mismo lo cierra); "Ver todo" del
+                      // panel lleva a la sección. El resto (Contacto) hace scroll.
+                      if (!category) return handleLink(item, e)
+                      e.preventDefault()
+                      if (isActiveCategory) setCategoryOpen(false)
+                      else openCategoryMenu(category.label)
+                    }}
+                    aria-expanded={category ? isActiveCategory : undefined}
                     style={{
                       textDecoration: 'none',
                       fontFamily: "var(--font-sans)",
@@ -443,8 +441,6 @@ export default function Navbar() {
         <div
           ref={categoryPanelRef}
           role="menu"
-          onMouseEnter={() => clearTimeout(categoryCloseTimer.current)}
-          onMouseLeave={scheduleCategoryClose}
           style={{
             position: 'fixed',
             top: PAGE_CONTENT_OFFSET - Math.min(typeof window !== 'undefined' ? window.scrollY : 0, ANNOUNCEMENT_BAR_HEIGHT),
@@ -491,13 +487,28 @@ export default function Navbar() {
             {/* Subcategory columns */}
             <div style={{ flex: 1, padding: '22px 0 24px 32px', overflowY: 'auto' }}>
               {activeCategory.children ? (
-                <div style={{ columns: '3 220px', columnGap: 40 }}>
-                  {activeCategory.children.map((child) => (
-                    <div key={child.label} style={{ breakInside: 'avoid', marginBottom: 22 }}>
-                      <CategoryTreeNode node={child} depth={0} onNavigate={goToCategory} />
-                    </div>
-                  ))}
-                </div>
+                <>
+                  <a
+                    href={activeCategory.to}
+                    onClick={(e) => { e.preventDefault(); goToCategory(activeCategory.to) }}
+                    style={{
+                      display: 'inline-block', marginBottom: 18,
+                      textDecoration: 'none', color: '#16110B',
+                      fontFamily: "var(--font-sans)",
+                      fontSize: 13.5, fontWeight: 600,
+                      borderBottom: '1px solid currentColor', paddingBottom: 2,
+                    }}
+                  >
+                    Ver todo {activeCategory.label} →
+                  </a>
+                  <div style={{ columns: '3 220px', columnGap: 40 }}>
+                    {activeCategory.children.map((child) => (
+                      <div key={child.label} style={{ breakInside: 'avoid', marginBottom: 22 }}>
+                        <CategoryTreeNode node={child} depth={0} onNavigate={goToCategory} />
+                      </div>
+                    ))}
+                  </div>
+                </>
               ) : (
                 <a
                   href={activeCategory.to}

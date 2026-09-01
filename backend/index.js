@@ -23,12 +23,15 @@ import adminRouter from './routes/admin.js'
 import backupsRouter from './routes/backups.js'
 import newsletterRouter from './routes/newsletter.js'
 import couponsRouter from './routes/coupons.js'
+import customersRouter from './routes/customers.js'
+import analyticsRouter from './routes/analytics.js'
 import arcaRouter from './routes/arca.js'
 import invoicesRouter from './routes/invoices.js'
 import { initializeArcaCredentials } from './config/arca.js'
 import { uploadsDir } from './config/uploads.js'
 import { createCorsOptionsDelegate } from './config/cors.js'
 import { startExpireReservationsJob } from './jobs/expireReservations.js'
+import { startPrunePageViewsJob } from './jobs/prunePageViews.js'
 import { backupManager } from './services/backupManager.js'
 
 const app  = express()
@@ -106,6 +109,8 @@ app.use('/api/payments', paymentsRouter)
 app.use('/api/bank-transfers', bankTransfersRouter)
 app.use('/api/newsletter', newsletterRouter)
 app.use('/api/coupons', couponsRouter)
+app.use('/api/customers', customersRouter)
+app.use('/api/analytics', analyticsRouter)
 
 // Mercado Pago no acepta back_urls con localhost. En desarrollo la preferencia
 // vuelve primero por APP_BASE_URL (por ejemplo, ngrok) y este puente redirige
@@ -158,4 +163,5 @@ app.use((err, _req, res, _next) => {
 app.listen(PORT, () => {
   console.log(`🔥 Fénix backend corriendo en http://localhost:${PORT}`)
   startExpireReservationsJob()
+  startPrunePageViewsJob()
 })

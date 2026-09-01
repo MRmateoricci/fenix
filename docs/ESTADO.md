@@ -7,8 +7,8 @@
 > Si el cambio merece un commit con mensaje propio, merece una entrada acá.
 > Un ajuste de padding, no.
 
-**Última actualización:** 30 de agosto de 2026
-**Commit de referencia:** `a509fd6` + cambios locales de esta tanda
+**Última actualización:** 1 de septiembre de 2026
+**Commit de referencia:** `015f5ae` + cambios locales de esta tanda
 
 ---
 
@@ -17,16 +17,16 @@
 | Área | Estado | Nota |
 |---|---|---|
 | Catálogo público | ✅ Funcionando | Falta terminar de cargar productos |
-| Panel de administración | ✅ Funcionando | 7 secciones |
+| Panel de administración | ✅ Funcionando | 9 secciones (Cuentas es solo lectura; Visitas y Resumen son analítica) |
 | Importación de listas de precios | ✅ Funcionando | XLSX + PDF de factura |
 | Importación de imágenes de catálogo | ✅ Funcionando | Con revisión y borrador |
 | Variantes (color × medida × tono) | ✅ Funcionando | Precio e imagen por combinación; el stock por celda quedó sin uso |
 | Carrito y checkout | ✅ Funcionando | Mercado Pago + transferencia manual + datos fiscales A/B/C |
 | Transferencia bancaria | ✅ Implementada | Descuento configurable, comprobante privado y validación manual |
-| Cotización de envío | 🟡 Provisorio | Tarifario manual por zona · plazos de tránsito propios (Shipnow) |
+| Cotización de envío | 🟡 Provisorio | Tarifario Andreani manual: zona × peso + seguro + IVA · plazos de tránsito propios (Shipnow) · falta cargar peso real en productos |
 | Envío gratis por monto | ✅ Funcionando | Umbral por env var |
 | Cupones de descuento | ✅ Funcionando | |
-| Cuentas de cliente | ✅ Funcionando | Email + OAuth Google/Facebook |
+| Cuentas de cliente | ✅ Funcionando | Email + OAuth Google/Facebook · sección **Cuentas** (solo lectura) en el panel |
 | Pedidos y seguimiento | ✅ Funcionando | Con notificaciones por mail |
 | Reseñas | ✅ Funcionando | Propias + Google Places |
 | Alertas de stock | ⚪ Fuera de uso | Tabla y endpoints intactos, formulario retirado de la ficha |
@@ -34,8 +34,175 @@
 | Disponibilidad y plazos | ✅ Funcionando | Reemplazó al control de stock y a "productos a pedido" — ver detalle abajo |
 | SEO | ✅ Funcionando | Helmet + sitemap + robots |
 | Facturación electrónica ARCA | 🟡 Implementada, producción bloqueada | A/B para RI y C para Monotributo; falta confirmar habilitación A real de Fenix |
+| Analítica de visitas | ✅ Funcionando | Propia, sin servicio externo · pestaña **Visitas** en el panel · sin IP ni cookies |
 
 ---
+
+## Retorno de Mercado Pago sin pagar + contacto por WhatsApp (2026-09-01)
+
+**Síntoma:** al tocar *Pagar con Mercado Pago* y volver con el botón *atrás* del
+navegador sin pagar, el `MpReturnGuard` mandaba a `/order-confirmation?status=pending`
+("Pago en proceso"). Esa pantalla no ofrecía forma de retomar el pago —sólo
+*Volver al inicio*— y el pedido quedaba `pending_payment` hasta vencer a los 45 min.
+El texto "tu pago está siendo procesado" era falso: no había pago en curso.
+
+**Fix:**
+
+- `src/App.jsx` — `MpReturnGuard`: un retorno abandonado (hay `fenix_pending_order_id`
+  y no se pasó por la confirmación) ahora redirige a `/checkout?payment=failure&orderId=X`,
+  no a la confirmación. Con `binary_mode` un pago real nunca queda pendiente: si
+  hubiera resuelto, MP lo habría traído por su propia `back_url`. Reusa el flujo de
+  reintento que ya existía para el rechazo (formulario precargado desde
+  `fenix_checkout_payment_draft` o `/api/orders/mine/:id/retry-data`, paso de pago,
+  aviso "Pago no efectuado"). El pedido viejo lo vence `expireReservations`.
+- `src/pages/OrderConfirmation.jsx` — el bloque "¿Tenés preguntas sobre tu pedido?"
+  linkeaba a Instagram hardcodeado; ahora abre WhatsApp con
+  `seoCfg.business.whatsapp` y el número de orden en el texto, igual que
+  `OrderTracking.jsx`.
+
+**Fuera de alcance:** las `back_urls` del backend, `binary_mode`, el job de
+vencimiento y el checkout en sí. El texto de contacto de la rama `isFailed` de
+`OrderConfirmation` (que no muestra el bloque) quedó sin tocar.
+
+---
+
+## Fecha de retiro con piso real de preparación (2026-09-01)
+
+**Síntoma:** un pedido de un producto sin stock inmediato (reposición del
+proveedor: varios días hábiles) le mostraba al cliente "retiralo mañana". El
+selector "Fecha de retiro" del checkout tenía `min` fijo en mañana y no miraba
+el plazo del carrito; el backend sólo validaba que la fecha existiera.
+
+**Fix:**
+
+- `src/utils/plazoEntrega.js` — nuevos helpers de días hábiles: `sumarDiasHabiles`,
+  `fechaRetiroMinima` (piso = mañana aunque el carrito no tenga plazo),
+  `fechaISOLocal` (para el `min` del `<input type="date">`, sin desfasaje UTC),
+  `retiroDemasiadoTemprano` y `textoRetiroDisponible` (redacción compartida, no
+  frases nuevas por pantalla).
+- `src/pages/Checkout.jsx` — el picker de retiro usa `fechaRetiroMinima(handlingDays)`
+  como `min`, muestra "Disponible para retirar a partir del…" y `validateStep2`
+  rechaza una fecha anterior al piso. `handlingDays` se re-lee del catálogo
+  (`useAdmin().products`, ya resuelto contra los settings actuales) y no del
+  snapshot del carrito: ese quedaba viejo si el carrito venía de otra sesión o
+  si cambió "Plazos de entrega" después de agregar el producto (era la causa de
+  que dejara elegir "mañana"). Un carrito abierto en otra pestaña necesita
+  recargar para ver el catálogo nuevo; el backend rechaza igual la fecha imposible.
+- `backend/routes/orders.js` — `POST /api/orders` revalida la fecha de retiro
+  server-side contra el mismo piso (el `min` del navegador se puede saltar),
+  usando `itemsSnapshot[].diasEntregaPedido` ya resuelto contra la DB.
+- `backend/services/businessDays.js` — nuevo, `isBusinessDay` + `addBusinessDays`
+  extraídos de `correoArgentino.js` para que la estimación de envío y la
+  validación de retiro cuenten los días igual.
+
+**Fuera de alcance:** el valor de reposición por defecto de la tienda
+(`store_settings.dias_entrega_pedido_default`, hoy 8) — es config del panel, no
+código. El bloque de checkout multi-paso viejo (`{false && …}` en `Checkout.jsx`)
+quedó sin tocar. Días hábiles no contemplan feriados (no hay calendario cargado).
+
+## Analítica de visitas propia — pestaña "Visitas" en el panel (2026-09-01)
+
+El dueño pidió ver cuánta gente entra a la web por día. En vez de sumar Google
+Analytics o Plausible (otra cuenta, otro login para el dueño, datos afuera), se
+hizo propio y queda dentro del panel.
+
+- **Medición**: `src/utils/analytics.js` + `<TrackPageView />` en `App.jsx` (dentro
+  de `Layout`, así `/admin` nunca se registra). En cada cambio de ruta manda un
+  beacon `POST /api/analytics/collect` con `keepalive`, fire-and-forget: si falla
+  no molesta al visitante ni frena la navegación.
+- **Privacidad**: no se guarda la IP. `page_views.visitor_hash` es
+  `SHA-256(sal_del_día + IP + user-agent)` y la sal rota cada día → sirve para
+  contar visitantes únicos dentro de la jornada sin identificar a nadie ni cruzar
+  días. Sal opcional `ANALYTICS_SALT` (si falta usa `ADMIN_SESSION_SECRET`). Sin
+  cookies nuevas, no hace falta cartel de cookies.
+- **Bots**: `isBotUserAgent` filtra buscadores, monitores y unfurl de links
+  (WhatsApp/redes). `is_bot` se guarda y el resumen los excluye.
+- **Resumen** (`GET /api/analytics/summary?days=`, admin): serie diaria (con
+  huecos en cero), top de páginas, top de orígenes ("Directo" = sin referrer) y
+  promedios por día. Agrupa por día calendario de Argentina
+  (`AT TIME ZONE 'America/Argentina/Buenos_Aires'`), no de UTC. **No hay "personas
+  únicas del período"**: el hash rota a diario, sumar días contaría dos veces a
+  quien vuelve. Lo sólido es el promedio de personas/día.
+- **Retención**: `backend/jobs/prunePageViews.js` borra las filas de más de
+  `RETENTION_DAYS` (180) una vez por día. La tabla es solo-append con PK entera
+  (no UUID) para no fragmentar el índice.
+- **Migración**: `npm run db:migrate` crea `page_views`. Nada que configurar en
+  Railway salvo, opcionalmente, `ANALYTICS_SALT`.
+- **Fuera de alcance**: no se tocó checkout, pedidos, precios, envíos, Mercado
+  Pago ni el Resumen de ventas (`OverviewDashboard`). Verificación del panel en
+  mobile pendiente en dispositivo real.
+
+---
+
+## Mega-menú del header: se abre por click, no por hover (2026-09-01)
+
+- El panel de categorías del header dejaba de abrirse solo al pasar el mouse. Ahora
+  se abre únicamente por click: el botón **Categoría** hace toggle y cada atajo
+  (Electricidad, Iluminación, Herramientas, Automatización) abre el panel en esa
+  categoría (segundo click sobre el mismo atajo lo cierra) en vez de navegar.
+- Como los atajos ya no navegan directo, el panel suma un enlace **"Ver todo
+  {categoría} →"** arriba de las columnas de subcategorías para entrar a la sección
+  completa. Cerrar por click-afuera / `Escape` ya existía.
+- Se eliminó todo el andamiaje de hover: `onMouseEnter`/`onMouseLeave` del `<nav>`,
+  del botón, de los atajos y del panel, más el timer `categoryCloseTimer` y
+  `scheduleCategoryClose`. En el panel abierto se mantiene el hover sobre la columna
+  izquierda para previsualizar subcategorías (no abre nada, el panel ya está abierto).
+- Sin cambios en el menú mobile (tiene su propio drill-down por tap) ni en el
+  buscador ni en el dropdown de cuenta. Frontend compila.
+- Pendiente: verificación en dispositivo móvil real.
+
+## Tarifario de envío Andreani: zona × peso + seguro + IVA (2026-09-01)
+
+Reemplazo del tarifario manual anterior (7 zonas por CP con precio fijo por
+servicio) por el esquema de Andreani.
+
+- **Zonas**: de 7 pasa a 3 (`rosa` / `salmon` / `bordo`), definidas por
+  provincia y resueltas por CP con `PRICING_ZONE_RANGES` (mapa a nivel provincia,
+  best-effort en bordes, gapless 1000–9999). Se elimina la zona "local": todo
+  entra como mínimo en rosa.
+- **Peso**: nuevo eje. `SHIPPING_WEIGHT_TIERS` (9 tramos) elige la tarifa base
+  según el peso total del pedido (suma de `weight_kg` × cantidad, recalculada
+  server-side en `POST /api/orders`). **20–25 kg y >50 kg no cotizan** →
+  WhatsApp. Sin pesos cargados → tramo 0–1 kg (decisión de negocio para no
+  frenar la compra). No se calcula peso volumétrico.
+- **Fórmula**: `seguro = valor declarado (subtotal productos c/IVA, pre-cupón) ×
+  0.02` → `subtotal = base + seguro` → `total = subtotal × 1.21`. El tarifario
+  Andreani viene sin IVA ni seguro; ambos se agregan en `getManualShippingQuote`.
+- **Días de tránsito**: se mantienen en su propia tabla fina (`TRANSIT_BANDS`,
+  ex `TRANSIT_BUSINESS_DAYS`, 7 bandas de CP) en vez de colapsarse a las 3 zonas
+  — colapsarlas ensancharía todas las ventanas de entrega. Los valores en días
+  no cambian.
+- **Eliminado**: `LARGE_PACKAGE_RATE` / `packageType`, `getShippingForCP` del
+  backend (era código muerto), restos de precios `expreso` por zona.
+- **Frontend**: los items del carrito llevan `weightKg`; `CartContext` expone
+  `totalWeight`; el checkout lo manda a `GET /api/shipping/estimate` (`&weight=`)
+  y a la copia local `src/config/shipping.js`. `subtotal` del estimate hace de
+  valor declarado.
+- Tests: `backend/config/shipping.test.js`.
+- **Pendiente**: cargar `weight_kg` real en los productos; integración con la API
+  de Andreani.
+
+## Sección Cuentas en el panel (solo lectura) (2026-09-01)
+
+- Nueva sección **Cuentas** en el panel: lista todas las cuentas de cliente
+  (registro con email + OAuth Google/Facebook) con buscador por nombre/email/
+  teléfono, cuatro contadores arriba (total, verificadas, con pedidos, newsletter)
+  y una fila expandible por cuenta con el detalle completo.
+- Backend: `GET /api/customers` (`routes/customers.js`), protegido con
+  `requireAdmin`. Una query con `LATERAL` agrega por cuenta: pedidos totales y
+  pagos, total gastado (pedidos con `paid_at`), última compra, favoritos, reseñas
+  y si el email está en `newsletter_subscribers`. `password_hash` **nunca** sale
+  del backend (`mapCustomerRow` lo omite; hay test que lo verifica).
+- Frontend: `AdminContext` expone `customers` + `fetchCustomers`; `CustomersTab`
+  filtra client-side sobre la lista cargada.
+- **Solo lectura**: no se puede editar ni borrar cuentas desde el panel. Sin
+  export CSV. Sin cambios de esquema (todo el dato ya existía).
+- Tests: `backend/routes/customers.test.js` (`mapCustomerRow`, `buildCustomerSearch`).
+  Frontend compila.
+- Datos de ejemplo: `node db/seedDemoCustomers.js` crea 6 cuentas demo (dominio
+  `demo.fenix.test`, pedidos `DEMO-C-*`); `--clean` las borra. No siembra reseñas
+  (son públicas).
+- Pendiente: verificación en dispositivo móvil real.
 
 ## Sección Tienda del panel paginada + filtro por imagen (2026-08-30)
 
@@ -78,11 +245,12 @@ Ejes de producto disponibles: `color_options`, `size_options`, `tone_options`
 (tono de luz), con `variant_stock` (JSONB) para stock por combinación exacta y
 precio propio opcional por color y por medida.
 
-Campos físicos ya en el esquema y listos para el cotizador: `length_cm`,
+Campos físicos ya en el esquema y usados por el cotizador: `length_cm`,
 `width_cm`, `height_cm`, `weight_kg`.
 
-**Falta:** poblar dimensiones y peso en los productos reales. Sin esto no hay
-cotizador de envío confiable.
+**Falta:** poblar peso (y dimensiones) en los productos reales. El cotizador
+Andreani va por peso: sin `weight_kg` cargado, todo cotiza en el tramo más
+barato (0–1 kg).
 
 **Galería de fotos (2026-08-20):** `products.gallery_images` (JSONB, default
 `[]`) guarda fotos adicionales del producto, en orden. Es una galería única por
@@ -211,10 +379,12 @@ varía según la localidad exacta dentro de cada zona de CP y esa granularidad n
 se conoce desde el código postal: un día exacto es precisión inventada, y la
 fecha inventada es la que después genera el reclamo.
 
-- `TRANSIT_BUSINESS_DAYS` en `backend/config/shipping.js`: `{ min, max }` de días
-  hábiles por zona, con los valores del tarifario de tránsito de Shipnow (que da
-  capital y "otras zonas" por provincia). El `min` es la capital más rápida de la
-  zona, el `max` la localidad más lenta.
+- `TRANSIT_BANDS` en `backend/config/shipping.js`: `{ min, max }` de días
+  hábiles por **banda de CP** (7 bandas finas, distintas de las 3 zonas de
+  tarifa), con los valores del tarifario de tránsito de Shipnow (que da capital
+  y "otras zonas" por provincia). El `min` es la capital más rápida de la banda,
+  el `max` la localidad más lenta. Precio y tránsito son dos ejes separados: el
+  precio va por zona Andreani, el tránsito por esta banda más fina.
 - Se resuelve **por CP, no por la provincia del formulario**: `provincia` es un
   input de texto libre ("Bs As", "caba", "Buenos aires"); el CP ya está validado
   y es el mismo dato con el que se cotiza el precio.
@@ -235,9 +405,8 @@ no había con qué justificar que llegara antes: mostraba la misma ventana de
 entrega que el clásico, por más plata. `SHIPPING_SERVICES` quedó en `['clasico']`
 y con eso deja de cotizarse, validarse y ofrecerse.
 
-- Los precios `expreso` siguen en `SHIPPING_ZONES` y en `LARGE_PACKAGE_RATE`:
-  reactivarlo es agregarlo a `SHIPPING_SERVICES` en los dos config (backend y
-  `src/config/shipping.js`).
+- El tarifario Andreani (2026-09-01) es zona × peso, sin precio por servicio:
+  reactivar `expreso` implicaría un tarifario separado, no una columna más.
 - Con un solo servicio el checkout **no muestra selector** — elegir entre una
   opción no es elegir. El costo se sigue mostrando como fila informativa. El
   selector vuelve solo cuando la lista tenga más de un elemento.
@@ -248,30 +417,37 @@ y con eso deja de cotizarse, validarse y ofrecerse.
   tal cual en el mail, el admin y el detalle del pedido.
 
 
-**Estado actual: tarifario manual por zona** (`backend/config/shipping.js`).
+**Estado actual: tarifario Andreani manual = zona × peso** (`backend/config/shipping.js`,
+espejo en `src/config/shipping.js` — todo cambio va en los dos).
 
-7 zonas por rango de CP cubriendo 1000–9999 sin huecos:
+**Zonas** (`PRICING_ZONE_RANGES`, resueltas por CP a nivel provincia, cubren
+1000–9999 sin huecos; best-effort en bordes provinciales). No hay zona "local":
+todo entra como mínimo en rosa.
 
-| Zona | CP | Clásico | Expreso |
-|---|---|---|---|
-| Gran La Plata | 1884–1936 | 12.020 | 13.219 |
-| CABA | 1000–1499 | 13.500 | 18.600 |
-| GBA | 1500–1883, 1937–1999 | 14.300 | 19.700 |
-| Centro, Litoral y Cuyo | 2000–3399, 5000–5999 | 15.957 | 21.941 |
-| Interior BA y La Pampa | 6000–8199 | 16.700 | 23.000 |
-| Norte (NOA/NEA) | 3400–4999 | 19.900 | 27.400 |
-| Patagonia | 8200–9999 | 25.500 | 35.100 |
+| Zona | Provincias |
+|---|---|
+| rosa | Buenos Aires, CABA, Córdoba, Santa Fe, Entre Ríos, Santiago del Estero, San Luis, La Pampa |
+| salmón | Formosa, Chaco, Corrientes, Misiones, Tucumán, Catamarca, La Rioja, San Juan, Mendoza, Neuquén, Río Negro |
+| bordó | Jujuy, Salta, Chubut, Santa Cruz, Tierra del Fuego |
 
-Más una tarifa plana de paquete grande (60×40×30 cm): 33.069 clásico / 46.546 expreso.
+**Tramos de peso** (`SHIPPING_WEIGHT_TIERS`, tarifa base sin IVA ni seguro): 0–1,
+1–2, 2–3, 3–5, 5–10, 10–15, 15–20, 25–35, 35–50 kg. **20–25 kg y >50 kg no
+cotizan** (Andreani no informó): se deriva a WhatsApp. Sin `weight_kg` cargado se
+usa el tramo más barato (0–1 kg).
+
+**Fórmula:** `seguro = valor declarado × 0.02` (valor declarado = subtotal de
+productos con IVA, pre-cupón) → `subtotal = base + seguro` → `total = subtotal × 1.21`.
 
 **Envío gratis:** `FREE_SHIPPING_THRESHOLD`, default 100.000, configurable con
 `ENVIO_GRATIS_MINIMO`. Aplica a todo el país. El frontend no tiene el valor
 hardcodeado, lo recibe de `GET /api/shipping/config`.
 
-**Pendiente:** integración real con Correo Argentino. El adaptador está previsto en
-`services/shippingQuotes.js` y se activa cambiando `SHIPPING_PROVIDER=correo_argentino`.
-Faltan credenciales (`CORREO_ARGENTINO_API_URL`, `CLIENT_ID`, `CLIENT_SECRET`).
-Requiere además las dimensiones físicas cargadas por producto.
+**Pendiente:**
+- Cargar peso (y dimensiones) reales en los productos — hoy todo cotiza en el
+  tramo 0–1 kg mientras `weight_kg` esté vacío.
+- Integración real con la API de Andreani. El adaptador está previsto en
+  `services/shippingQuotes.js`; debe respetar el contrato de
+  `getManualShippingQuote` (CP + peso + valor declarado → costo final).
 
 ### Pagos
 
@@ -448,7 +624,8 @@ Links: envío → `/policies/shipping` (página real). Cuotas → `/faq#medios-d
    PERÍODO DESDE ya quedó fijado en `2024-01`
 3. Aplicar la migración de `invoices.iva_breakdown`
 4. Ejecutar las pruebas PostgreSQL descartables de facturación con `TEST_DATABASE_URL`
-5. **Cargar dimensiones y peso** en los productos reales — bloquea el cotizador real
+5. **Cargar peso (y dimensiones)** en los productos reales — sin `weight_kg` el
+   cotizador Andreani cotiza todo en el tramo 0–1 kg
 6. **Cuotas**: migrar `ProductCard.jsx` y agregar el mensaje en `ProductDetail` para
    que consuman `GET /api/payments/config` en lugar del `INSTALLMENTS = 6` hardcodeado
 7. **Verificar cuotas sin interés** activas en el panel de MP
@@ -456,7 +633,7 @@ Links: envío → `/policies/shipping` (página real). Cuotas → `/faq#medios-d
    mega-menú, arranque del hero) postergado al agregar la `AnnouncementBar`, que
    por ahora simula el efecto con `transform` por scroll — ver detalle arriba
 9. **Terminar de poblar el catálogo** con productos e imágenes
-10. Credenciales de Correo Argentino y activación del adaptador real
+10. Credenciales / API de Andreani y activación del adaptador real en `shippingQuotes.js`
 11. Refactor de `AdminDashboard.jsx` (8.100+ líneas en un solo archivo)
 12. Definir exclusiones de envío gratis, si las hubiera
 13. Habilitar cantidad > 1 en el selector de `ProductDetail` para items a pedido
@@ -464,6 +641,21 @@ Links: envío → `/policies/shipping` (página real). Cuotas → `/faq#medios-d
 ---
 
 ## Bitácora
+
+### 2026-09-01 · Login del panel roto cuando Vite cambia de puerto
+
+En desarrollo, si el 5173 quedaba ocupado por una corrida vieja, Vite arrancaba en
+5174 y el login del panel devolvía "Contraseña incorrecta" — que en realidad era un
+**403 de CORS**: el backend sólo aceptaba como origen `localhost:5173` y `:4173`, y
+el formulario ([AdminLogin.jsx](../src/pages/admin/AdminLogin.jsx)) muestra el mismo
+mensaje ante cualquier respuesta que no sea 2xx.
+
+`isDevLocalhostOrigin()` en `backend/config/cors.js` ahora acepta cualquier puerto de
+`localhost` / `127.0.0.1` / `[::1]` mientras `NODE_ENV !== 'production'`. Se aplica en
+los dos lugares que filtran origen: el delegate de CORS y `trustedMutationOrigin` de
+`middleware/requireAdmin.js` (que si no, bloquearía cada guardado del panel desde el
+puerto "equivocado"). En producción no cambia nada: el origen sigue teniendo que
+estar en la lista explícita.
 
 ### 2026-08-26 · Variantes que el proveedor no lista: precio derivado y aviso
 

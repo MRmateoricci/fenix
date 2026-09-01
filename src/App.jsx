@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useEffect } from 'react'
+import { trackPageView } from './utils/analytics'
 import { CartProvider } from './context/CartContext'
 import { AdminProvider, useAdmin } from './context/AdminContext'
 import { AuthProvider, useAuth } from './context/AuthContext'
@@ -49,10 +50,13 @@ function MpReturnGuard() {
       return
     }
     if (pathname === '/order-confirmation') return
-    // Si el usuario volvió al sitio sin pasar por la página de confirmación
-    // (por ejemplo, cerró la pestaña de MP y abrió el sitio de nuevo),
-    // lo redirigimos a la confirmación para que vea el estado real.
-    navigate(`/order-confirmation?orderId=${pendingId}&status=pending`, { replace: true })
+    // El usuario volvió al sitio sin completar el pago (botón atrás del
+    // navegador, cerró la pestaña de MP…). Con binary_mode un pago real nunca
+    // queda "pendiente": si el pago hubiera resuelto, MP lo habría traído por
+    // su propia back_url a /order-confirmation. Que esté acá significa intento
+    // abandonado, así que lo mandamos al checkout con los datos precargados
+    // para reintentar, en vez de dejarlo en una confirmación sin salida.
+    navigate(`/checkout?payment=failure&orderId=${pendingId}`, { replace: true })
   }, [navigate, pathname, search])
 
   return null
@@ -68,6 +72,18 @@ function ScrollToTop() {
   return null
 }
 
+// Registra cada visita de página de la tienda. Vive dentro de Layout, que no
+// envuelve las rutas del panel, así que /admin nunca llega acá.
+function TrackPageView() {
+  const { pathname } = useLocation()
+
+  useEffect(() => {
+    trackPageView(pathname)
+  }, [pathname])
+
+  return null
+}
+
 function Layout() {
   const { pathname } = useLocation()
   // La ficha de producto ya tiene su propio botón "Consultar por WhatsApp" en el CTA;
@@ -77,6 +93,7 @@ function Layout() {
   return (
     <>
       <ScrollToTop />
+      <TrackPageView />
       <MpReturnGuard />
       <AnnouncementBar />
       <Navbar />

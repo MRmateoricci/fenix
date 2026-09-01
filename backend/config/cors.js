@@ -17,6 +17,18 @@ export function normalizeOrigin(value) {
   }
 }
 
+// En desarrollo Vite salta de puerto (5173 → 5174 → …) cuando el anterior quedó
+// ocupado por una corrida vieja. Sin esto, el panel devolvía 403 de CORS y el
+// login lo mostraba como "contraseña incorrecta". En producción queda apagado:
+// ahí el origen tiene que estar sí o sí en la lista explícita.
+export function isDevLocalhostOrigin(origin) {
+  if (process.env.NODE_ENV === 'production') return false
+  const normalized = normalizeOrigin(origin)
+  if (!normalized) return false
+  const { hostname } = new URL(normalized)
+  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]'
+}
+
 function firstForwardedValue(value) {
   return value?.split(',')[0]?.trim()
 }
@@ -49,6 +61,7 @@ export function createCorsOptionsDelegate({ appBaseUrl, frontendBaseUrl } = {}) 
         const normalized = normalizeOrigin(origin)
         if (normalized && allowedOrigins.has(normalized)) return originCallback(null, true)
         if (normalized && normalized === currentRequestOrigin) return originCallback(null, true)
+        if (isDevLocalhostOrigin(origin)) return originCallback(null, true)
 
         if (normalized) {
           const hostname = new URL(normalized).hostname
