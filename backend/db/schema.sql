@@ -497,7 +497,12 @@ END $$;
 -- ─────────────────────────────────────────────────────────────────────────────
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_method VARCHAR(20) NOT NULL DEFAULT 'mercadopago';
 ALTER TABLE orders DROP CONSTRAINT IF EXISTS orders_payment_method_check;
-ALTER TABLE orders ADD CONSTRAINT orders_payment_method_check CHECK (payment_method IN ('mercadopago', 'pay_in_store'));
+-- Incluye 'bank_transfer' desde acá aunque las columnas de transferencia se
+-- agreguen más abajo: el schema se reproduce entero en cada migración y si ya
+-- hay un pedido con transferencia en la base, recrear el CHECK sin ese valor
+-- falla ("violated by some row"). La lista completa se define una sola vez.
+ALTER TABLE orders ADD CONSTRAINT orders_payment_method_check
+  CHECK (payment_method IN ('mercadopago', 'pay_in_store', 'bank_transfer'));
 
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS pickup_date DATE;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS estimated_delivery_date DATE;
@@ -935,10 +940,6 @@ ALTER TABLE store_settings ADD CONSTRAINT store_settings_bank_transfer_discount_
 ALTER TABLE store_settings DROP CONSTRAINT IF EXISTS store_settings_bank_transfer_expiry_check;
 ALTER TABLE store_settings ADD CONSTRAINT store_settings_bank_transfer_expiry_check
   CHECK (bank_transfer_expiry_hours BETWEEN 1 AND 720);
-
-ALTER TABLE orders DROP CONSTRAINT IF EXISTS orders_payment_method_check;
-ALTER TABLE orders ADD CONSTRAINT orders_payment_method_check
-  CHECK (payment_method IN ('mercadopago', 'pay_in_store', 'bank_transfer'));
 
 -- El descuento bancario queda separado del cupon para reconstruir el total y
 -- mostrar ambas bonificaciones sin cambiar la semantica historica de
