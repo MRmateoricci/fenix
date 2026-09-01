@@ -9,7 +9,12 @@ import { attachUserIfPresent, requireAuth } from '../middleware/requireAuth.js'
 // solo en cada pedido cancelado.
 import { estimateDeliveryDate } from '../services/correoArgentino.js'
 import { addBusinessDays } from '../services/businessDays.js'
-import { SHIPPING_SERVICES, normalizeShippingService, qualifiesForFreeShipping } from '../config/shipping.js'
+import {
+  SHIPPING_SERVICES,
+  normalizeShippingService,
+  qualifiesForFreeShipping,
+  isFreeShippingPostalCode,
+} from '../config/shipping.js'
 import { quoteShipping } from '../services/shippingQuotes.js'
 import { sendBankTransferInstructions, sendOrderConfirmationNotifications } from '../services/orderNotifications.js'
 import { PaymentReconciliationError, reconcileMercadoPagoReturn } from '../services/mercadopagoPayments.js'
@@ -483,7 +488,9 @@ router.post('/', attachUserIfPresent, async (req, res) => {
       if (!quote) {
         return res.status(400).json({ error: 'No pudimos calcular el envío automáticamente — consultanos por WhatsApp y lo coordinamos' })
       }
-      const freeShipping = qualifiesForFreeShipping({ subtotal: productsTotal })
+      const freeShipping =
+        qualifiesForFreeShipping({ subtotal: productsTotal })
+        || isFreeShippingPostalCode(customer.codigoPostal)
       shippingCost = freeShipping ? 0 : quote.cost
       // Margen de preparación: el mayor plazo del carrito, nunca la suma — los
       // items se despachan juntos, así que manda el que más tarda en estar.

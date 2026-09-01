@@ -14,6 +14,12 @@ export const SHIPPING_IVA_RATE = 0.21
 // Peso que se asume cuando el carrito no trae pesos cargados: tramo más barato.
 const FALLBACK_WEIGHT_KG = 0.5
 
+// Espejo de backend/config/shipping.js. Envío sin cargo a City Bell (1896),
+// Gonnet (1897) y Villa Elisa (1894); recargo fijo sobre el total al resto.
+// Vista previa nada más: POST /api/orders vuelve a cotizar contra el backend.
+export const FREE_SHIPPING_POSTAL_CODES = [1894, 1896, 1897]
+export const SHIPPING_SURCHARGE = 4000
+
 // Zonas de tarifa Andreani. No hay zona local: todo destino que podría contar
 // como misma localidad entra igual que la zona rosa.
 export const SHIPPING_ZONES = {
@@ -104,6 +110,17 @@ export function getShippingForCP(postalCode, service = 'clasico', { weightKg = 0
   const num = Number(normalized)
   if (Number.isNaN(num) || num < 1000 || num > 9999) return SHIPPING_FALLBACK
 
+  // Envío sin cargo por localidad: antes de zona y peso, igual que el backend.
+  if (FREE_SHIPPING_POSTAL_CODES.includes(num)) {
+    return {
+      id: 'local_gratis',
+      label: 'Envío a domicilio',
+      description: 'Envío sin cargo a City Bell, Gonnet y Villa Elisa',
+      service,
+      price: 0,
+    }
+  }
+
   const zone = findZone(num)
   if (!zone) return SHIPPING_FALLBACK
 
@@ -114,7 +131,8 @@ export function getShippingForCP(postalCode, service = 'clasico', { weightKg = 0
   const insurance = roundMoney(Math.max(0, Number(declaredValue) || 0) * SHIPPING_INSURANCE_RATE)
   const subtotal = roundMoney(base + insurance)
   const iva = roundMoney(subtotal * SHIPPING_IVA_RATE)
-  const price = roundMoney(subtotal + iva)
+  // Recargo fijo sobre el importe ya con IVA (decisión comercial, no impuesto).
+  const price = roundMoney(subtotal + iva + SHIPPING_SURCHARGE)
 
   return { ...zone, service, price }
 }

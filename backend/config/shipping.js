@@ -87,6 +87,36 @@ function isValidArgentinePostalCode(normalized) {
   return !Number.isNaN(num) && num >= 1000 && num <= 9999
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Envío sin cargo por localidad. Decisión comercial: a City Bell, Gonnet y
+// Villa Elisa la entrega la hace el local, así que el envío no se cobra —
+// cualquiera sea el peso del pedido o el monto del carrito. Se resuelve por el
+// tramo numérico de 4 dígitos del CP; el 1897 arrastra también a Joaquín
+// Gorina, pegada a Gonnet, y se acepta como parte del mismo criterio.
+// ─────────────────────────────────────────────────────────────────────────────
+export const FREE_SHIPPING_POSTAL_CODES = [1894, 1896, 1897]
+
+// Nombres para mostrar (barra de anuncios, política de envíos, cotización). Van
+// acá y no en el JSX para no repartir la misma lista en lugares que después
+// divergen. El frontend los recibe de GET /api/shipping/config.
+export const FREE_SHIPPING_LOCALITIES = ['City Bell', 'Gonnet', 'Villa Elisa']
+
+const FREE_SHIPPING_LOCALITIES_TEXT = new Intl.ListFormat('es-AR', {
+  style: 'long',
+  type: 'conjunction',
+}).format(FREE_SHIPPING_LOCALITIES)
+
+export function isFreeShippingPostalCode(postalCode) {
+  const normalized = normalizePostalCode(postalCode)
+  if (!isValidArgentinePostalCode(normalized)) return false
+  return FREE_SHIPPING_POSTAL_CODES.includes(Number(normalized))
+}
+
+// Recargo fijo que se suma al costo final del envío (después del seguro y el
+// IVA) en todo destino que sí se cobra. No aplica a FREE_SHIPPING_POSTAL_CODES.
+// Configurable por env var, igual que el umbral de envío gratis.
+export const SHIPPING_SURCHARGE = Number(process.env.ENVIO_RECARGO_FIJO) || 4000
+
 // Mapa código postal → zona de tarifa. Rangos del tramo numérico del CPA
 // agrupados por provincia. Es best-effort en los bordes entre provincias:
 // algunas localidades caen en el bloque numérico de la provincia vecina
@@ -142,6 +172,22 @@ export function getManualShippingQuote({
   const normalized = normalizePostalCode(postalCode)
   if (!isValidArgentinePostalCode(normalized)) return null
 
+  // Envío sin cargo por localidad: se resuelve antes que la zona y el peso —
+  // un pedido a City Bell/Gonnet/Villa Elisa va gratis aunque su tramo de peso
+  // no tenga tarifa Andreani (20–25 kg o más de 50 kg).
+  if (isFreeShippingPostalCode(normalized)) {
+    return {
+      id: 'local_gratis',
+      label: 'Envío a domicilio',
+      description: `Envío sin cargo a ${FREE_SHIPPING_LOCALITIES_TEXT}`,
+      postalCode: normalized,
+      service,
+      cost: 0,
+      breakdown: { base: 0, insurance: 0, subtotal: 0, iva: 0, surcharge: 0, total: 0 },
+      source: 'local_gratis',
+    }
+  }
+
   const zone = findPricingZone(normalized)
   if (!zone) return null
 
@@ -152,7 +198,9 @@ export function getManualShippingQuote({
   const insurance = roundMoney(Math.max(0, Number(declaredValue) || 0) * SHIPPING_INSURANCE_RATE)
   const subtotal = roundMoney(base + insurance)
   const iva = roundMoney(subtotal * SHIPPING_IVA_RATE)
-  const total = roundMoney(subtotal + iva)
+  // El recargo fijo va sobre el importe ya con IVA: es una decisión comercial de
+  // la tienda, no un impuesto ni parte del tarifario de Andreani.
+  const total = roundMoney(subtotal + iva + SHIPPING_SURCHARGE)
 
   return {
     id: zone.id,
@@ -161,7 +209,7 @@ export function getManualShippingQuote({
     postalCode: normalized,
     service,
     cost: total,
-    breakdown: { base, insurance, subtotal, iva, total },
+    breakdown: { base, insurance, subtotal, iva, surcharge: SHIPPING_SURCHARGE, total },
     source: 'andreani',
   }
 }

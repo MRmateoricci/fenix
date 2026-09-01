@@ -4,6 +4,7 @@ import {
   getManualShippingQuote,
   getTransitBusinessDays,
   qualifiesForFreeShipping,
+  isFreeShippingPostalCode,
   FREE_SHIPPING_THRESHOLD,
 } from './shipping.js'
 
@@ -29,15 +30,15 @@ test('el CP resuelve a la zona Andreani correcta', () => {
 })
 
 // ── Tramo por peso ───────────────────────────────────────────────────────────
-test('el peso total elige el tramo de tarifa (sin seguro: total = base × 1,21)', () => {
+test('el peso total elige el tramo (sin seguro: total = base × 1,21 + recargo fijo $4.000)', () => {
   const totalRosa = (kg) => getManualShippingQuote({ postalCode: '1900', weightKg: kg }).cost
-  assert.equal(totalRosa(0.4), 11067.88) // 0–1 kg → base 9147,01
-  assert.equal(totalRosa(1), 11067.88) //   límite inferior inclusive
-  assert.equal(totalRosa(2), 11067.88) // 1–2 kg → misma base
-  assert.equal(totalRosa(2.5), 11881.33) // 2–3 kg → base 9819,28
-  assert.equal(totalRosa(20), 43615.99) // 15–20 kg → base 36046,27
-  assert.equal(totalRosa(25), 70430.47) // 25–35 kg → base 58207,00
-  assert.equal(totalRosa(50), 91315.55) // 35–50 kg → base 75467,40
+  assert.equal(totalRosa(0.4), 15067.88) // 0–1 kg → base 9147,01 + recargo
+  assert.equal(totalRosa(1), 15067.88) //   límite inferior inclusive
+  assert.equal(totalRosa(2), 15067.88) // 1–2 kg → misma base
+  assert.equal(totalRosa(2.5), 15881.33) // 2–3 kg → base 9819,28
+  assert.equal(totalRosa(20), 47615.99) // 15–20 kg → base 36046,27
+  assert.equal(totalRosa(25), 74430.47) // 25–35 kg → base 58207,00
+  assert.equal(totalRosa(50), 95315.55) // 35–50 kg → base 75467,40
 })
 
 test('20–25 kg y más de 50 kg no cotizan automáticamente', () => {
@@ -48,7 +49,28 @@ test('20–25 kg y más de 50 kg no cotizan automáticamente', () => {
 
 test('sin peso cargado se cotiza el tramo más barato (0–1 kg)', () => {
   const sinPeso = getManualShippingQuote({ postalCode: '1900', weightKg: 0 })
-  assert.equal(sinPeso.cost, 11067.88)
+  assert.equal(sinPeso.cost, 15067.88)
+})
+
+// ── Envío sin cargo por localidad (City Bell / Gonnet / Villa Elisa) ─────────
+test('City Bell, Gonnet y Villa Elisa tienen envío gratis sin importar peso ni monto', () => {
+  assert.equal(getManualShippingQuote({ postalCode: '1896', weightKg: 1 }).cost, 0) // City Bell
+  assert.equal(getManualShippingQuote({ postalCode: '1897', weightKg: 3 }).cost, 0) // Gonnet
+  assert.equal(getManualShippingQuote({ postalCode: '1894', weightKg: 10 }).cost, 0) // Villa Elisa
+  // Peso que en cualquier otra zona no cotizaría: acá igual va gratis.
+  assert.equal(getManualShippingQuote({ postalCode: '1896', weightKg: 22 }).cost, 0)
+  assert.equal(getManualShippingQuote({ postalCode: '1896', weightKg: 80 }).cost, 0)
+  // El seguro tampoco se cobra.
+  assert.equal(getManualShippingQuote({ postalCode: '1896', weightKg: 2, declaredValue: 500000 }).cost, 0)
+})
+
+test('isFreeShippingPostalCode reconoce sólo las localidades sin cargo', () => {
+  assert.equal(isFreeShippingPostalCode('1894'), true)
+  assert.equal(isFreeShippingPostalCode('1896'), true)
+  assert.equal(isFreeShippingPostalCode(' 1897 '), true)
+  assert.equal(isFreeShippingPostalCode('1900'), false) // La Plata
+  assert.equal(isFreeShippingPostalCode('1895'), false)
+  assert.equal(isFreeShippingPostalCode('abc'), false)
 })
 
 // ── Seguro + IVA ─────────────────────────────────────────────────────────────
@@ -60,9 +82,10 @@ test('el seguro es 2 % del valor declarado y el IVA se aplica sobre base + segur
     insurance: 1000,
     subtotal: 18758.06,
     iva: 3939.19,
-    total: 22697.25,
+    surcharge: 4000,
+    total: 26697.25,
   })
-  assert.equal(quote.cost, 22697.25)
+  assert.equal(quote.cost, 26697.25)
 })
 
 // ── Casos borde ──────────────────────────────────────────────────────────────

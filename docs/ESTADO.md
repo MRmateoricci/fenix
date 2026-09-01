@@ -23,8 +23,9 @@
 | Variantes (color × medida × tono) | ✅ Funcionando | Precio e imagen por combinación; el stock por celda quedó sin uso |
 | Carrito y checkout | ✅ Funcionando | Mercado Pago + transferencia manual + datos fiscales A/B/C |
 | Transferencia bancaria | ✅ Implementada | Descuento configurable, comprobante privado y validación manual |
-| Cotización de envío | 🟡 Provisorio | Tarifario Andreani manual: zona × peso + seguro + IVA · plazos de tránsito propios (Shipnow) · falta cargar peso real en productos |
-| Envío gratis por monto | ✅ Funcionando | Umbral por env var |
+| Cotización de envío | 🟡 Provisorio | Tarifario Andreani manual: zona × peso + seguro + IVA **+ recargo fijo $4.000** · plazos de tránsito propios (Shipnow) · falta cargar peso real en productos |
+| Envío gratis por monto | ✅ Funcionando | Umbral por env var (`ENVIO_GRATIS_MINIMO`) |
+| Envío gratis por localidad | ✅ Funcionando | City Bell, Gonnet y Villa Elisa (CP 1896/1897/1894), sin mínimo ni tope de peso |
 | Cupones de descuento | ✅ Funcionando | |
 | Cuentas de cliente | ✅ Funcionando | Email · OAuth Google/Facebook oculto hasta configurarlo · sección **Cuentas** (solo lectura) en el panel |
 | Pedidos y seguimiento | ✅ Funcionando | Con notificaciones por mail |
@@ -37,6 +38,37 @@
 | Analítica de visitas | ✅ Funcionando | Propia, sin servicio externo · pestaña **Visitas** en el panel · sin IP ni cookies |
 
 ---
+
+## Envío gratis en City Bell / Gonnet / Villa Elisa + recargo fijo $4.000 (2026-09-01)
+
+**Qué se pidió:** que los envíos a City Bell, Gonnet y Villa Elisa sean gratis
+(mostrando "Gratis" al ingresar el CP y anunciándolo en la barra de arriba), y
+que a todos los demás códigos postales se les sume $4.000 de envío.
+
+**Cómo quedó:**
+
+- `backend/config/shipping.js` (autoridad) + espejo `src/config/shipping.js`:
+  - `FREE_SHIPPING_POSTAL_CODES = [1894, 1896, 1897]` — se chequea **antes** de
+    zona y peso, así que un pedido pesado a esas localidades igual va gratis
+    (incluye los tramos 20–25 kg y +50 kg que normalmente derivan a WhatsApp).
+    El 1897 arrastra a Joaquín Gorina, pegada a Gonnet: se acepta.
+  - `SHIPPING_SURCHARGE` (`ENVIO_RECARGO_FIJO`, default 4000) — se suma al costo
+    final del envío, **después** del seguro y el IVA (decisión comercial, no es
+    impuesto). No aplica a las localidades sin cargo.
+  - `FREE_SHIPPING_LOCALITIES` — nombres para mostrar, servidos por
+    `GET /api/shipping/config`.
+- `backend/routes/orders.js` y `routes/shipping.js`: `freeShipping` ahora es
+  `qualifiesForFreeShipping(...) || isFreeShippingPostalCode(...)`.
+- `src/components/AnnouncementBar.jsx`: slide nuevo *"ENVÍO GRATIS EN CITY BELL,
+  GONNET Y VILLA ELISA"* (mobile: *"…EN CITY BELL Y ZONA"*), con las localidades
+  del backend.
+- `src/pages/Policy.jsx`: sección "Envío sin cargo en la zona" en la política de
+  envíos.
+- Tests de `backend/config/shipping.test.js` actualizados (montos + recargo +
+  casos de localidad gratis).
+
+**Fuera de alcance:** días de tránsito (`TRANSIT_BANDS`), carrito (no promete
+gratis por zona porque no conoce el domicilio), retiro en local, Mercado Pago.
 
 ## Retorno de Mercado Pago sin pagar + contacto por WhatsApp (2026-09-01)
 

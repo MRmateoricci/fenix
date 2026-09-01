@@ -7,6 +7,10 @@ const API_BASE = import.meta.env.VITE_API_URL || ''
 const fmt = (n) =>
   new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(n)
 
+// "City Bell, Gonnet y Villa Elisa" — la lista de localidades sale del backend
+// (GET /api/shipping/config), no se hardcodea acá.
+const listaLocalidades = new Intl.ListFormat('es-AR', { style: 'long', type: 'conjunction' })
+
 function scrollToId(id) {
   document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' })
 }
@@ -36,6 +40,9 @@ export default function AnnouncementBar() {
   }, [])
 
   const threshold = shippingConfig?.freeShippingThreshold
+  const freeLocalities = Array.isArray(shippingConfig?.freeShippingLocalities) && shippingConfig.freeShippingLocalities.length
+    ? shippingConfig.freeShippingLocalities
+    : null
 
   const tiers = useMemo(() => {
     if (!cuotas || cuotas.length === 0) return null
@@ -78,6 +85,14 @@ export default function AnnouncementBar() {
         desktop: <>ENVÍO GRATIS EN COMPRAS DESDE {fmt(threshold)}</>,
         mobile: <>ENVÍO GRATIS DESDE {fmt(threshold)}</>,
       },
+      ...(freeLocalities
+        ? [{
+            key: 'envio-local',
+            href: '/policies/shipping',
+            desktop: <>ENVÍO GRATIS EN {listaLocalidades.format(freeLocalities).toUpperCase()}</>,
+            mobile: <>ENVÍO GRATIS EN {freeLocalities[0].toUpperCase()} Y ZONA</>,
+          }]
+        : []),
       {
         key: 'cuotas',
         href: '/faq#medios-de-pago',
@@ -100,7 +115,7 @@ export default function AnnouncementBar() {
         mobile: <>RETIRÁ EN CITY BELL</>,
       },
     ]
-  }, [threshold, tiers, pathname])
+  }, [threshold, tiers, pathname, freeLocalities])
 
   if (!slides) return null
 

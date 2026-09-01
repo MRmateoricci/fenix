@@ -2,7 +2,9 @@ import { Router } from 'express'
 import {
   SHIPPING_SERVICES,
   FREE_SHIPPING_THRESHOLD,
+  FREE_SHIPPING_LOCALITIES,
   qualifiesForFreeShipping,
+  isFreeShippingPostalCode,
 } from '../config/shipping.js'
 import { quoteShipping } from '../services/shippingQuotes.js'
 import { estimateDeliveryDate } from '../services/correoArgentino.js'
@@ -11,12 +13,13 @@ const router = Router()
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/shipping/config
-// Público — única fuente de verdad del umbral y las zonas de envío gratis
-// para que el frontend nunca los tenga hardcodeados (carrito, checkout).
+// Público — única fuente de verdad del umbral y las localidades de envío gratis
+// para que el frontend nunca los tenga hardcodeados (carrito, checkout, banner).
 // ─────────────────────────────────────────────────────────────────────────────
 router.get('/config', (_req, res) => {
   res.json({
     freeShippingThreshold: FREE_SHIPPING_THRESHOLD,
+    freeShippingLocalities: FREE_SHIPPING_LOCALITIES,
   })
 })
 
@@ -45,7 +48,8 @@ router.get('/estimate', async (req, res) => {
       })
     }
 
-    const freeShipping = qualifiesForFreeShipping({ subtotal })
+    const freeShipping =
+      qualifiesForFreeShipping({ subtotal }) || isFreeShippingPostalCode(postalCode)
 
     // El margen de preparación lo manda el Checkout con el mayor plazo del
     // carrito. Es sólo para la vista previa: POST /api/orders lo vuelve a
