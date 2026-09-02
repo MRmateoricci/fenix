@@ -8,7 +8,7 @@
 > Un ajuste de padding, no.
 
 **Última actualización:** 2 de septiembre de 2026
-**Commit de referencia:** `242da63` + cambios locales de esta tanda (cupón en la preferencia de Mercado Pago)
+**Commit de referencia:** `9fc5565` + cambios locales de esta tanda (nombres legibles en "Páginas más vistas")
 
 ---
 
@@ -36,6 +36,36 @@
 | SEO | ✅ Funcionando | Helmet + sitemap + robots |
 | Facturación electrónica ARCA | 🟡 Implementada, producción bloqueada | A/B para RI y C para Monotributo; falta confirmar habilitación A real de Fenix |
 | Analítica de visitas | ✅ Funcionando | Propia, sin servicio externo · pestaña **Visitas** en el panel · sin IP ni cookies |
+
+---
+
+## Nombres legibles en "Páginas más vistas" (2026-09-02)
+
+**El problema:** la tarjeta "Páginas más vistas" de la pestaña **Visitas**
+mostraba el pathname crudo (`/products/5a389268-e3ce-…`). Sólo un programador
+podía leerlo; el dueño no sabía qué producto era cada fila.
+
+**La solución:** `getAnalyticsSummary` (`services/analytics.js`) ahora agrega un
+campo `label` a cada fila del top:
+
+- Rutas fijas → nombre en español (`STATIC_PAGE_LABELS`: `/` → "Inicio",
+  `/products` → "Catálogo", `/checkout` → "Checkout", etc.).
+- `/products/<uuid>` → nombre del producto, resuelto en una sola consulta
+  (`resolveProductNames`, `COALESCE(name, descripcion, codigo)` recortado a 70).
+  Un uuid que ya no existe → "Producto (eliminado)".
+- `/policies/<slug>` → título de la política; ruta desconocida → se deja cruda.
+
+El pathname sigue guardándose igual: la traducción es al vuelo, sin migración ni
+cambio en `page_views`. El front (`AnalyticsTab.jsx`) muestra el `label` como
+texto principal y el `path` en gris chico debajo, así el dueño entiende y la
+ruta técnica sigue a la vista.
+
+**Límite conocido:** el catálogo por categoría usa query params
+(`/products?cat=…`) que se descartan al guardar, así que todo eso cuenta como
+"Catálogo". Ya era así; no se tocó en esta tanda.
+
+**Lo que NO se tocó:** el beacon, el gráfico diario, "de dónde llega la gente",
+la retención, el hash anónimo del visitante ni el esquema.
 
 ---
 

@@ -94,30 +94,49 @@ function BarChart({ daily }) {
   )
 }
 
-function RankBars({ rows, labelKey, valueKey, valueSuffix }) {
+function RankBars({ rows, labelKey, valueKey, valueSuffix, subLabelKey }) {
   const max = Math.max(...rows.map((r) => r[valueKey]), 1)
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-      {rows.map((row) => (
-        <div key={row[labelKey]}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, marginBottom: 6, fontSize: 11.5 }}>
-            <span style={{
-              color: C.text2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-            }}>
-              {row[labelKey]}
-            </span>
-            <strong style={{ fontSize: 11, whiteSpace: 'nowrap' }}>
-              {nf.format(row[valueKey])}{valueSuffix ? ` ${valueSuffix}` : ''}
-            </strong>
+      {rows.map((row) => {
+        const sub = subLabelKey && row[subLabelKey] && row[subLabelKey] !== row[labelKey]
+          ? row[subLabelKey]
+          : null
+        return (
+          <div key={row.path || row[labelKey]}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, marginBottom: 6, fontSize: 11.5 }}>
+              <span style={{ minWidth: 0 }}>
+                <span
+                  title={sub ? `${row[labelKey]}\n${sub}` : row[labelKey]}
+                  style={{
+                    display: 'block', color: C.text2,
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  }}
+                >
+                  {row[labelKey]}
+                </span>
+                {sub && (
+                  <span style={{
+                    display: 'block', color: C.muted, fontSize: 10, marginTop: 1,
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  }}>
+                    {sub}
+                  </span>
+                )}
+              </span>
+              <strong style={{ fontSize: 11, whiteSpace: 'nowrap' }}>
+                {nf.format(row[valueKey])}{valueSuffix ? ` ${valueSuffix}` : ''}
+              </strong>
+            </div>
+            <div style={{ height: 8, background: C.hairline, borderRadius: 10, overflow: 'hidden' }}>
+              <div style={{
+                width: `${(row[valueKey] / max) * 100}%`, height: '100%',
+                background: `linear-gradient(90deg, ${C.red}, #E15B46)`, borderRadius: 10,
+              }} />
+            </div>
           </div>
-          <div style={{ height: 8, background: C.hairline, borderRadius: 10, overflow: 'hidden' }}>
-            <div style={{
-              width: `${(row[valueKey] / max) * 100}%`, height: '100%',
-              background: `linear-gradient(90deg, ${C.red}, #E15B46)`, borderRadius: 10,
-            }} />
-          </div>
-        </div>
-      ))}
+        )
+      })}
     </div>
   )
 }
@@ -252,7 +271,7 @@ export default function AnalyticsTab() {
               <h3 style={panelTitle}>Páginas más vistas</h3>
               <p style={panelSub}>En los últimos {rangeLabel}</p>
               {data.topPages.length ? (
-                <RankBars rows={data.topPages} labelKey="path" valueKey="views" valueSuffix="visitas" />
+                <RankBars rows={data.topPages} labelKey="label" valueKey="views" valueSuffix="visitas" subLabelKey="path" />
               ) : (
                 <p style={{ color: C.muted, fontSize: 12 }}>Todavía no hay visitas registradas.</p>
               )}

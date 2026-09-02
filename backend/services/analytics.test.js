@@ -6,6 +6,8 @@ import {
   referrerHost,
   normalizePath,
   clampDays,
+  productIdFromPath,
+  friendlyPageLabel,
 } from './analytics.js'
 
 // ── Detección de bots ────────────────────────────────────────────────────────
@@ -85,4 +87,41 @@ test('clampDays acota el rango a [1, 365] y cae al default si es inválido', () 
   assert.equal(clampDays(9999), 365)
   assert.equal(clampDays('abc'), 30)
   assert.equal(clampDays(undefined, 90), 90)
+})
+
+// ── Nombres legibles de páginas ──────────────────────────────────────────────
+test('productIdFromPath reconoce solo fichas de producto con uuid válido', () => {
+  const id = '5a389268-e3ce-4259-ba38-834a595b6d78'
+  assert.equal(productIdFromPath(`/products/${id}`), id)
+  assert.equal(productIdFromPath(`/products/${id.toUpperCase()}`), id)
+  assert.equal(productIdFromPath('/products/foo'), null)
+  assert.equal(productIdFromPath('/products'), null)
+  assert.equal(productIdFromPath(`/products/${id}/reviews`), null)
+  assert.equal(productIdFromPath('/'), null)
+  assert.equal(productIdFromPath(null), null)
+})
+
+test('friendlyPageLabel traduce las rutas fijas de la tienda', () => {
+  assert.equal(friendlyPageLabel('/'), 'Inicio')
+  assert.equal(friendlyPageLabel('/products'), 'Catálogo')
+  assert.equal(friendlyPageLabel('/checkout'), 'Checkout')
+  assert.equal(friendlyPageLabel('/policies/shipping'), 'Política de envíos')
+  assert.equal(friendlyPageLabel('/policies/otra-cosa'), 'Política: otra-cosa')
+  assert.equal(friendlyPageLabel('/orders/5a389268-e3ce-4259-ba38-834a595b6d78'), 'Detalle de pedido')
+})
+
+test('friendlyPageLabel usa el nombre del producto para las fichas', () => {
+  const id = '5a389268-e3ce-4259-ba38-834a595b6d78'
+  const nombres = new Map([[id, 'Lámpara LED 9W']])
+  assert.equal(friendlyPageLabel(`/products/${id}`, nombres), 'Lámpara LED 9W')
+  // ficha de un producto que ya no está en el catálogo
+  assert.equal(
+    friendlyPageLabel('/products/11111111-1111-1111-1111-111111111111', nombres),
+    'Producto (eliminado)',
+  )
+})
+
+test('friendlyPageLabel deja la ruta cruda si no la conoce', () => {
+  assert.equal(friendlyPageLabel('/algo-nuevo'), '/algo-nuevo')
+  assert.equal(friendlyPageLabel(''), '')
 })

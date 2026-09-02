@@ -84,6 +84,91 @@ export function clampDays(value, fallback = 30) {
   return Math.min(Math.max(n, 1), 365)
 }
 
+// ── Nombres legibles para "Páginas más vistas" ───────────────────────────────
+// El resumen agrupa por pathname crudo (`/`, `/products/<uuid>`, …). Para que el
+// dueño no tenga que interpretar rutas, cada fila del top se traduce a un nombre
+// común. El pathname llega ya normalizado: sin query, sin hash ni barra final.
+// Rutas fijas de la tienda — ver src/App.jsx.
+const STATIC_PAGE_LABELS = {
+  '/': 'Inicio',
+  '/products': 'Catálogo',
+  '/entrega-inmediata': 'Entrega inmediata',
+  '/productos-a-pedido': 'Productos a pedido',
+  '/cart': 'Carrito',
+  '/checkout': 'Checkout',
+  '/order-confirmation': 'Confirmación de pedido',
+  '/track-order': 'Seguimiento de pedido',
+  '/nosotros': 'Nosotros',
+  '/faq': 'Preguntas frecuentes',
+  '/guias': 'Guías',
+  '/profesionales': 'Profesionales',
+  '/login': 'Iniciar sesión',
+  '/register': 'Crear cuenta',
+  '/forgot-password': 'Recuperar contraseña',
+  '/reset-password': 'Restablecer contraseña',
+  '/verify-email': 'Verificar email',
+  '/account': 'Mi cuenta',
+  '/favorites': 'Favoritos',
+  '/orders': 'Mis pedidos',
+}
+
+// Slugs de /policies/:slug — ver POLICIES en src/pages/Policy.jsx.
+const POLICY_LABELS = {
+  refunds: 'Política de reembolso',
+  shipping: 'Política de envíos',
+  privacy: 'Política de privacidad',
+  terms: 'Términos del servicio',
+}
+
+// UUID como los genera gen_random_uuid(). Filtra antes de armar el ::uuid[]:
+// una ruta tipeada a mano (`/products/foo`) haría fallar el casteo en Postgres.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+// Id de producto si el path es una ficha (`/products/<uuid>`), o null.
+export function productIdFromPath(path) {
+  const m = typeof path === 'string' && path.match(/^\/products\/([^/]+)$/)
+  return m && UUID_RE.test(m[1]) ? m[1].toLowerCase() : null
+}
+
+// Recorta nombres largos (descripción de inventario) para que no revienten la fila.
+function truncateLabel(text, max = 70) {
+  if (!text) return text
+  const t = String(text).trim()
+  return t.length > max ? `${t.slice(0, max - 1)}…` : t
+}
+
+// Traduce un pathname de la tienda a un nombre legible para el panel.
+// `productNames` es un Map<uuid, nombre> con las fichas que aparecen en el top.
+export function friendlyPageLabel(path, productNames = new Map()) {
+  if (typeof path !== 'string' || !path) return path || ''
+  if (STATIC_PAGE_LABELS[path]) return STATIC_PAGE_LABELS[path]
+
+  const productId = productIdFromPath(path)
+  if (productId) return productNames.get(productId) || 'Producto (eliminado)'
+
+  const policy = path.match(/^\/policies\/([^/]+)$/)
+  if (policy) return POLICY_LABELS[policy[1]] || `Política: ${policy[1]}`
+
+  if (/^\/orders\/[^/]+$/.test(path)) return 'Detalle de pedido'
+
+  return path
+}
+
+// Resuelve el nombre de las fichas de producto que aparezcan en `paths`, en una
+// sola consulta. Devuelve Map<uuid, nombre recortado>.
+async function resolveProductNames(paths) {
+  const ids = [...new Set(paths.map(productIdFromPath).filter(Boolean))]
+  const names = new Map()
+  if (!ids.length) return names
+  const { rows } = await pool.query(
+    `SELECT id, COALESCE(NULLIF(name, ''), NULLIF(descripcion, ''), codigo) AS label
+       FROM products WHERE id = ANY($1::uuid[])`,
+    [ids]
+  )
+  for (const row of rows) names.set(row.id, truncateLabel(row.label))
+  return names
+}
+
 // Rellena los días sin visitas con ceros para que el gráfico no tenga huecos.
 function fillDailyGaps(rows, days) {
   const byDay = new Map(rows.map((row) => [row.day, row]))
@@ -158,6 +243,8 @@ export async function getAnalyticsSummary({ days = 30 } = {}) {
     dailyQuery, topPagesQuery, topReferrersQuery,
   ])
 
+  const productNames = await resolveProductNames(topPages.rows.map((row) => row.path))
+
   const series = fillDailyGaps(daily.rows, range)
   const totalViews = series.reduce((sum, day) => sum + day.views, 0)
   const totalVisitors = series.reduce((sum, day) => sum + day.visitors, 0)
@@ -180,7 +267,9 @@ export async function getAnalyticsSummary({ days = 30 } = {}) {
       viewsPerDay: perDay(totalViews),
     },
     topPages: topPages.rows.map((row) => ({
-      path: row.path, views: Number(row.views), visitors: Number(row.visitors),
+      path: row.path,
+      label: friendlyPageLabel(row.path, productNames),
+      views: Number(row.views), visitors: Number(row.visitors),
     })),
     topReferrers: topReferrers.rows.map((row) => ({
       source: row.source, visitors: Number(row.visitors),
