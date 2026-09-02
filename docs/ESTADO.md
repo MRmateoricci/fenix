@@ -8,7 +8,7 @@
 > Un ajuste de padding, no.
 
 **Última actualización:** 2 de septiembre de 2026
-**Commit de referencia:** `d4852fb` + cambios locales de esta tanda (tope de cupón por cliente)
+**Commit de referencia:** `242da63` + cambios locales de esta tanda (cupón en la preferencia de Mercado Pago)
 
 ---
 
@@ -36,6 +36,41 @@
 | SEO | ✅ Funcionando | Helmet + sitemap + robots |
 | Facturación electrónica ARCA | 🟡 Implementada, producción bloqueada | A/B para RI y C para Monotributo; falta confirmar habilitación A real de Fenix |
 | Analítica de visitas | ✅ Funcionando | Propia, sin servicio externo · pestaña **Visitas** en el panel · sin IP ni cookies |
+
+---
+
+## Cupón en la preferencia de Mercado Pago (2026-09-02)
+
+**El problema:** una clienta aplicó un cupón y pagó con Checkout Pro, pero MP le
+cobró el precio de lista sin el descuento. Además, como el importe pagado no
+coincidía con `orders.total_amount` (que sí tenía el cupón restado), la
+conciliación (`mercadopagoPayments.js`) rechazaba el pago por diferencia de
+monto: el webhook respondía `IGNORED` y el pedido nunca pasaba a `paid` —
+quedaba en `pending_payment` hasta vencer a los 45 min. Resultado: pago real en
+MP sin pedido asociado.
+
+**Causa:** `buildPreferenceBody` (`services/mercadopago.js`) armaba los ítems de
+la preferencia a precio de lista + envío, sin restar `order.discount_amount`.
+
+**Cómo quedó:**
+
+- Nueva función `buildPreferenceItems(order)`. Sin cupón (`discount_amount` 0 o
+  nulo): comportamiento idéntico al anterior, mismos ítems.
+- Con cupón: el descuento se prorratea entre las líneas de producto en
+  proporción a su subtotal (el envío nunca se toca), la última línea absorbe el
+  redondeo, y cada línea va con `quantity: 1` y el precio ya descontado (la
+  cantidad se pasa al título, ej. `Foco LED (x2)`). El bloque de productos se
+  ancla a `total_amount − envío`, así la suma que cobra MP coincide **centavo a
+  centavo** con `orders.total_amount` y la conciliación pasa sola.
+- Si un cupón dejara el total de productos en cero (≥100 % off), la preferencia
+  lanza un error claro en vez de mandar líneas en $0 a MP.
+- **No se tocó** el webhook ni la conciliación: fallaban sólo por la diferencia
+  de monto, que ahora ya no existe. Transferencia bancaria no estaba afectada.
+- Backend puro, sin migración ni env vars. Tests en `mercadopago.test.js`.
+
+**Pendiente / manual:** el pedido de la clienta que ya pagó hay que resolverlo a
+mano — buscar el pago en el panel de MP y, según se le devuelva o se le entregue,
+marcar el pedido y emitir (o no) la factura.
 
 ---
 

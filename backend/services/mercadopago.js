@@ -1,4 +1,5 @@
 import { MercadoPagoConfig, Preference } from 'mercadopago'
+import { roundMoney } from './bankTransfer.js'
 import 'dotenv/config'
 
 const client = new MercadoPagoConfig({
@@ -35,18 +36,69 @@ export function buildBackUrls(returnBaseUrl, orderId) {
   }
 }
 
+// Líneas de producto de la preferencia. El cupón de descuento se guarda en el
+// pedido pero se aplica sólo sobre los productos (nunca sobre el envío), así que
+// hay que prorratearlo acá: si no, Checkout Pro cobra el precio de lista y el
+// importe pagado deja de coincidir con orders.total_amount — y la conciliación
+// del pago (mercadopagoPayments.js) rechaza ese pago por diferencia de monto,
+// dejando el pedido sin marcar como pagado.
+//
+// El bloque de productos tiene que sumar exactamente `total_amount − envío`. Se
+// prorratea en proporción al subtotal de cada línea, la última absorbe el
+// redondeo, y cada línea va con quantity 1 (la cantidad viaja al título): el
+// precio unitario prorrateado no siempre cae en centavos exactos, el total sí.
+export function buildPreferenceItems(order) {
+  const lines = (order.items || []).map((item) => ({
+    id:        String(item.id),
+    name:      item.name,
+    quantity:  Number(item.quantity) || 1,
+    unitPrice: Number(item.price) || 0,
+  }))
+
+  const discount = Math.max(0, Number(order.discount_amount) || 0)
+  const gross = lines.reduce((sum, line) => sum + line.unitPrice * line.quantity, 0)
+
+  if (!discount || gross <= 0) {
+    return lines.map((line) => ({
+      id:          line.id,
+      title:       line.name,
+      quantity:    line.quantity,
+      unit_price:  line.unitPrice,
+      currency_id: 'ARS',
+    }))
+  }
+
+  const shippingCost = Number(order.shipping_cost) || 0
+  const netTarget = roundMoney((Number(order.total_amount) || 0) - shippingCost)
+  if (netTarget <= 0) {
+    throw new Error(
+      'El pedido con el cupón aplicado no se puede cobrar por Mercado Pago: el total de productos quedó en cero',
+    )
+  }
+
+  let allocated = 0
+  return lines.map((line, index) => {
+    const isLast = index === lines.length - 1
+    const lineNet = isLast
+      ? roundMoney(netTarget - allocated)
+      : roundMoney((line.unitPrice * line.quantity / gross) * netTarget)
+    if (!isLast) allocated = roundMoney(allocated + lineNet)
+    return {
+      id:          line.id,
+      title:       line.quantity > 1 ? `${line.name} (x${line.quantity})` : line.name,
+      quantity:    1,
+      unit_price:  lineNet,
+      currency_id: 'ARS',
+    }
+  })
+}
+
 export function buildPreferenceBody(order, { returnBaseUrl, webhookBaseUrl }, now = new Date()) {
   const nameParts = order.customer_name.split(' ')
   const firstName = nameParts[0]
   const lastName  = nameParts.slice(1).join(' ') || ''
 
-  const items = order.items.map((item) => ({
-    id:          String(item.id),
-    title:       item.name,
-    quantity:    item.quantity,
-    unit_price:  Number(item.price),
-    currency_id: 'ARS',
-  }))
+  const items = buildPreferenceItems(order)
 
   // El envío se cobra como línea aparte — nunca metido dentro del precio de
   // los items, para no ensuciar el desglose que ve el cliente en MP y el
