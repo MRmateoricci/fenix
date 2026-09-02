@@ -22,7 +22,7 @@ import { sendReviewInvitationForOrder } from '../services/reviewInvitations.js'
 import { isValidEmail, normalizeEmail } from '../utils/email.js'
 import { resolveVariantRule, ruleMatches } from '../services/productVariants.js'
 import { resolvePublicOptionPrice, resolvePublicPrice } from '../services/publicPricing.js'
-import { evaluateCoupon, findCouponByCode } from '../services/coupons.js'
+import { countCustomerCouponUses, evaluateCoupon, findCouponByCode } from '../services/coupons.js'
 import {
   buildReceiverData,
   InvoiceValidationError,
@@ -459,7 +459,12 @@ router.post('/', attachUserIfPresent, async (req, res) => {
     let couponCode = null
     if (req.body?.discountCode) {
       const coupon = await findCouponByCode(req.body.discountCode)
-      const evaluation = evaluateCoupon(coupon, couponBase)
+      // Tope por cliente: cuántos pedidos con el pago ya confirmado usaron este
+      // cupón bajo el mismo email o DNI del comprador.
+      const customerPriorUses = coupon?.per_customer_limit != null
+        ? await countCustomerCouponUses(coupon.code, { email: customerEmail, dni: customerDni })
+        : 0
+      const evaluation = evaluateCoupon(coupon, couponBase, { customerPriorUses })
       if (evaluation.error) {
         return res.status(400).json({ error: evaluation.error })
       }

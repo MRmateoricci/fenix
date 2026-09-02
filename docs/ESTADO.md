@@ -7,8 +7,8 @@
 > Si el cambio merece un commit con mensaje propio, merece una entrada acá.
 > Un ajuste de padding, no.
 
-**Última actualización:** 1 de septiembre de 2026
-**Commit de referencia:** `053fb0f` + merge de `main` remoto (`ac3cb33`) + cambios locales de esta tanda
+**Última actualización:** 2 de septiembre de 2026
+**Commit de referencia:** `d4852fb` + cambios locales de esta tanda (tope de cupón por cliente)
 
 ---
 
@@ -26,7 +26,7 @@
 | Cotización de envío | 🟡 Provisorio | Tarifario Andreani manual: zona × peso + seguro + IVA **+ recargo fijo $4.000** · plazos de tránsito propios (Shipnow) · falta cargar peso real en productos |
 | Envío gratis por monto | ✅ Funcionando | Umbral por env var (`ENVIO_GRATIS_MINIMO`) |
 | Envío gratis por localidad | ✅ Funcionando | City Bell, Gonnet y Villa Elisa (CP 1896/1897/1894), sin mínimo ni tope de peso |
-| Cupones de descuento | ✅ Funcionando | |
+| Cupones de descuento | ✅ Funcionando | Límite global + opción "un solo uso por cliente" (por email o DNI) |
 | Cuentas de cliente | ✅ Funcionando | Email · OAuth Google/Facebook oculto hasta configurarlo · sección **Cuentas** (solo lectura) en el panel |
 | Pedidos y seguimiento | ✅ Funcionando | Con notificaciones por mail |
 | Reseñas | ✅ Funcionando | Propias + Google Places |
@@ -36,6 +36,42 @@
 | SEO | ✅ Funcionando | Helmet + sitemap + robots |
 | Facturación electrónica ARCA | 🟡 Implementada, producción bloqueada | A/B para RI y C para Monotributo; falta confirmar habilitación A real de Fenix |
 | Analítica de visitas | ✅ Funcionando | Propia, sin servicio externo · pestaña **Visitas** en el panel · sin IP ni cookies |
+
+---
+
+## Tope de cupón por cliente (2026-09-02)
+
+**Qué se pidió:** que un cupón se pueda marcar como "un solo uso por cliente",
+tomando el DNI o el correo del comprador para no dejar que la misma persona lo
+repita.
+
+**Cómo quedó:**
+
+- `coupons.per_customer_limit INTEGER` (NULL = sin tope, comportamiento
+  histórico; 1 = una vez por cliente; N para futuro). **Los cupones existentes
+  quedan igual** (NULL). Sin tabla nueva: el canje se deriva de `orders`
+  (`coupon_code` + `coupon_usage_counted_at`).
+- Identidad del comprador = email normalizado **OR** DNI cuando se informó
+  (`services/coupons.js` → `countCustomerCouponUses`). El "uso" cuenta solo con
+  el pago confirmado, igual que `times_used` — un checkout abandonado no bloquea.
+- Enforcement duro en `POST /api/orders` (email/DNI del propio pedido).
+  `POST /api/coupons/validate` pre-chequea solo si el visitante está logueado
+  (usa el email/DNI de su cuenta) para no exponer datos de terceros desde un
+  endpoint público; el invitado ve el mensaje al confirmar el pedido.
+- Admin: checkbox "Uno por cliente" en el alta de cupón + chip en la lista.
+  Como el resto de los campos del cupón, no se edita después de creado.
+- Índice `idx_orders_coupon_code_upper` para el chequeo.
+- Tests nuevos: `backend/services/coupons.test.js`.
+
+**Límites conocidos:** quien no necesita factura puede usar otro correo (techo de
+cualquier cupón sin login obligatorio). Dos checkouts en paralelo del mismo
+comprador, antes de pagar, podrían pasar los dos — misma limitación que ya tiene
+`usage_limit` global. Marcar "pagado" a mano un pedido MP desde el panel no
+cuenta el uso (gap pre-existente de `PATCH /:id/status`).
+
+**Fuera de alcance:** no se tocó el circuito de pago, MP, transferencias, envíos
+ni `usage_limit`. No se agregó login obligatorio para cupones. Mobile del panel
+y del checkout: verificación en dispositivo real pendiente.
 
 ---
 

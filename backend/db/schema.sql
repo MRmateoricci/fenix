@@ -1047,3 +1047,20 @@ CREATE TABLE IF NOT EXISTS page_views (
 -- El resumen del panel siempre consulta por rango de fechas y sin bots.
 CREATE INDEX IF NOT EXISTS idx_page_views_created_at
   ON page_views(created_at DESC) WHERE is_bot = FALSE;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Tope de usos del mismo cupón por cliente
+-- ─────────────────────────────────────────────────────────────────────────────
+-- NULL = sin tope (comportamiento histórico: el cupón se puede reusar). 1 = una
+-- sola vez por cliente. Se identifica al comprador por email normalizado y, si
+-- lo informó, por DNI — así no repite el cupón cambiando solo el correo cuando
+-- igual necesita factura. El uso se cuenta igual que times_used: recién con el
+-- pago confirmado (orders.coupon_usage_counted_at).
+ALTER TABLE coupons ADD COLUMN IF NOT EXISTS per_customer_limit INTEGER;
+ALTER TABLE coupons DROP CONSTRAINT IF EXISTS coupons_per_customer_limit_check;
+ALTER TABLE coupons ADD CONSTRAINT coupons_per_customer_limit_check
+  CHECK (per_customer_limit IS NULL OR per_customer_limit > 0);
+
+-- El chequeo "este cliente ya usó el cupón" filtra orders por código de cupón.
+CREATE INDEX IF NOT EXISTS idx_orders_coupon_code_upper
+  ON orders(UPPER(coupon_code)) WHERE coupon_code IS NOT NULL;

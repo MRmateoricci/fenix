@@ -443,6 +443,7 @@ export default function Checkout() {
     try {
       const res = await fetch(`${API_BASE}/api/coupons/validate`, {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code, subtotal: couponBase }),
       })
@@ -469,6 +470,7 @@ export default function Checkout() {
     setCouponChecking(true)
     fetch(`${API_BASE}/api/coupons/validate`, {
       method: 'POST',
+      credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ code: appliedCoupon.code, subtotal: couponBase }),
       signal: controller.signal,

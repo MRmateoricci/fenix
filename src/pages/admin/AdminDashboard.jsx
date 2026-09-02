@@ -3920,7 +3920,7 @@ function OperationalOrdersSection({ title, subtitle, orders, emptyText, type, on
 }
 
 // ── CouponsTab ────────────────────────────────────────────────────────────────
-const EMPTY_COUPON_FORM = { code: '', type: 'percentage', value: '', minPurchase: '', usageLimit: '', expiresAt: '' }
+const EMPTY_COUPON_FORM = { code: '', type: 'percentage', value: '', minPurchase: '', usageLimit: '', oncePerCustomer: false, expiresAt: '' }
 
 function CouponsTab() {
   const { coupons, couponsLoading, couponsError, fetchCoupons, createCoupon, updateCoupon, deleteCoupon } = useAdmin()
@@ -3960,6 +3960,7 @@ function CouponsTab() {
         value,
         minPurchase: form.minPurchase || null,
         usageLimit: form.usageLimit || null,
+        perCustomerLimit: form.oncePerCustomer ? 1 : null,
         expiresAt: form.expiresAt ? new Date(form.expiresAt).toISOString() : null,
       })
       setForm(EMPTY_COUPON_FORM)
@@ -4049,6 +4050,17 @@ function CouponsTab() {
               style={inp}
             />
           </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 5, width: 150 }}>
+            <label style={lbl}>Uso por cliente</label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12.5, color: C.ink, cursor: 'pointer', minHeight: 33 }}>
+              <input
+                type="checkbox"
+                checked={form.oncePerCustomer}
+                onChange={e => setForm(f => ({ ...f, oncePerCustomer: e.target.checked }))}
+              />
+              Uno por cliente
+            </label>
+          </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 5, width: 160 }}>
             <label style={lbl}>Vence (opcional)</label>
             <input
@@ -4100,6 +4112,11 @@ function CouponsTab() {
                 <div style={{ fontSize: 12, color: C.text3, minWidth: 90, textAlign: 'right' }}>
                   {c.times_used}{c.usage_limit != null ? ` / ${c.usage_limit}` : ''} usos
                 </div>
+                {c.per_customer_limit != null && (
+                  <span style={pill(C.hairline, C.text3)}>
+                    {c.per_customer_limit === 1 ? '1 por cliente' : `${c.per_customer_limit} por cliente`}
+                  </span>
+                )}
                 <div style={{ fontSize: 12, color: expired ? C.red : C.text3, minWidth: 110, textAlign: 'right' }}>
                   {c.expires_at ? `Vence ${new Date(c.expires_at).toLocaleDateString('es-AR')}` : 'Sin vencimiento'}
                 </div>
