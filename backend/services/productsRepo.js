@@ -289,7 +289,7 @@ export async function previewSupplierPriceDrafts(client, files, usdArsRate) {
       if (seenCodes.has(codeKey)) {
         duplicateItems.push({
           status: 'duplicate', codigo: row.codigo, descripcion: row.descripcion,
-          reason: 'Código repetido en los archivos seleccionados', changes: [],
+          reason: 'Código repetido en las hojas o archivos seleccionados. Se usa la primera aparición; revisá sus datos antes de confirmar.', changes: [],
         })
         continue
       }
@@ -356,6 +356,7 @@ export async function previewSupplierPriceDrafts(client, files, usdArsRate) {
           targetName: mapping.product_name,
           variant: variant || null,
           currency,
+          currencySource: row.currencySource,
           matchType: 'saved',
           changes,
           ...(grouped ? { groupedTarget: grouped, reason: groupedReason(grouped, mapping.product_code) } : {}),
@@ -386,6 +387,7 @@ export async function previewSupplierPriceDrafts(client, files, usdArsRate) {
           targetProductId: existing.id,
           targetCode: existing.codigo, targetName: existing.product_name,
           currency,
+          currencySource: row.currencySource,
           matchType: 'code',
           ...(grouped ? { groupedTarget: grouped } : {}),
           reason: grouped
@@ -409,7 +411,7 @@ export async function previewSupplierPriceDrafts(client, files, usdArsRate) {
       } else {
         items.push({
           status: 'create', codigo: row.codigo, descripcion: row.descripcion,
-          currency, changes: pricePreviewChanges(null, row),
+          currency, currencySource: row.currencySource, changes: pricePreviewChanges(null, row),
         })
         created++
       }
@@ -432,6 +434,8 @@ export async function previewSupplierPriceDrafts(client, files, usdArsRate) {
     const fileSkipped = items.length - fileCreated - fileUpdated
     fileResults.push({
       fileName: file.fileName,
+      sheetName: file.sheetName,
+      warnings: file.warnings || [],
       supplier: file.supplier,
       currency: file.currency,
       totalRows: file.totalRows,
@@ -488,7 +492,7 @@ export async function createSupplierPriceDrafts(client, files, usdArsRate, previ
     const file = files[fileIndex]
     const previewItems = preview?.files?.[fileIndex]?.items || null
     const previewByCode = previewItems
-      ? new Map(previewItems.filter(item => item.codigo).map(item => [priceCodeKey(item.codigo), item]))
+      ? new Map(previewItems.filter(item => item.codigo && !['duplicate', 'invalid'].includes(item.status)).map(item => [priceCodeKey(item.codigo), item]))
       : null
     const uniqueRows = []
     let duplicateRows = 0
@@ -610,6 +614,8 @@ export async function createSupplierPriceDrafts(client, files, usdArsRate, previ
     skipped += fileSkipped
     fileResults.push({
       fileName: file.fileName,
+      sheetName: file.sheetName,
+      warnings: file.warnings || [],
       supplier: file.supplier,
       currency: file.currency,
       totalRows: file.totalRows,

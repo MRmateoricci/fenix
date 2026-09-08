@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react'
 import { buildCategoryTree } from '../data/categoryTree'
+import { priceImportError } from '../utils/priceImportError'
 
 const API_BASE         = import.meta.env.VITE_API_URL || ''
 
@@ -601,6 +602,13 @@ export function AdminProvider({ children }) {
 
   // Historial de cargas de lista de un proveedor. Se pide bajo demanda: el
   // resumen de la última carga ya viene en fetchSupplierSettings.
+  const fetchSupplierReport = useCallback(async (period = '30') => {
+    const res = await adminFetch(`${API_BASE}/api/suppliers?period=${encodeURIComponent(period)}`)
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error || 'No se pudo cargar el resumen de proveedores')
+    return data
+  }, [])
+
   const fetchSupplierImports = useCallback(async (supplier) => {
     const res = await adminFetch(`${API_BASE}/api/products/supplier-settings/${encodeURIComponent(supplier)}/imports`, {
 
@@ -819,12 +827,23 @@ export function AdminProvider({ children }) {
     return data
   }, [])
 
-  const uploadPriceFiles = useCallback(async (files, supplier) => {
+  const inspectPriceFiles = useCallback(async files => {
+    setImportError(null)
+    const formData = new FormData()
+    for (const file of files) formData.append('files', file)
+    const res = await adminFetch(`${API_BASE}/api/products/import/prices/inspect`, { method: 'POST', body: formData })
+    const data = await res.json()
+    if (!res.ok) throw new Error(priceImportError(data, 'No se pudo analizar el Excel'))
+    return data
+  }, [])
+
+  const uploadPriceFiles = useCallback(async (files, supplier, sheetSelection) => {
     setImportLoading(true)
     setImportError(null)
     try {
       const formData = new FormData()
       for (const file of files) formData.append('files', file)
+      if (sheetSelection) formData.append('sheetSelection', JSON.stringify(sheetSelection))
       formData.append('supplier', supplier)
       const res = await adminFetch(`${API_BASE}/api/products/import/prices/bulk`, {
         method: 'POST',
@@ -832,7 +851,7 @@ export function AdminProvider({ children }) {
         body: formData,
       })
       const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'No se pudieron importar las listas de precios')
+      if (!res.ok) throw new Error(priceImportError(data, 'No se pudieron importar las listas de precios'))
       if (data.exchangeRate) {
         setCurrencySettings(current => ({ ...current, usdArsRate: data.exchangeRate }))
       }
@@ -847,10 +866,11 @@ export function AdminProvider({ children }) {
     }
   }, [fetchSupplierSettings])
 
-  const previewPriceFiles = useCallback(async (files, supplier) => {
+  const previewPriceFiles = useCallback(async (files, supplier, sheetSelection) => {
     setImportError(null)
     const formData = new FormData()
     for (const file of files) formData.append('files', file)
+    if (sheetSelection) formData.append('sheetSelection', JSON.stringify(sheetSelection))
     formData.append('supplier', supplier)
     const res = await adminFetch(`${API_BASE}/api/products/import/prices/bulk/preview`, {
       method: 'POST',
@@ -859,7 +879,7 @@ export function AdminProvider({ children }) {
     })
     const data = await res.json()
     if (!res.ok) {
-      const error = new Error(data.error || 'No se pudo preparar la vista previa')
+      const error = new Error(priceImportError(data, 'No se pudo preparar la vista previa'))
       setImportError(error.message)
       throw error
     }
@@ -1160,7 +1180,7 @@ export function AdminProvider({ children }) {
       importResult, importLoading, importError,
       currencySettings, fetchCurrencySettings, updateCurrencySettings, updateDeliverySettings,
       supplierSettings, fetchSupplierSettings, updateSupplierCurrency,
-      setPriceCodeMapping, clearPriceCodeMapping, fetchSupplierImports,
+      setPriceCodeMapping, clearPriceCodeMapping, fetchSupplierImports, fetchSupplierReport,
       setPriceCodeCurrency, clearPriceCodeCurrency,
       subcategories, fetchSubcategories, createSubcategory, updateSubcategory, deleteSubcategory,
       productTypes, fetchProductTypes, createProductType, updateProductType, deleteProductType,
@@ -1171,7 +1191,7 @@ export function AdminProvider({ children }) {
       fetchInventorySelectionIds, applyInventoryBatch,
       previewProductMerge, mergeInventoryProducts, updateProductVariantRules, detachProductVariant,
       adjustInventoryStocks, uploadInventoryFile, uploadProductImage,
-      parsePriceFile, previewPriceFiles, uploadPriceFiles, rematchPriceLines, applyPriceUpdates,
+      parsePriceFile, inspectPriceFiles, previewPriceFiles, uploadPriceFiles, rematchPriceLines, applyPriceUpdates,
       searchProducts, parseInvoicePdf, applyInvoiceLines,
       parseCleosCatalogPdf, uploadCleosPreviewImage, applyCleosCatalogProducts,
       parseCatalogImagesPdf, uploadCatalogPreviewImage, applyCatalogImages,

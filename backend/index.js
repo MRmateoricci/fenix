@@ -11,6 +11,7 @@ import favoritesRouter from './routes/favorites.js'
 import stockAlertsRouter from './routes/stockAlerts.js'
 import reviewsRouter from './routes/reviews.js'
 import productsRouter from './routes/products.js'
+import suppliersRouter from './routes/suppliers.js'
 import subcategoriesRouter from './routes/subcategories.js'
 import productTypesRouter from './routes/productTypes.js'
 import categoryCustomizationsRouter from './routes/categoryCustomizations.js'
@@ -96,6 +97,7 @@ app.use('/api/favorites', favoritesRouter)
 app.use('/api/stock-alerts', stockAlertsRouter)
 app.use('/api/reviews', reviewsRouter)
 app.use('/api/products', productsRouter)
+app.use('/api/suppliers', suppliersRouter)
 app.use('/api/subcategories', subcategoriesRouter)
 app.use('/api/product-types', productTypesRouter)
 app.use('/api/category-customizations', categoryCustomizationsRouter)

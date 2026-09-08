@@ -5,6 +5,8 @@ import { getCategoryValue, getSubcategoryOptions, getProductTypeOptions } from '
 import FenixLogo from '../../assets/FenixLogo'
 import OverviewDashboard from './OverviewDashboard'
 import BackupsTab from './BackupsTab'
+import PriceSheetMappingModal from './PriceSheetMappingModal'
+import SuppliersTab from './SuppliersTab'
 import { isPreparationOverdue, PREPARATION_ALERT_HOURS } from '../../utils/orderPreparation'
 
 // ── Paleta ────────────────────────────────────────────────────────────────────
@@ -7913,7 +7915,17 @@ function PriceTargetCell({ row, supplier, canMap, busy, onMap }) {
   )
 }
 
-function BulkPriceReviewModal({ preview, supplier = '', saving = false, readOnly = false, error = '', onConfirm, onCurrencyOverride, onMapCode, onClose }) {
+function PriceImportWarnings({ files = [] }) {
+  const warnings = files.flatMap(file => (file.warnings || []).map(message => ({ fileName: file.fileName, message })))
+  if (!warnings.length) return null
+  return (
+    <div role="status" style={{ marginTop: 10, padding: '8px 10px', borderRadius: 7, background: C.amberLight, color: C.amberDark, fontSize: 11.5, maxHeight: 150, overflowY: 'auto' }}>
+      {warnings.map((warning, index) => <div key={index}><strong>{warning.fileName}:</strong> {warning.message}</div>)}
+    </div>
+  )
+}
+
+function BulkPriceReviewModal({ preview, supplier = '', saving = false, readOnly = false, error = '', onConfirm, onCurrencyOverride, onMapCode, onClose, onBack }) {
   const initialFilter = preview.updated ? 'update' : preview.created ? 'create' : preview.unchanged ? 'unchanged' : 'all'
   const [filter, setFilter] = useState(initialFilter)
   const [search, setSearch] = useState('')
@@ -7982,12 +7994,16 @@ function BulkPriceReviewModal({ preview, supplier = '', saving = false, readOnly
               {readOnly ? 'Este es el comprobante de lo procesado.' : 'Revisá altas, cambios y omisiones. Nada se modifica hasta confirmar.'}
             </span>
           </div>
-          <button type="button" onClick={onClose} disabled={saving} style={outlineBtn}>Cerrar</button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {onBack && <button type="button" onClick={onBack} disabled={saving} style={outlineBtn}>Editar hojas y columnas</button>}
+            <button type="button" onClick={onClose} disabled={saving} style={outlineBtn}>Cerrar</button>
+          </div>
         </div>
 
         <div style={{ padding: '14px 20px 12px', borderBottom: `1px solid ${C.border}`, background: '#FAFBFC' }}>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
             <span style={pill('#EEF2FF', '#4338CA')}>{preview.processedFiles} de {preview.totalFiles} archivos</span>
+            {preview.processedSheets != null && <span style={pill('#EEF2FF', '#4338CA')}>{preview.processedSheets} hojas</span>}
             <span style={pill('#F3F4F6', C.text3)}>{preview.totalRows} filas leídas</span>
             <span style={pill(C.greenLight, C.green)}>{preview.created || 0} a crear</span>
             <span style={pill(C.amberLight, C.amberDark)}>{preview.updated || 0} a actualizar</span>
@@ -8018,6 +8034,7 @@ function BulkPriceReviewModal({ preview, supplier = '', saving = false, readOnly
               {' '}Filtrá por <strong>Creaciones</strong> y asociá las que sean el mismo artículo con otro código: si las creás quedan duplicadas y el producto original se queda con el precio viejo.
             </div>
           )}
+          <PriceImportWarnings files={preview.files} />
           {!!preview.failedFiles?.length && (
             <div style={{ marginTop: 10, padding: '8px 10px', borderRadius: 7, background: C.redLight, color: C.red, fontSize: 11.5 }}>
               {preview.failedFiles.map(file => <div key={file.fileName}><strong>{file.fileName}:</strong> {file.error}</div>)}
@@ -8066,16 +8083,16 @@ function BulkPriceReviewModal({ preview, supplier = '', saving = false, readOnly
                       <strong style={{ color: C.ink, fontFamily: 'monospace' }}>{row.codigo || `Fila ${row.rowNumber}`}</strong>
                       {row.descripcion && <span title={row.descripcion} style={{ display: 'block', marginTop: 3, color: C.muted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.descripcion}</span>}
                       {canOverrideCurrency && row.codigo && !['invalid', 'duplicate'].includes(row.status) && (
-                        row.currency !== row.fileCurrency ? (
+                        row.currencySource === 'saved' || row.currency !== row.fileCurrency ? (
                           <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 5 }}>
-                            <span style={pill('#FEF3C7', '#92400E')}>Excepción: {row.currency}</span>
+                            <span style={pill('#FEF3C7', '#92400E')}>{row.currencySource === 'cell' ? 'Excel' : 'Excepción'}: {row.currency}</span>
                             <button
                               type="button"
                               disabled={savingCurrencyKey === row.rowKey}
-                              onClick={() => handleCurrencyOverride(row, null)}
+                              onClick={() => handleCurrencyOverride(row, row.currencySource === 'cell' ? row.fileCurrency : null)}
                               style={{ border: 'none', background: 'none', padding: 0, color: C.muted, fontSize: 10, textDecoration: 'underline', cursor: 'pointer' }}
                             >
-                              {savingCurrencyKey === row.rowKey ? '...' : 'Quitar'}
+                              {savingCurrencyKey === row.rowKey ? '...' : row.currencySource === 'cell' ? `Usar ${row.fileCurrency}` : 'Quitar'}
                             </button>
                           </div>
                         ) : (
@@ -8398,7 +8415,7 @@ function FolderImagesReviewModal({ parsed, onConfirm, onClose }) {
   )
 }
 
-function UnifiedProductsTab() {
+function UnifiedProductsTab({ initialSupplier = '' }) {
   const {
     inventory, inventoryTotal, inventorySuppliers, inventoryLoading, inventoryError,
     importResult, importLoading, importError,
@@ -8410,7 +8427,7 @@ function UnifiedProductsTab() {
     fetchInventorySelectionIds, applyInventoryBatch,
     previewProductMerge, mergeInventoryProducts,
     adjustInventoryStocks, uploadInventoryFile,
-    previewPriceFiles, uploadPriceFiles,
+    inspectPriceFiles, previewPriceFiles, uploadPriceFiles,
     parseInvoicePdf, applyInvoiceLines,
     parseCatalogImagesPdf, uploadCatalogPreviewImage, applyCatalogImages,
     parseFolderImages, applyFolderImages,
@@ -8418,7 +8435,7 @@ function UnifiedProductsTab() {
   } = useAdmin()
 
   const [search, setSearch]           = useState('')
-  const [supplierFilter, setSupplier] = useState('Todos')
+  const [supplierFilter, setSupplier] = useState(initialSupplier || 'Todos')
   const [publicationFilter, setPublicationFilter] = useState('Todos')
   const [stockStatus, setStockStatus] = useState('Todos')
   const [stockMin, setStockMin]       = useState('')
@@ -8438,8 +8455,9 @@ function UnifiedProductsTab() {
   const [invoiceError, setInvoiceError]     = useState(null)
   const [invoiceParsed, setInvoiceParsed]   = useState(null)
   const [priceParsing, setPriceParsing]     = useState(false)
-  const [priceSupplier, setPriceSupplier]   = useState('')
+  const [priceSupplier, setPriceSupplier]   = useState(initialSupplier)
   const [pricePreview, setPricePreview]     = useState(null)
+  const [priceSetup, setPriceSetup]         = useState(null)
   const [pricePreviewError, setPricePreviewError] = useState('')
   const [resultDetailOpen, setResultDetailOpen] = useState(false)
   const [catalogSupplier, setCatalogSupplier] = useState('')
@@ -8553,8 +8571,23 @@ function UnifiedProductsTab() {
     setPriceParsing(true)
     try {
       const files = [file]
-      const data = await previewPriceFiles(files, priceSupplier)
-      setPricePreview({ data, files, supplier: priceSupplier })
+      const data = await inspectPriceFiles(files)
+      setPriceSetup({ data, files, supplier: priceSupplier })
+    } catch (err) {
+      setPricePreviewError(err.message || 'No se pudo preparar la vista previa')
+    } finally {
+      setPriceParsing(false)
+    }
+  }
+
+  async function handlePriceSheetsContinue(sheetSelection, draftSheets) {
+    if (!priceSetup) return
+    setPricePreviewError('')
+    setPriceParsing(true)
+    setPriceSetup(current => ({ ...current, draftSheets }))
+    try {
+      const data = await previewPriceFiles(priceSetup.files, priceSetup.supplier, sheetSelection)
+      setPricePreview({ data, files: priceSetup.files, supplier: priceSetup.supplier, sheetSelection })
     } catch (err) {
       setPricePreviewError(err.message || 'No se pudo preparar la vista previa')
     } finally {
@@ -8566,8 +8599,9 @@ function UnifiedProductsTab() {
     if (!pricePreview) return
     setPricePreviewError('')
     try {
-      await uploadPriceFiles(pricePreview.files, pricePreview.supplier)
+      await uploadPriceFiles(pricePreview.files, pricePreview.supplier, pricePreview.sheetSelection)
       setPricePreview(null)
+      setPriceSetup(null)
       await fetchCatalog()
       setPage(1)
       await fetchInventory({ ...inventoryFilters, page: 1 })
@@ -8580,7 +8614,7 @@ function UnifiedProductsTab() {
     if (!pricePreview) return
     if (currency) await setPriceCodeCurrency(pricePreview.supplier, codigo, currency)
     else await clearPriceCodeCurrency(pricePreview.supplier, codigo)
-    const data = await previewPriceFiles(pricePreview.files, pricePreview.supplier)
+    const data = await previewPriceFiles(pricePreview.files, pricePreview.supplier, pricePreview.sheetSelection)
     setPricePreview(current => (current ? { ...current, data } : current))
   }
 
@@ -8590,7 +8624,7 @@ function UnifiedProductsTab() {
     if (!pricePreview) return
     if (productId) await setPriceCodeMapping(pricePreview.supplier, codigo, productId, variantRuleId)
     else await clearPriceCodeMapping(pricePreview.supplier, codigo)
-    const data = await previewPriceFiles(pricePreview.files, pricePreview.supplier)
+    const data = await previewPriceFiles(pricePreview.files, pricePreview.supplier, pricePreview.sheetSelection)
     setPricePreview(current => (current ? { ...current, data } : current))
   }
 
@@ -9001,7 +9035,7 @@ function UnifiedProductsTab() {
         {/* Importaciones temporalmente ocultas: stock general, ventas del local y compras a proveedor. */}
         <ImportUploadCard
           label="Precios proveedor"
-          hint="Elegí el proveedor y subí un Excel. Primero vas a revisar qué se crea y qué precios cambian antes de confirmar."
+          hint="Subí un Excel XLS/XLSX, elegí las hojas y revisá las columnas y la moneda de cada una. Después vas a ver los cambios antes de confirmar."
           disabled={importLoading || priceParsing || !priceSupplier}
           busyLabel={priceParsing ? 'Procesando precios...' : !priceSupplier ? 'Elegí un proveedor' : 'Importando...'}
           onFile={handlePriceFileUpload}
@@ -9117,8 +9151,22 @@ function UnifiedProductsTab() {
 
       {importError && (
         <DismissibleErrorNotice key={importError}>
-          {importError}
+          <div style={{ whiteSpace: 'pre-wrap' }}>{importError}</div>
         </DismissibleErrorNotice>
+      )}
+
+      {pricePreviewError && !priceSetup && !pricePreview && <DismissibleErrorNotice key={pricePreviewError}><div style={{ whiteSpace: 'pre-wrap' }}>{pricePreviewError}</div></DismissibleErrorNotice>}
+
+      {priceSetup && !pricePreview && (
+        <PriceSheetMappingModal
+          setup={priceSetup}
+          defaultCurrency={supplierSettings.find(setting => setting.supplier === priceSetup.supplier)?.currency || 'ARS'}
+          busy={priceParsing}
+          error={pricePreviewError}
+          onContinue={handlePriceSheetsContinue}
+          onClose={() => { setPriceSetup(null); setPricePreviewError('') }}
+          theme={C}
+        />
       )}
 
       {pricePreview && (
@@ -9130,7 +9178,8 @@ function UnifiedProductsTab() {
           onCurrencyOverride={handlePriceCodeCurrency}
           onMapCode={handlePriceCodeMapping}
           supplier={pricePreview.supplier}
-          onClose={() => { if (!importLoading) { setPricePreview(null); setPricePreviewError('') } }}
+          onBack={() => { setPricePreview(null); setPricePreviewError('') }}
+          onClose={() => { if (!importLoading) { setPricePreview(null); setPriceSetup(null); setPricePreviewError('') } }}
         />
       )}
 
@@ -9162,6 +9211,7 @@ function UnifiedProductsTab() {
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             {importResult.totalFiles !== undefined && <span style={pill('#EEF2FF', '#4338CA')}>{importResult.processedFiles} de {importResult.totalFiles} archivos procesados</span>}
+            {importResult.processedSheets != null && <span style={pill('#EEF2FF', '#4338CA')}>{importResult.processedSheets} hojas procesadas</span>}
             {importResult.totalRows !== undefined && <span style={pill('#F3F4F6', C.text3)}>{importResult.totalRows} filas leídas</span>}
             {importResult.created !== undefined && <span style={pill(C.greenLight, C.green)}>{importResult.created} creados</span>}
             {importResult.updated !== undefined && <span style={pill(importResult.fileType === 'catalog-images' ? C.white : C.amberLight, importResult.fileType === 'catalog-images' ? C.dark : C.amberDark)}>{importResult.updated} actualizados</span>}
@@ -9197,6 +9247,7 @@ function UnifiedProductsTab() {
               Ver detalle de creaciones y actualizaciones
             </button>
           )}
+          <PriceImportWarnings files={importResult.files} />
           {!!importResult.failedFiles?.length && (
             <div style={{ marginTop: 10, color: C.red, fontSize: 11.5 }}>
               {importResult.failedFiles.map(file => (
@@ -9620,6 +9671,7 @@ function UnifiedProductsTab() {
 const NAV_ITEMS = [
   { id: 'overview',     label: 'Resumen',        Icon: BarChartIcon },
   { id: 'products',     label: 'Productos',      Icon: GridIcon },
+  { id: 'suppliers',    label: 'Proveedores',    Icon: StoreIcon },
   { id: 'categories',   label: 'Categorías',     Icon: FolderIcon },
   { id: 'store',        label: 'Tienda',         Icon: StoreIcon },
   { id: 'offers',       label: 'Ofertas',        Icon: TagIcon },
@@ -9632,9 +9684,11 @@ export default function AdminDashboard() {
   const { products, updateProduct, deleteProduct, logout } = useAdmin()
   const navigate  = useNavigate()
   const [tab, setTab]           = useState('overview')
+  const [productsSupplier, setProductsSupplier] = useState('')
   const mainRef = useRef(null)
 
-  function changeTab(nextTab) {
+  function changeTab(nextTab, supplier = '') {
+    if (nextTab === 'products') setProductsSupplier(supplier)
     setTab(nextTab)
     requestAnimationFrame(() => {
       mainRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
@@ -9775,8 +9829,9 @@ export default function AdminDashboard() {
           <OverviewDashboard products={products} onNavigate={changeTab} />
         )}
         {tab === 'products' && (
-          <UnifiedProductsTab />
+          <UnifiedProductsTab key={productsSupplier} initialSupplier={productsSupplier} />
         )}
+        {tab === 'suppliers' && <SuppliersTab onOpenProducts={supplier => changeTab('products', supplier)} />}
         {tab === 'categories' && (
           <CategoriesTab />
         )}

@@ -351,7 +351,7 @@ router.post('/', attachUserIfPresent, async (req, res) => {
     // en lo que manda el cliente (podría mandar cualquier item.price).
     const productIds = items.map((i) => i.id)
     const { rows: dbProducts } = await pool.query(
-      `SELECT products.id, precio_venta, precio_iva, precio_venta_usd, precio_iva_usd, price_currency,
+      `SELECT products.id, supplier, precio_venta, precio_iva, precio_venta_usd, precio_iva_usd, price_currency,
               color_options, size_options, tone_options, variant_stock,
               COALESCE((SELECT usd_ars_rate FROM store_settings WHERE id=1),1510) AS usd_ars_rate,
               stock_inmediato,
@@ -394,6 +394,7 @@ router.post('/', attachUserIfPresent, async (req, res) => {
       const price = resolvedPrice.price
       itemsSnapshot.push({
         id:       dbProduct.id,
+        supplier: dbProduct.supplier,
         name:     i.name,
         category: i.category,
         price,
@@ -653,6 +654,10 @@ const PUBLIC_ORDER_FIELDS = `
   items, created_at, paid_at
 `
 
+export function customerOrderResponse(order) {
+  return { ...order, items: (order.items || []).map(({ supplier, ...item }) => item) }
+}
+
 // POST /api/orders/public/:id/reconcile-payment
 // El retorno de Checkout Pro puede llegar antes que el webhook. Usamos los IDs
 // solo para volver a consultar a Mercado Pago y verificar orden, monto y moneda.
@@ -701,7 +706,7 @@ router.get('/public/:id', async (req, res) => {
       [req.params.id]
     )
     if (!rows.length) return res.status(404).json({ error: 'Pedido no encontrado' })
-    res.json(rows[0])
+    res.json(customerOrderResponse(rows[0]))
   } catch (err) {
     console.error('[GET /api/orders/public/:id]', err)
     res.status(500).json({ error: 'Error interno' })
@@ -719,7 +724,7 @@ router.get('/track/:orderNumber', async (req, res) => {
       [req.params.orderNumber.toUpperCase()]
     )
     if (!rows.length) return res.status(404).json({ error: 'Pedido no encontrado' })
-    res.json(rows[0])
+    res.json(customerOrderResponse(rows[0]))
   } catch (err) {
     console.error('[GET /api/orders/track/:orderNumber]', err)
     res.status(500).json({ error: 'Error interno' })
@@ -742,7 +747,7 @@ router.get('/mine', requireAuth, async (req, res) => {
        ORDER BY created_at DESC`,
       [req.userId, CUSTOMER_ORDER_STATUSES]
     )
-    res.json(rows)
+    res.json(rows.map(customerOrderResponse))
   } catch (err) {
     console.error('[GET /api/orders/mine]', err)
     res.status(500).json({ error: 'Error interno' })
@@ -804,7 +809,7 @@ router.get('/mine/:id', requireAuth, async (req, res) => {
     )
     if (!rows.length) return res.status(404).json({ error: 'Pedido no encontrado' })
     res.set('Cache-Control', 'no-store')
-    res.json(rows[0])
+    res.json(customerOrderResponse(rows[0]))
   } catch (err) {
     console.error('[GET /api/orders/mine/:id]', err)
     res.status(500).json({ error: 'Error interno' })

@@ -11,10 +11,11 @@ import {
   toNumber,
   parseHuerguiCatalog,
   parseAlcidesPrices,
-  parseSupplierPrices,
+  inspectSupplierPrices,
   parseSaleVoucher,
   parseKianPurchaseOrder,
 } from '../services/excelImport.js'
+import { parseBulkPriceUploads, supplierCurrencyDefaults } from '../services/supplierPriceUpload.js'
 import { parseInvoicePdf } from '../services/pdfInvoiceImport.js'
 import {
   applyCleosCatalogProducts,
@@ -78,37 +79,18 @@ function normalizePriceSupplier(value) {
   return supplier && supplier.length <= 80 ? supplier : null
 }
 
-function priceCurrencyFromFilename(filename) {
-  const name = path.parse(path.basename(String(filename || ''))).name
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toUpperCase()
-  return /(^|[^A-Z])(DOLAR|DOLARES|USD)([^A-Z]|$)/.test(name) || /U\$S/.test(name)
-    ? 'USD'
-    : 'ARS'
-}
-
-function parseBulkPriceUploads(files, supplier) {
-  const parsedFiles = []
-  const failedFiles = []
-  for (const file of files) {
-    try {
-      const parsed = parseSupplierPrices(file.buffer)
-      if (!parsed.rows.length) throw new Error('No contiene filas de productos reconocibles')
-      parsedFiles.push({
-        fileName: path.basename(file.originalname),
-        supplier,
-        currency: priceCurrencyFromFilename(file.originalname),
-        ...parsed,
-      })
-    } catch (err) {
-      failedFiles.push({
-        fileName: path.basename(file.originalname),
-        error: err.message || 'No se pudo leer el archivo',
-      })
+function parsePriceRequest(req, res, supplier) {
+  try {
+    const result = parseBulkPriceUploads(req.files, supplier, req.body.sheetSelection)
+    if (result.configured && result.failedFiles.length) {
+      res.status(400).json({ error: 'No se pudieron leer todas las hojas seleccionadas. Revisá su configuración o desmarcá las que no quieras importar.', failedFiles: result.failedFiles })
+      return null
     }
+    return result
+  } catch (err) {
+    res.status(400).json({ error: err.message })
+    return null
   }
-  return { parsedFiles, failedFiles }
 }
 
 async function applySavedSupplierCurrencies(client, parsedFiles) {
@@ -118,7 +100,9 @@ async function applySavedSupplierCurrencies(client, parsedFiles) {
     [[...new Set(parsedFiles.map(file => file.supplier))]]
   )
   const currencyBySupplier = new Map(savedCurrencies.rows.map(row => [row.supplier, row.currency]))
-  for (const file of parsedFiles) file.currency = currencyBySupplier.get(file.supplier) || file.currency
+  for (const file of parsedFiles) {
+    if (!file.explicitCurrency) file.currency = currencyBySupplier.get(file.supplier) || file.currency
+  }
 }
 
 // Un código puntual puede venir en una moneda distinta a la del resto del
@@ -142,7 +126,10 @@ async function applySavedPriceCodeOverrides(client, parsedFiles) {
     if (!overrides) continue
     for (const row of file.rows) {
       const currency = overrides.get(priceCodeKey(row.codigo))
-      if (currency) row.currency = currency
+      if (currency) {
+        row.currency = currency
+        row.currencySource = 'saved'
+      }
     }
   }
 }
@@ -1619,9 +1606,14 @@ router.post('/import/prices/parse', upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Falta el archivo' })
   const supplier = normalizePriceSupplier(req.body.supplier)
   if (!supplier) return res.status(400).json({ error: 'Indicá el proveedor de la lista de precios' })
+  let parsed
+  try {
+    parsed = parseAlcidesPrices(req.file.buffer)
+  } catch (err) {
+    return res.status(400).json({ error: err.message })
+  }
   const client = await pool.connect()
   try {
-    const parsed = parseAlcidesPrices(req.file.buffer)
     const [lines, settings] = await Promise.all([
       matchPriceRows(client, parsed.rows, supplier),
       client.query('SELECT usd_ars_rate FROM store_settings WHERE id = 1'),
@@ -1630,6 +1622,8 @@ router.post('/import/prices/parse', upload.single('file'), async (req, res) => {
       lines: lines.map(serializePriceMatchLine),
       totalRows: parsed.totalRows,
       skipped: parsed.skipped,
+      warnings: parsed.warnings,
+      sheetName: parsed.sheetName,
       supplier,
       usdArsRate: Number(settings.rows[0]?.usd_ars_rate || 1510),
     })
@@ -1641,13 +1635,32 @@ router.post('/import/prices/parse', upload.single('file'), async (req, res) => {
   }
 })
 
+router.post('/import/prices/inspect', upload.array('files', 100), (req, res) => {
+  const files = Array.isArray(req.files) ? req.files : []
+  if (!files.length) return res.status(400).json({ error: 'Elegí al menos un archivo XLS o XLSX' })
+  const inspected = []
+  const failedFiles = []
+  files.forEach((file, fileIndex) => {
+    const fileName = path.basename(file.originalname)
+    try {
+      inspected.push({ fileIndex, fileName, sheets: inspectSupplierPrices(file.buffer) })
+    } catch (err) {
+      failedFiles.push({ fileName, error: err.message })
+    }
+  })
+  res.status(inspected.length ? 200 : 400).json({ files: inspected, failedFiles,
+    ...(!inspected.length ? { error: 'No se pudieron abrir los archivos seleccionados.' } : {}) })
+})
+
 router.post('/import/prices/bulk/preview', upload.array('files', 100), async (req, res) => {
   const files = Array.isArray(req.files) ? req.files : []
   if (!files.length) return res.status(400).json({ error: 'Elegí al menos un archivo XLS o XLSX' })
   const supplier = normalizePriceSupplier(req.body.supplier)
   if (!supplier) return res.status(400).json({ error: 'Elegí el proveedor de la lista de precios' })
 
-  const { parsedFiles, failedFiles } = parseBulkPriceUploads(files, supplier)
+  const parsedRequest = parsePriceRequest(req, res, supplier)
+  if (!parsedRequest) return
+  const { parsedFiles, failedFiles } = parsedRequest
 
   if (!parsedFiles.length) {
     return res.status(400).json({
@@ -1667,7 +1680,8 @@ router.post('/import/prices/bulk/preview', upload.array('files', 100), async (re
       fileType: 'bulk-prices',
       preview: true,
       totalFiles: files.length,
-      processedFiles: parsedFiles.length,
+      processedFiles: new Set(parsedFiles.map(file => file.fileIndex)).size,
+      processedSheets: parsedFiles.length,
       totalRows: parsedFiles.reduce((sum, file) => sum + file.totalRows, 0),
       exchangeRate: usdArsRate,
       failedFiles,
@@ -1687,7 +1701,9 @@ router.post('/import/prices/bulk', upload.array('files', 100), async (req, res) 
   const supplier = normalizePriceSupplier(req.body.supplier)
   if (!supplier) return res.status(400).json({ error: 'Elegí el proveedor de la lista de precios' })
 
-  const { parsedFiles, failedFiles } = parseBulkPriceUploads(files, supplier)
+  const parsedRequest = parsePriceRequest(req, res, supplier)
+  if (!parsedRequest) return
+  const { parsedFiles, failedFiles } = parsedRequest
   if (!parsedFiles.length) {
     return res.status(400).json({
       error: 'Ninguno de los archivos contiene una lista de precios válida',
@@ -1707,10 +1723,7 @@ router.post('/import/prices/bulk', upload.array('files', 100), async (req, res) 
        SELECT entry.supplier, entry.currency
        FROM jsonb_to_recordset($1::jsonb) AS entry(supplier text, currency text)
        ON CONFLICT (supplier) DO NOTHING`,
-      [JSON.stringify([...new Map(parsedFiles.map(file => [file.supplier, {
-        supplier: file.supplier,
-        currency: file.currency,
-      }])).values()])]
+      [JSON.stringify(supplierCurrencyDefaults(parsedFiles))]
     )
     const preview = await previewSupplierPriceDrafts(client, parsedFiles, usdArsRate)
     const result = await createSupplierPriceDrafts(client, parsedFiles, usdArsRate, preview)
@@ -1721,7 +1734,8 @@ router.post('/import/prices/bulk', upload.array('files', 100), async (req, res) 
     res.json({
       fileType: 'bulk-prices',
       totalFiles: files.length,
-      processedFiles: parsedFiles.length,
+      processedFiles: new Set(parsedFiles.map(file => file.fileIndex)).size,
+      processedSheets: parsedFiles.length,
       totalRows: parsedFiles.reduce((sum, file) => sum + file.totalRows, 0),
       exchangeRate: usdArsRate,
       failedFiles,

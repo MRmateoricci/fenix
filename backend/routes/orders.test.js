@@ -3,9 +3,16 @@ import assert from 'node:assert/strict'
 import {
   buildRetryCheckoutData,
   CUSTOMER_ORDER_STATUSES,
+  customerOrderResponse,
   resolveProductVariantPrice,
   verifyInvoiceARecipient,
 } from './orders.js'
+
+test('el proveedor guardado para estadísticas no se publica en el pedido del cliente', () => {
+  const order = { id: 'pedido', items: [{ id: 'producto', supplier: 'INTERNO', quantity: 2, price: 100 }] }
+  assert.deepEqual(customerOrderResponse(order), { id: 'pedido', items: [{ id: 'producto', quantity: 2, price: 100 }] })
+  assert.equal(order.items[0].supplier, 'INTERNO')
+})
 
 test('Mi cuenta solo considera pedidos confirmados', () => {
   assert.deepEqual(CUSTOMER_ORDER_STATUSES, ['reserved', 'paid', 'preparing', 'shipped', 'delivered'])

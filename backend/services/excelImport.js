@@ -48,13 +48,14 @@ function normalizedHeader(value) {
     .toUpperCase()
     .replace(/[^A-Z0-9$]+/g, ' ')
     .replace(/\s+/g, ' ')
+    .trim()
 }
 
 function findPriceHeader(rows) {
-  for (let rowIndex = 0; rowIndex < Math.min(rows.length, 25); rowIndex++) {
+  for (let rowIndex = 0; rowIndex < Math.min(rows.length, 100); rowIndex++) {
     const headers = (rows[rowIndex] || []).map(normalizedHeader)
     const codeIndex = headers.findIndex(header => /^(ITEM|CODIGO|COD|SKU|ARTICULO|COD ARTICULO|CODIGO ARTICULO|CODIGO PRODUCTO)$/.test(header))
-    const descriptionIndex = headers.findIndex(header => /DESCRIP|DETALLE|^PRODUCTO$/.test(header))
+    const descriptionIndex = headers.findIndex((header, index) => index !== codeIndex && /DESCRIP|DETALLE|^(PRODUCTO|ARTICULO|NOMBRE)$/.test(header))
     if (codeIndex >= 0 && descriptionIndex >= 0) return { rowIndex, headers, codeIndex, descriptionIndex }
   }
   return null
@@ -69,27 +70,95 @@ function firstHeaderIndex(headers, predicate, excluded = new Set()) {
 
 // Lee por nombre de columna para soportar las listas actuales de los proveedores,
 // que intercalan "Costo c/IVA" y también pueden agregar columnas equivalentes en
-// pesos. Si la cabecera no se reconoce, conserva el formato histórico A-E.
-export function parseSupplierPrices(buffer) {
-  const rowsRaw = readRows(buffer)
-  const detected = findPriceHeader(rowsRaw)
-  const headerRowIndex = detected?.rowIndex ?? 0
-  const headers = detected?.headers || []
-  const codeIndex = detected?.codeIndex ?? 0
-  const descriptionIndex = detected?.descriptionIndex ?? 1
-  const used = new Set([codeIndex, descriptionIndex])
+// pesos. Un precio genérico de proveedor se interpreta como costo y se avisa.
+export function readPriceWorkbook(buffer) {
+  try {
+    return XLSX.read(buffer, { type: 'buffer', cellNF: true })
+  } catch {
+    throw new Error('No se pudo abrir el Excel. Verificá que sea un archivo XLS o XLSX válido y que no esté protegido con contraseña.')
+  }
+}
 
-  const costIndex = detected
-    ? firstHeaderIndex(headers, header => /COSTO/.test(header) && !/IVA/.test(header), used)
-    : 2
-  if (costIndex >= 0) used.add(costIndex)
-  const saleIndex = detected
-    ? firstHeaderIndex(headers, header => /VENTA/.test(header) && !/IVA/.test(header), used)
-    : 3
-  if (saleIndex >= 0) used.add(saleIndex)
-  const taxIndex = detected
-    ? firstHeaderIndex(headers, header => /PRECIO/.test(header) && /IVA/.test(header) && !/COSTO/.test(header), used)
-    : 4
+function priceCellCurrency(cell) {
+  // Excel puede guardar USD solamente en el formato numérico, no en el valor.
+  // Un símbolo $ aislado es ambiguo: en ese caso se usa la moneda de la hoja.
+  const label = `${cell?.w || cell?.v || ''} ${cell?.z || ''}`.toUpperCase()
+  const usd = /\b(USD|DOLAR|DOLARES)\b|U\$S|US\$/.test(label)
+  const ars = /\b(ARS|PESOS)\b|ARG\$/.test(label)
+  return usd !== ars ? (usd ? 'USD' : 'ARS') : null
+}
+
+export function parseSupplierPrices(buffer, options = {}) {
+  return parseSupplierPriceSheet(readPriceWorkbook(buffer), options)
+}
+
+export function parseSupplierPriceSheet(workbook, options = {}) {
+  const sheetName = options.sheetName ?? workbook.SheetNames[0]
+  if (!workbook.SheetNames.includes(sheetName)) throw new Error(`No existe la hoja “${sheetName}” en este archivo.`)
+  const sheet = workbook.Sheets[sheetName]
+  if (!sheet) throw new Error('El archivo no contiene hojas para leer.')
+  // range: 0 conserva los números reales de fila aunque el rango usado empiece más abajo.
+  const rowsRaw = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true, defval: null, range: 0 })
+  const detected = options.columns ? null : findPriceHeader(rowsRaw)
+  const warnings = []
+  if (!options.sheetName && workbook.SheetNames.length > 1) {
+    warnings.push(`Solo se lee la primera hoja, “${sheetName}”. No se importan: ${workbook.SheetNames.slice(1).join(', ')}. Para cargarlas, guardá cada lista en un archivo separado y revisá su formato y moneda.`)
+  }
+  const fail = message => {
+    throw new Error(`Hoja “${sheetName}”: ${message}${warnings.length ? ` ${warnings.join(' ')}` : ''}`)
+  }
+  if (!rowsRaw.some(row => row.some(cell => cell != null && String(cell).trim() !== ''))) {
+    fail('La hoja está vacía.')
+  }
+  if (!detected && !options.columns) {
+    fail('No se encontraron encabezados de código y descripción en las primeras 100 filas. Usá una fila con “Código”, “Descripción” y “Precio Costo” (o “Precio”). Cada producto debe ocupar una fila.')
+  }
+  let headerRowIndex, headers, codeIndex, descriptionIndex, costIndex, saleIndex, taxIndex
+  if (options.columns) {
+    if (!Number.isInteger(options.headerRow) || options.headerRow < 1 || options.headerRow > rowsRaw.length) {
+      fail('Elegí una fila de encabezados válida.')
+    }
+    headerRowIndex = options.headerRow - 1
+    headers = (rowsRaw[headerRowIndex] || []).map(normalizedHeader)
+    const maxColumn = XLSX.utils.decode_range(sheet['!ref'] || 'A1').e.c
+    const fields = ['codeIndex', 'descriptionIndex', 'costIndex', 'saleIndex', 'taxIndex']
+    const indexes = fields.map(field => options.columns[field])
+    if (indexes.some(index => !Number.isInteger(index) || index < -1 || index > maxColumn)) {
+      fail('La asignación contiene una columna que no existe en la hoja.')
+    }
+    ;[codeIndex, descriptionIndex, costIndex, saleIndex, taxIndex] = indexes
+    if (codeIndex < 0 || [costIndex, saleIndex, taxIndex].every(index => index < 0)) {
+      fail('Asigná una columna de código y al menos una columna de precio.')
+    }
+    const assigned = indexes.filter(index => index >= 0)
+    if (new Set(assigned).size !== assigned.length) fail('Una misma columna no puede asignarse a dos campos distintos.')
+  } else {
+    ;({ rowIndex: headerRowIndex, headers, codeIndex, descriptionIndex } = detected)
+    const used = new Set([codeIndex, descriptionIndex])
+
+    costIndex = firstHeaderIndex(headers, header => /\b(COSTO|COSTE)\b/.test(header) && !/IVA/.test(header), used)
+    if (costIndex >= 0) used.add(costIndex)
+    saleIndex = firstHeaderIndex(headers, header => /VENTA/.test(header) && !/IVA/.test(header), used)
+    if (saleIndex >= 0) used.add(saleIndex)
+    taxIndex = firstHeaderIndex(headers, header => /PRECIO/.test(header) && /IVA/.test(header) && !/COSTO|COSTE/.test(header), used)
+    // No mezclar una segunda lista/moneda con columnas de precio ya reconocidas.
+    if ([costIndex, saleIndex, taxIndex].every(index => index < 0)) {
+      const genericIndexes = headers.flatMap((header, index) =>
+        !used.has(index) && /^(PRECIO(?: DE LISTA| LISTA| UNITARIO| POR MT| POR METRO)?|IMPORTE)(?: EN)?(?: ARS| ARG\$| USD| U\$S| U S| PESOS| DOLARES| \$)?$/.test(header) ? [index] : [])
+      if (genericIndexes.length > 1) {
+        fail(`Hay varias columnas de precio posibles en la fila ${headerRowIndex + 1}. Dejá una sola o identificá las columnas como “Precio Costo”, “Precio Venta” y “Precio c/IVA”, en una misma moneda.`)
+      }
+      if (genericIndexes.length === 1) {
+        costIndex = genericIndexes[0]
+        const label = String(rowsRaw[headerRowIndex][costIndex]).trim()
+        warnings.push(`Hoja “${sheetName}”: la columna “${label}” se interpreta como costo del proveedor. Revisá que el importe y la moneda sean correctos antes de confirmar.`)
+      }
+    }
+    if ([costIndex, saleIndex, taxIndex].every(index => index < 0)) {
+      const labels = rowsRaw[headerRowIndex].filter(value => value != null && String(value).trim()).join(', ')
+      fail(`Se encontraron encabezados en la fila ${headerRowIndex + 1} (${labels}), pero ninguna columna de precio reconocida. Usá “Precio Costo”, “Precio Venta”, “Precio c/IVA” o “Precio”. “Costo c/IVA” no se convierte automáticamente a costo sin IVA.`)
+    }
+  }
 
   // SheetJS respeta el rango usado de la hoja. Algunos proveedores aplican
   // formato hasta la fila 1000, aunque después del último producto no haya
@@ -120,22 +189,83 @@ export function parseSupplierPrices(buffer) {
       })
       continue
     }
+    const currencies = new Set([costIndex, saleIndex, taxIndex]
+      .filter(index => index >= 0 && toNumber(row?.[index]) != null)
+      .map(index => priceCellCurrency(sheet[XLSX.utils.encode_cell({ r: rowNumber - 1, c: index })]))
+      .filter(Boolean))
+    if (currencies.size > 1) fail(`Fila ${rowNumber}: las columnas de precio elegidas mezclan pesos y dólares. Asigná columnas en una misma moneda para ese producto.`)
+    const currency = [...currencies][0]
     rows.push({
       codigo,
       descripcion: row?.[descriptionIndex] != null ? String(row[descriptionIndex]).trim() : null,
       precio_costo: precioCosto,
       precio_venta: precioVenta,
       precio_iva: precioIva,
+      ...(currency ? { currency, currencySource: 'cell' } : {}),
     })
   }
 
+  if (!rows.length) {
+    const examples = invalidRows.slice(0, 3).map(row => `Fila ${row.rowNumber}: ${row.reason}`).join('; ')
+    fail(dataRows.length
+      ? `No se encontraron productos válidos. ${examples}. Cada producto necesita un código de hasta 64 caracteres y al menos un precio numérico.`
+      : `No hay productos debajo de los encabezados de la fila ${headerRowIndex + 1}.`)
+  }
+
+  const currencyRows = rows.filter(row => row.currency).length
+  if (currencyRows) warnings.push(`Hoja “${sheetName}”: ${currencyRows} filas tienen moneda explícita en sus celdas (${[...new Set(rows.map(row => row.currency).filter(Boolean))].join(', ')}). Se respeta esa moneda; para las demás se usa la moneda elegida para la hoja. Las excepciones por código guardadas tienen prioridad.`)
+
   return {
+    sheetName,
+    headerRow: headerRowIndex + 1,
+    warnings,
     rows,
     totalRows: dataRows.length,
     skipped,
     invalidRows,
     columns: { codeIndex, descriptionIndex, costIndex, saleIndex, taxIndex },
   }
+}
+
+export function inspectSupplierPrices(buffer) {
+  const workbook = readPriceWorkbook(buffer)
+  return workbook.SheetNames.map(sheetName => {
+    const sheet = workbook.Sheets[sheetName]
+    const range = XLSX.utils.decode_range(sheet['!ref'] || 'A1')
+    const sampleRows = XLSX.utils.sheet_to_json(sheet, {
+      header: 1, raw: true, defval: null,
+      range: { s: { r: 0, c: 0 }, e: { r: Math.min(range.e.r, 99), c: Math.min(range.e.c, 255) } },
+    })
+    const sampleDisplayRows = sampleRows.map((row, rowIndex) => row.map((value, column) => {
+      const cell = sheet[XLSX.utils.encode_cell({ r: rowIndex, c: column })]
+      return cell?.w?.trim() || value
+    }))
+    const detected = findPriceHeader(sampleRows)
+    let parsed, error = ''
+    try {
+      parsed = parseSupplierPriceSheet(workbook, { sheetName })
+    } catch (err) {
+      error = err.message
+    }
+    const headerRow = parsed?.headerRow || (detected ? detected.rowIndex + 1 : 1)
+    const title = normalizedHeader(sampleRows.slice(0, headerRow).flat().join(' '))
+    const usd = /\b(USD|DOLAR|DOLARES)\b|U\$S/.test(title)
+    const ars = /\b(ARS|PESOS)\b|ARG\$/.test(title)
+    return {
+      sheetName, headerRow, rowCount: range.e.r + 1,
+      columnCount: Math.min(range.e.c + 1, 256), sampleRows, sampleDisplayRows,
+      columns: parsed?.columns || {
+        codeIndex: detected?.codeIndex ?? -1, descriptionIndex: detected?.descriptionIndex ?? -1,
+        costIndex: -1, saleIndex: -1, taxIndex: -1,
+      },
+      currency: usd !== ars ? (usd ? 'USD' : 'ARS') : null,
+      currencyHint: (usd && ars ? 'La hoja menciona pesos y dólares. Revisá las columnas elegidas.'
+        : usd || ars ? 'Moneda sugerida por el encabezado de la hoja.' : 'No se pudo detectar una moneda general. Revisala antes de continuar.')
+        + ' Las celdas que indican USD o ARS conservan esa moneda. La selección se usa para importes sin moneda explícita, incluido el símbolo $ solo.',
+      selected: !!parsed, validRows: parsed?.rows.length || 0,
+      warnings: parsed?.warnings || [], error,
+    }
+  })
 }
 
 // ── 1. Catálogo maestro (Huergui) ────────────────────────────────────────────
