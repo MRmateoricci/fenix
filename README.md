@@ -306,7 +306,7 @@ Abrir:
 
 Si Gmail no está configurado, el pedido se crea igual y el backend solo registra una advertencia. El correo es deliberadamente “best effort”.
 
-La integración real de Correo Argentino todavía está pendiente en `backend/services/correoArgentino.js`. Hoy siempre se utiliza una estimación de 5 días hábiles del transportista más 3 días hábiles de margen interno.
+La integración real con la API del transportista todavía está pendiente en `backend/services/correoArgentino.js`. Hoy la ventana de entrega se estima con el tarifario de tránsito propio (`TRANSIT_BANDS` por banda de CP) más el margen de preparación del pedido.
 
 ### Frontend: `.env.local` opcional
 
@@ -412,8 +412,7 @@ La API responde JSON, salvo la descarga/servicio de archivos estáticos en `/upl
 - `GET /api/catalog`
 - `GET /api/catalog/:id`
 - `GET /api/reviews/:productId`
-- `GET /api/shipping/estimate?postalCode=1894&service=clasico`
-- `GET /api/shipping/estimate?postalCode=5000&service=expreso&packageType=large`
+- `GET /api/shipping/estimate?postalCode=1894&subtotal=85000&weight=3.2`
 - `POST /api/orders`
 - `POST /api/auth/verify-email`
 - `GET /api/orders/public/:id`
@@ -552,36 +551,42 @@ la misma transacción.
 ## Envíos
 
 El costo se cotiza con `backend/services/shippingQuotes.js`. Por defecto usa
-`SHIPPING_PROVIDER=manual` y las tarifas temporales de
+`SHIPPING_PROVIDER=manual` y el tarifario Andreani de
 `backend/config/shipping.js`; el checkout conserva una copia en
 `src/config/shipping.js` para mostrar la cotización sin demoras.
 
-Las tarifas manuales vigentes son:
+El costo se arma con dos ejes:
 
-| Alcance | Códigos postales | Clásico | Expreso |
-| --- | --- | ---: | ---: |
-| Local | 1894 | $12.020 | $13.219 |
-| Nacional estándar | 1000, 2000, 5000, 7600 | $15.957 | $21.941 |
-| Nacional grande (60 × 40 × 30 cm) | Se activa al informar paquete grande | $33.069 | $46.546 |
+1. **Zona de destino**, resuelta por código postal (no hay zona "local": todo
+   entra como mínimo en la zona rosa):
+   - **rosa** — Buenos Aires, CABA, Córdoba, Santa Fe, Entre Ríos, Santiago del
+     Estero, San Luis, La Pampa.
+   - **salmón** — Formosa, Chaco, Corrientes, Misiones, Tucumán, Catamarca, La
+     Rioja, San Juan, Mendoza, Neuquén, Río Negro.
+   - **bordó** — Jujuy, Salta, Chubut, Santa Cruz, Tierra del Fuego.
+2. **Peso total del pedido** (`SHIPPING_WEIGHT_TIERS`), que elige un tramo de
+   tarifa base. Los tramos 20–25 kg y más de 50 kg no cotizan: se derivan a
+   WhatsApp. Sin pesos cargados en los productos se cotiza el tramo más barato.
+
+Sobre la tarifa base se suma el seguro (2 % del valor declarado) y recién
+entonces el IVA (21 %): `total = (base + seguro) × 1,21`.
 
 Los archivos que contienen el tarifario son:
 
 - `src/config/shipping.js`, para mostrar la estimación en la interfaz.
 - `backend/config/shipping.js`, para recalcular y validar el costo de forma segura.
 
-Todo cambio manual debe aplicarse en ambos archivos. El backend vuelve a cotizar
-y es la autoridad final al crear el pedido; nunca acepta el precio enviado por
-el navegador.
+Todo cambio de tarifas, zonas o fórmula debe aplicarse en ambos archivos. El
+backend vuelve a cotizar y es la autoridad final al crear el pedido; nunca
+acepta el precio enviado por el navegador.
 
-El cliente puede elegir envío clásico o expreso. Si el código postal no coincide,
-el checkout deriva la consulta a WhatsApp. La tarifa grande ya está contemplada
-por el cotizador, pero requiere que el catálogo o el futuro proveedor informe
-las dimensiones reales del paquete.
+Los días de tránsito se resuelven aparte, por una banda de CP más fina que las
+tres zonas de tarifa (`TRANSIT_BANDS` en `backend/config/shipping.js`).
 
-Cuando estén disponibles las credenciales, implementar el adaptador marcado en
-`backend/services/shippingQuotes.js`, configurar las variables
-`CORREO_ARGENTINO_*` y cambiar `SHIPPING_PROVIDER` a `correo_argentino`. El resto
-del checkout y la creación de órdenes mantienen el mismo contrato.
+Cuando esté disponible la API de Andreani, implementar el adaptador marcado en
+`backend/services/shippingQuotes.js` manteniendo el mismo contrato de
+`getManualShippingQuote` (recibe CP, peso y valor declarado; devuelve el costo
+final).
 
 ## Mercado Pago y webhooks en desarrollo
 
@@ -804,11 +809,12 @@ npm.cmd run dev
 1. Reemplazar la clave administrativa embebida por autenticación segura del lado del servidor.
 2. Agregar tests de API y tests del flujo de checkout/stock.
 3. Agregar un pipeline CI con build y pruebas antes de desplegar en Railway.
-4. Implementar la llamada real a Correo Argentino.
-5. Centralizar las zonas de envío para evitar mantener dos copias.
-6. Mover las imágenes a almacenamiento persistente.
-7. Dividir el bundle del panel y las páginas públicas con carga diferida.
-8. Incorporar logs estructurados, monitoreo y alertas de errores.
+4. Implementar la llamada real a la API de Andreani.
+5. Cargar peso y dimensiones reales en los productos (hoy el envío sin peso cae al tramo más barato).
+6. Centralizar el tarifario de envío para evitar mantener dos copias.
+7. Mover las imágenes a almacenamiento persistente.
+8. Dividir el bundle del panel y las páginas públicas con carga diferida.
+9. Incorporar logs estructurados, monitoreo y alertas de errores.
 
 ## Licencia
 

@@ -3,6 +3,7 @@ import { Link, useSearchParams, Navigate } from 'react-router-dom'
 import { OrderItemsBlock } from '../components/OrderItemsBlock'
 import { useCart } from '../context/CartContext'
 import BankTransferPanel from '../components/BankTransferPanel'
+import { SEO as seoCfg } from '../config/seo'
 
 const API_BASE = import.meta.env.VITE_API_URL || ''
 
@@ -142,6 +143,11 @@ export default function OrderConfirmation() {
   const isSuccess = !isFailed && !isPending
   const isReserved = isSuccess && order?.status === 'reserved'
   const isBankTransfer = order?.payment_method === 'bank_transfer'
+  const whatsappHref = `https://wa.me/${seoCfg.business.whatsapp}?text=${encodeURIComponent(
+    order?.order_number
+      ? `Hola! Tengo una consulta sobre mi pedido #${order.order_number}`
+      : 'Hola! Tengo una consulta sobre mi pedido'
+  )}`
 
   return (
     <div style={{ backgroundColor: 'var(--color-bg)', minHeight: '100vh' }}>
@@ -232,14 +238,14 @@ export default function OrderConfirmation() {
               ¿Tenés preguntas sobre tu pedido?
             </p>
             <p style={{ color: 'var(--color-text-muted)' }}>
-              Escribinos a{' '}
+              Escribinos por{' '}
               <a
-                href="https://instagram.com/fenixcitybell"
+                href={whatsappHref}
                 target="_blank"
                 rel="noopener noreferrer"
                 style={{ color: 'var(--color-primary)', textDecoration: 'underline' }}
               >
-                @fenixcitybell
+                WhatsApp
               </a>{' '}
               o vení a vernos: 473 entre 14C y 15, City Bell.
             </p>

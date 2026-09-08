@@ -497,7 +497,12 @@ END $$;
 -- ─────────────────────────────────────────────────────────────────────────────
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_method VARCHAR(20) NOT NULL DEFAULT 'mercadopago';
 ALTER TABLE orders DROP CONSTRAINT IF EXISTS orders_payment_method_check;
-ALTER TABLE orders ADD CONSTRAINT orders_payment_method_check CHECK (payment_method IN ('mercadopago', 'pay_in_store'));
+-- Incluye 'bank_transfer' desde acá aunque las columnas de transferencia se
+-- agreguen más abajo: el schema se reproduce entero en cada migración y si ya
+-- hay un pedido con transferencia en la base, recrear el CHECK sin ese valor
+-- falla ("violated by some row"). La lista completa se define una sola vez.
+ALTER TABLE orders ADD CONSTRAINT orders_payment_method_check
+  CHECK (payment_method IN ('mercadopago', 'pay_in_store', 'bank_transfer'));
 
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS pickup_date DATE;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS estimated_delivery_date DATE;
@@ -936,10 +941,6 @@ ALTER TABLE store_settings DROP CONSTRAINT IF EXISTS store_settings_bank_transfe
 ALTER TABLE store_settings ADD CONSTRAINT store_settings_bank_transfer_expiry_check
   CHECK (bank_transfer_expiry_hours BETWEEN 1 AND 720);
 
-ALTER TABLE orders DROP CONSTRAINT IF EXISTS orders_payment_method_check;
-ALTER TABLE orders ADD CONSTRAINT orders_payment_method_check
-  CHECK (payment_method IN ('mercadopago', 'pay_in_store', 'bank_transfer'));
-
 -- El descuento bancario queda separado del cupon para reconstruir el total y
 -- mostrar ambas bonificaciones sin cambiar la semantica historica de
 -- discount_amount.
@@ -1017,3 +1018,49 @@ COMMENT ON COLUMN users.dni IS
 ALTER TABLE users DROP CONSTRAINT IF EXISTS users_dni_check;
 ALTER TABLE users ADD CONSTRAINT users_dni_check
   CHECK (dni IS NULL OR dni ~ '^[0-9]{7,8}$');
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Analítica de visitas
+-- ─────────────────────────────────────────────────────────────────────────────
+-- El dueño pidió ver cuánta gente entra a la tienda por día. En vez de sumar un
+-- servicio externo (Google Analytics / Plausible), cada visita de página la
+-- registra el propio frontend con un beacon y queda en esta tabla.
+--
+-- No se guarda la IP. `visitor_hash` es un SHA-256 de (sal del día + IP +
+-- user-agent) y la sal rota cada día: alcanza para contar visitantes únicos
+-- dentro de una misma jornada sin poder identificar a nadie ni seguir a una
+-- persona de un día para otro. `is_bot` marca el tráfico automático (buscadores,
+-- monitores, unfurl de links) para poder excluirlo del resumen.
+--
+-- PK entera y no UUID: es una tabla de solo-append con muchas más inserciones
+-- que el resto; una clave monótona no fragmenta el índice como sí lo haría un
+-- UUID aleatorio. El job backend/jobs/prunePageViews.js la mantiene acotada.
+CREATE TABLE IF NOT EXISTS page_views (
+  id            BIGINT       GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  path          VARCHAR(255) NOT NULL,
+  referrer_host VARCHAR(255),
+  visitor_hash  CHAR(64)     NOT NULL,
+  is_bot        BOOLEAN      NOT NULL DEFAULT FALSE,
+  created_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+);
+
+-- El resumen del panel siempre consulta por rango de fechas y sin bots.
+CREATE INDEX IF NOT EXISTS idx_page_views_created_at
+  ON page_views(created_at DESC) WHERE is_bot = FALSE;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Tope de usos del mismo cupón por cliente
+-- ─────────────────────────────────────────────────────────────────────────────
+-- NULL = sin tope (comportamiento histórico: el cupón se puede reusar). 1 = una
+-- sola vez por cliente. Se identifica al comprador por email normalizado y, si
+-- lo informó, por DNI — así no repite el cupón cambiando solo el correo cuando
+-- igual necesita factura. El uso se cuenta igual que times_used: recién con el
+-- pago confirmado (orders.coupon_usage_counted_at).
+ALTER TABLE coupons ADD COLUMN IF NOT EXISTS per_customer_limit INTEGER;
+ALTER TABLE coupons DROP CONSTRAINT IF EXISTS coupons_per_customer_limit_check;
+ALTER TABLE coupons ADD CONSTRAINT coupons_per_customer_limit_check
+  CHECK (per_customer_limit IS NULL OR per_customer_limit > 0);
+
+-- El chequeo "este cliente ya usó el cupón" filtra orders por código de cupón.
+CREATE INDEX IF NOT EXISTS idx_orders_coupon_code_upper
+  ON orders(UPPER(coupon_code)) WHERE coupon_code IS NOT NULL;

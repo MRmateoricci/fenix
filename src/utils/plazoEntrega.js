@@ -46,3 +46,52 @@ export function rangoEntregaTexto(desdeValor, hastaValor) {
     ? `entre el ${desde.getDate()} y el ${DIA_Y_MES.format(hasta)}`
     : `entre el ${DIA_Y_MES.format(desde)} y el ${DIA_Y_MES.format(hasta)}`
 }
+
+// ── Fecha de retiro más temprana ────────────────────────────────────────────
+// El retiro en el local no puede ofrecerse antes de que la mercadería esté
+// lista: un producto que se repone del proveedor son varios días hábiles, no
+// "mañana". `diasPreparacion` es el mayor plazo del carrito (plazoMaximo), ya
+// resuelto contra stock_inmediato + los plazos de la tienda. El backend vuelve
+// a validar esta misma cota en POST /api/orders — acá sólo se acota el picker.
+
+// Días hábiles = lunes a viernes. No se contemplan feriados: no hay calendario
+// cargado y el margen de los plazos de la tienda absorbe ese desfasaje.
+function esDiaHabil(fecha) {
+  const dia = fecha.getDay()
+  return dia !== 0 && dia !== 6
+}
+
+export function sumarDiasHabiles(desde, dias) {
+  const fecha = new Date(desde.getFullYear(), desde.getMonth(), desde.getDate())
+  let sumados = 0
+  while (sumados < dias) {
+    fecha.setDate(fecha.getDate() + 1)
+    if (esDiaHabil(fecha)) sumados++
+  }
+  return fecha
+}
+
+// Nunca antes de mañana, aunque el carrito no tenga plazo (todo en el local con
+// despacho 0): preparar el pedido y avisar que está lleva al menos un día.
+export function fechaRetiroMinima(diasPreparacion = 0, hoy = new Date()) {
+  return sumarDiasHabiles(hoy, Math.max(1, normalizar(diasPreparacion)))
+}
+
+// 'YYYY-MM-DD' en hora local, para el atributo `min` de un <input type="date">.
+// No se usa toISOString(): de noche (UTC-3) adelantaría un día.
+export function fechaISOLocal(fecha) {
+  const mes = String(fecha.getMonth() + 1).padStart(2, '0')
+  const dia = String(fecha.getDate()).padStart(2, '0')
+  return `${fecha.getFullYear()}-${mes}-${dia}`
+}
+
+// `valorPicker` llega como 'YYYY-MM-DD' del <input>. Compara sólo el día.
+export function retiroDemasiadoTemprano(valorPicker, diasPreparacion, hoy = new Date()) {
+  const elegida = parseFecha(valorPicker)
+  if (!elegida) return false
+  return elegida < fechaRetiroMinima(diasPreparacion, hoy)
+}
+
+export function textoRetiroDisponible(diasPreparacion, hoy = new Date()) {
+  return `Disponible para retirar a partir del ${DIA_Y_MES.format(fechaRetiroMinima(diasPreparacion, hoy))}`
+}

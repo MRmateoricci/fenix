@@ -14,6 +14,7 @@ export const POLICIES = {
     title: 'Política de envíos',
     sections: [
       ['Envíos a domicilio', 'El costo y la fecha estimada se calculan con el código postal antes de pagar. La estimación puede variar por disponibilidad, clima o demoras del operador logístico.'],
+      ['Envío sin cargo en la zona', 'Los pedidos a City Bell, Gonnet y Villa Elisa tienen envío gratis, sin mínimo de compra: lo entregamos nosotros. Al ingresar tu código postal en el checkout vas a ver el envío en $0.'],
       ['Retiro en el local', 'El retiro es gratuito en nuestro local de City Bell. Te avisaremos cuando el pedido esté listo; presentá tu DNI y el número de pedido.'],
       ['Recepción', 'Revisá el estado del paquete al recibirlo. Si observás daños visibles, dejá constancia y contactanos cuanto antes.'],
     ],

@@ -1,5 +1,5 @@
 import jwt from 'jsonwebtoken'
-import { normalizeOrigin, requestOrigin } from '../config/cors.js'
+import { isDevLocalhostOrigin, normalizeOrigin, requestOrigin } from '../config/cors.js'
 
 export const ADMIN_COOKIE_NAME = 'fenix_admin_session'
 
@@ -11,6 +11,7 @@ function trustedMutationOrigin(req) {
   if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) return true
   const origin = normalizeOrigin(req.get('origin'))
   if (!origin) return true
+  if (isDevLocalhostOrigin(origin)) return true
   const allowed = new Set([
     normalizeOrigin(process.env.FRONTEND_BASE_URL),
     normalizeOrigin(process.env.APP_BASE_URL),

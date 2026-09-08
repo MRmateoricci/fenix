@@ -1,14 +1,15 @@
 import { Router } from 'express'
 import { pool } from '../db/pool.js'
 import { requireAdmin } from '../middleware/requireAdmin.js'
-import { evaluateCoupon, findCouponByCode } from '../services/coupons.js'
+import { attachUserIfPresent } from '../middleware/requireAuth.js'
+import { countCustomerCouponUses, evaluateCoupon, findCouponByCode } from '../services/coupons.js'
 
 const router = Router()
 
 // Pública: el checkout la usa para validar el código y calcular el
 // descuento antes de mandarlo a POST /api/orders (que vuelve a validarlo
 // contra la DB — nunca se confía en el monto que calculó el navegador).
-router.post('/validate', async (req, res) => {
+router.post('/validate', attachUserIfPresent, async (req, res) => {
   try {
     const code = String(req.body?.code || '').trim()
     const subtotal = Number(req.body?.subtotal)
@@ -18,7 +19,22 @@ router.post('/validate', async (req, res) => {
     }
 
     const coupon = await findCouponByCode(code)
-    const result = evaluateCoupon(coupon, subtotal)
+
+    // Pre-chequeo del tope por cliente solo si el visitante está autenticado:
+    // usamos el email/DNI de su cuenta, así este endpoint público no sirve para
+    // sondear si un correo ajeno ya usó un cupón. Al invitado se lo valida
+    // recién en POST /api/orders, contra su propio email.
+    let customerPriorUses = 0
+    if (coupon?.per_customer_limit != null && req.userId) {
+      const { rows } = await pool.query('SELECT email, dni FROM users WHERE id = $1', [req.userId])
+      if (rows.length) {
+        customerPriorUses = await countCustomerCouponUses(
+          coupon.code, { email: rows[0].email, dni: rows[0].dni },
+        )
+      }
+    }
+
+    const result = evaluateCoupon(coupon, subtotal, { customerPriorUses })
     if (result.error) return res.status(400).json({ error: result.error })
 
     res.json({
@@ -57,6 +73,7 @@ router.post('/', requireAdmin, async (req, res) => {
     const value = Number(req.body?.value)
     const minPurchase = parseOptionalNumber(req.body?.minPurchase)
     const usageLimit = parseOptionalNumber(req.body?.usageLimit)
+    const perCustomerLimit = parseOptionalNumber(req.body?.perCustomerLimit)
     const expiresAt = req.body?.expiresAt || null
     const active = req.body?.active !== false
 
@@ -70,11 +87,14 @@ router.post('/', requireAdmin, async (req, res) => {
     if (Number.isNaN(usageLimit) || (usageLimit != null && (!Number.isInteger(usageLimit) || usageLimit <= 0))) {
       return res.status(400).json({ error: 'Límite de usos inválido' })
     }
+    if (Number.isNaN(perCustomerLimit) || (perCustomerLimit != null && (!Number.isInteger(perCustomerLimit) || perCustomerLimit <= 0))) {
+      return res.status(400).json({ error: 'Límite por cliente inválido' })
+    }
 
     const { rows } = await pool.query(
-      `INSERT INTO coupons (code, type, value, active, min_purchase, usage_limit, expires_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
-      [code, type, value, active, minPurchase, usageLimit, expiresAt]
+      `INSERT INTO coupons (code, type, value, active, min_purchase, usage_limit, per_customer_limit, expires_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+      [code, type, value, active, minPurchase, usageLimit, perCustomerLimit, expiresAt]
     )
     res.status(201).json(rows[0])
   } catch (err) {
@@ -120,6 +140,13 @@ router.patch('/:id', requireAdmin, async (req, res) => {
         return res.status(400).json({ error: 'Límite de usos inválido' })
       }
       fields.push(`usage_limit = $${idx++}`); params.push(usageLimit)
+    }
+    if ('perCustomerLimit' in req.body) {
+      const perCustomerLimit = parseOptionalNumber(req.body.perCustomerLimit)
+      if (Number.isNaN(perCustomerLimit) || (perCustomerLimit != null && (!Number.isInteger(perCustomerLimit) || perCustomerLimit <= 0))) {
+        return res.status(400).json({ error: 'Límite por cliente inválido' })
+      }
+      fields.push(`per_customer_limit = $${idx++}`); params.push(perCustomerLimit)
     }
     if ('expiresAt' in req.body) {
       fields.push(`expires_at = $${idx++}`); params.push(req.body.expiresAt || null)
