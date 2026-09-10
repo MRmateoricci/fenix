@@ -9603,7 +9603,7 @@ function UnifiedProductsTab({ initialSupplier = '' }) {
       {!inventoryError && (
         <div style={{ background: C.white, borderRadius: 10, border: `1px solid ${C.border}`, overflowX: 'auto' }}>
           <div style={{
-                display: 'grid', gridTemplateColumns: '30px 56px minmax(250px, 1fr) 150px 160px 160px 180px 130px 120px', minWidth: 1310,
+                display: 'grid', gridTemplateColumns: '30px 56px minmax(250px, 1fr) 150px 160px 160px 150px 180px 130px 120px', minWidth: 1470,
                 gap: 8, padding: '10px 14px', borderBottom: `1px solid ${C.hairline}`, background: C.paper,
                 alignItems: 'start',
               }}>
@@ -9646,6 +9646,12 @@ function UnifiedProductsTab({ initialSupplier = '' }) {
                   <div style={headerRangeRow}>
                     <input type="number" min="0" placeholder="Mín." value={saleMin} onChange={event => { setSaleMin(event.target.value); setPage(1) }} style={headerFilterControl} />
                     <input type="number" min="0" placeholder="Máx." value={saleMax} onChange={event => { setSaleMax(event.target.value); setPage(1) }} style={headerFilterControl} />
+                  </div>
+                </div>
+                <div style={{ display: 'grid', gap: 7 }}>
+                  <span style={{ ...lbl, paddingTop: 2 }} title="Importe final que ve el cliente en la tienda, con IVA incluido.">P. c/IVA</span>
+                  <div style={{ ...headerFilterControl, display: 'flex', alignItems: 'center', color: C.muted, border: 'none', background: 'transparent', paddingLeft: 0 }}>
+                    Precio de tienda
                   </div>
                 </div>
                 <div style={{ display: 'grid', gap: 7 }}>
@@ -9696,6 +9702,10 @@ function UnifiedProductsTab({ initialSupplier = '' }) {
                 const costUsd = p.precio_costo_usd != null ? Number(p.precio_costo_usd) : p.precio_costo != null ? Number(p.precio_costo) / usdArsRate : null
                 const saleArs = p.precio_venta != null ? Number(p.precio_venta) : null
                 const saleUsd = p.precio_venta_usd != null ? Number(p.precio_venta_usd) : saleArs != null ? saleArs / usdArsRate : null
+                // El backend ya resolvió el importe final con publicPricing: acá
+                // sólo se muestra, no se vuelve a aplicar el IVA.
+                const publicArs = p.precio_publico != null ? Number(p.precio_publico) : null
+                const publicUsd = publicArs != null ? publicArs / usdArsRate : null
                 return (
                 <div
                   key={p.id}
@@ -9703,7 +9713,7 @@ function UnifiedProductsTab({ initialSupplier = '' }) {
                   onMouseEnter={() => setHoveredProductId(p.id)}
                   onMouseLeave={() => setHoveredProductId(null)}
                   style={{
-                    display: 'grid', gridTemplateColumns: '30px 56px minmax(250px, 1fr) 150px 160px 160px 180px 130px 120px', minWidth: 1310,
+                    display: 'grid', gridTemplateColumns: '30px 56px minmax(250px, 1fr) 150px 160px 160px 150px 180px 130px 120px', minWidth: 1470,
                     gap: 8, padding: '10px 14px', alignItems: 'center',
                     borderBottom: i < inventory.length - 1 ? `1px solid ${C.hairline}` : 'none',
                     background: selectedIds.has(p.id) ? '#FFF5F5' : hoveredProductId === p.id ? '#F9FAFB' : C.white,
@@ -9753,6 +9763,13 @@ function UnifiedProductsTab({ initialSupplier = '' }) {
                   <span style={{ display: 'flex', flexDirection: 'column', fontSize: 13, fontWeight: 600, color: C.ink, overflow: 'hidden', whiteSpace: 'nowrap' }}>
                     <span>{saleArs != null ? fmt(saleArs) : '—'}</span>
                     {saleUsd != null && <small style={{ color: C.muted, fontSize: 10.5, fontWeight: 400 }}>{fmtUsd(saleUsd)}</small>}
+                  </span>
+                  <span
+                    style={{ display: 'flex', flexDirection: 'column', fontSize: 13, fontWeight: 600, color: C.ink, overflow: 'hidden', whiteSpace: 'nowrap' }}
+                    title={p.precio_iva != null || p.precio_iva_usd != null ? 'Precio con IVA cargado en el producto' : 'Calculado sobre el precio de venta'}
+                  >
+                    <span>{publicArs != null ? fmt(publicArs) : '—'}</span>
+                    {publicUsd != null && <small style={{ color: C.muted, fontSize: 10.5, fontWeight: 400 }}>{fmtUsd(publicUsd)}</small>}
                   </span>
                   <div style={{
                     display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,

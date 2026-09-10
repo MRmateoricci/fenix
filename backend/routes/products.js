@@ -46,6 +46,7 @@ import {
   applyInvoiceLines,
   priceCodeKey,
 } from '../services/productsRepo.js'
+import { resolvePublicPrice } from '../services/publicPricing.js'
 import {
   detachVariantRule,
   findRuleAmbiguity,
@@ -317,7 +318,7 @@ router.get('/', async (req, res) => {
     const orderColumn = sortColumns[sortBy] || sortColumns.updated
     const orderDirection = String(sortDir).toLowerCase() === 'asc' ? 'ASC' : 'DESC'
 
-    const [data, countResult, suppliersResult] = await Promise.all([
+    const [data, countResult, suppliersResult, rateResult] = await Promise.all([
       pool.query(
         `SELECT products.*,
                 (SELECT COUNT(*)::integer FROM product_variant_rules vr WHERE vr.product_id=products.id) AS variant_rule_count
@@ -333,10 +334,27 @@ router.get('/', async (req, res) => {
          WHERE supplier IS NOT NULL AND TRIM(supplier) <> ''
          ORDER BY supplier`
       ),
+      pool.query('SELECT usd_ars_rate FROM store_settings WHERE id = 1'),
     ])
 
+    // precio_publico es el importe final que la tienda le muestra al cliente.
+    // Lo resuelve publicPricing —la autoridad— para que el panel no pueda
+    // mostrar un precio distinto del que se va a cobrar en el checkout.
+    const usdArsRate = Number(rateResult.rows[0]?.usd_ars_rate) || 1510
+    const products = data.rows.map(row => ({
+      ...row,
+      precio_publico: resolvePublicPrice({
+        priceWithTax: row.precio_iva,
+        priceWithTaxUsd: row.precio_iva_usd,
+        price: row.precio_venta,
+        priceUsd: row.precio_venta_usd,
+        currency: row.price_currency,
+        usdArsRate,
+      }),
+    }))
+
     res.json({
-      products: data.rows,
+      products,
       total: Number(countResult.rows[0].count),
       suppliers: suppliersResult.rows.map(row => row.supplier),
       page: currentPage,

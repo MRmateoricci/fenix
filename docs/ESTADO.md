@@ -8,7 +8,7 @@
 > Un ajuste de padding, no.
 
 **Última actualización:** 10 de septiembre de 2026
-**Commit de referencia:** `808f7ad` + cambios locales de esta tanda (Meta Pixel)
+**Commit de referencia:** `655a82a` (búsqueda por palabras) + cambios locales de esta tanda (columna P. c/IVA en la tabla de productos)
 
 ---
 
@@ -39,6 +39,36 @@
 | Meta Pixel | ✅ Funcionando | PageView + ViewContent + AddToCart + InitiateCheckout + Purchase · solo navegador, sin Conversions API |
 
 ---
+
+## Tabla de productos del panel: búsqueda por palabras y precio con IVA (2026-09-10)
+
+**Búsqueda del inventario.** El filtro de la columna PRODUCTO buscaba la frase
+completa con un solo `ILIKE`, así que `redondo 6,3` no encontraba
+`INT.SIMPLE 6A REDONDO T/PALA 6,3mm NEGRO`: los nombres vienen de las listas de
+proveedores y no tienen orden fijo. Ahora `buildProductFilters`
+(`backend/routes/products.js`) parte lo tipeado en palabras y exige que **todas**
+aparezcan, en cualquier orden, sobre `codigo + descripcion + name` juntos
+(`concat_ws`). Tope de 8 palabras y los comodines `%` y `_` que tipee el usuario
+se escapan para buscarse como texto. Cubierto por
+`backend/routes/products.search.test.js`.
+
+Como el mismo constructor de filtros lo usa `GET /api/products/selection/ids`, el
+botón "Seleccionar los N resultados" sigue coincidiendo con lo que se ve en
+pantalla.
+
+**Columna P. c/IVA.** La tabla mostraba sólo el precio de venta neto, que no es
+el que ve el cliente. Se agregó una columna con el importe final de la tienda,
+entre P. venta y Stock. El valor lo resuelve el backend con `publicPricing.js`
+—la autoridad— y viaja como `precio_publico` en cada fila de
+`GET /api/products`: el panel sólo lo muestra, no vuelve a aplicar el 21 %. El
+tooltip aclara si viene de un precio con IVA cargado a mano o del cálculo sobre
+el neto.
+
+**Pendiente / fuera de alcance:** la columna no ordena ni filtra por rango (el
+orden y el rango siguen sobre P. venta); ordenar por importe final exigiría
+duplicar la lógica de `publicPricing` en SQL. La búsqueda por palabras **no** se
+aplicó todavía al catálogo público (`buildCatalogFilters` en
+`backend/routes/catalog.js`), que tiene el mismo problema.
 
 ## Meta Pixel (2026-09-10)
 
