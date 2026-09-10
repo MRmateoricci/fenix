@@ -214,7 +214,29 @@ function newProductCodeConflictMessage(conflicts) {
   return `No se pueden crear productos porque estos códigos ya existen: ${details}${remaining}`
 }
 
-function buildProductFilters(query) {
+// Los nombres del inventario vienen de las listas de proveedores y no tienen un
+// orden fijo ("INT.SIMPLE 6A REDONDO T/PALA 6,3mm"), así que buscar la frase
+// completa no encuentra nada. Se parte lo tipeado en palabras y se exige que
+// todas aparezcan —en cualquier orden y en cualquiera de los campos buscables—
+// para que "redondo 6,3" llegue al producto.
+const SEARCH_MAX_TERMS = 8
+const SEARCHABLE_TEXT = `concat_ws(' ', codigo, descripcion, name)`
+
+// % y _ son comodines de ILIKE: si el usuario los tipea tienen que buscarse como
+// texto literal, no como patrón.
+function escapeLikeTerm(term) {
+  return term.replace(/[\\%_]/g, match => `\\${match}`)
+}
+
+function searchTerms(search) {
+  return String(search || '')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, SEARCH_MAX_TERMS)
+}
+
+export function buildProductFilters(query) {
   const {
     search, supplier, lowStock, stockStatus, published,
     stockMin, stockMax, costMin, costMax, saleMin, saleMax,
@@ -223,10 +245,9 @@ function buildProductFilters(query) {
   const params = []
   let idx = 1
 
-  if (search) {
-    conditions.push(`(codigo ILIKE $${idx} OR descripcion ILIKE $${idx} OR name ILIKE $${idx})`)
-    params.push(`%${search}%`)
-    idx++
+  for (const term of searchTerms(search)) {
+    conditions.push(`${SEARCHABLE_TEXT} ILIKE $${idx++}`)
+    params.push(`%${escapeLikeTerm(term)}%`)
   }
   if (supplier) {
     conditions.push(`supplier ILIKE $${idx++}`)
