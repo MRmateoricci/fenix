@@ -8,6 +8,7 @@ import ProductCard from '../components/ProductCard'
 import PageSEO from '../components/SEO'
 import FenixLogo from '../assets/FenixLogo'
 import { SEO as seoCfg } from '../config/seo'
+import { trackMetaViewContent, trackMetaAddToCart } from '../utils/metaPixel'
 import {
   findCompatiblePublicSelection,
   getPublicCoverVariantRule,
@@ -209,6 +210,20 @@ export default function ProductDetail() {
     setActiveImageIndex(0)
   }, [selectedImage])
 
+  // ViewContent del Meta Pixel. Depende del id del producto y del precio de la
+  // variante elegida: cambiar de color/medida/tono muestra otro precio y otra
+  // ficha. El helper descarta el reenvío inmediato del mismo producto, así que
+  // mover el selector no genera un evento por cada click.
+  useEffect(() => {
+    if (!product) return
+    trackMetaViewContent({
+      id: product.id,
+      name: displayName,
+      price: selectedPrice,
+      category: displayCategory,
+    })
+  }, [product?.id, selectedPrice])
+
   useEffect(() => {
     if (product && window.location.hash === '#reviews') {
       window.requestAnimationFrame(() => {
@@ -264,6 +279,16 @@ export default function ProductDetail() {
         weightKg: Number(product.weightKg) || 0,
       })
     }
+    // Un solo AddToCart por click: la cantidad viaja dentro del evento, no como
+    // un evento por unidad (el addItem de arriba sí se repite, porque el carrito
+    // suma de a uno).
+    trackMetaAddToCart({
+      id: product.id,
+      name: displayName,
+      price: selectedPrice,
+      category: product.category,
+      quantity: qty,
+    })
     setAdded(true)
     setTimeout(() => setAdded(false), 1500)
   }

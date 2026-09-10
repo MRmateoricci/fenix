@@ -1,9 +1,10 @@
-import { useState, Fragment, useMemo, useEffect } from 'react'
+import { useState, Fragment, useMemo, useEffect, useRef } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useCart } from '../context/CartContext'
 import { useAuth } from '../context/AuthContext'
 import { useAdmin } from '../context/AdminContext'
 import PageSEO from '../components/SEO'
+import { trackMetaInitiateCheckout } from '../utils/metaPixel'
 import { getShippingForCP, SHIPPING_SERVICES } from '../config/shipping'
 import mercadoPagoLogo from '../assets/mercado-pago-horizontal.svg'
 import { POLICIES } from './Policy'
@@ -223,6 +224,18 @@ export default function Checkout() {
     })
     return plazoMaximo(conPlazoActual)
   }, [items, catalogProducts])
+
+  // InitiateCheckout del Meta Pixel: una sola vez por visita al checkout, apenas
+  // hay carrito. El ref evita el reenvío por cada re-render del formulario (que
+  // cambia en cada tecla) y por el doble efecto de StrictMode en desarrollo.
+  // Un reintento tras un pago rechazado vuelve a montar la pantalla y sí cuenta
+  // como un nuevo inicio de compra, que es lo correcto.
+  const initiateCheckoutSent = useRef(false)
+  useEffect(() => {
+    if (initiateCheckoutSent.current || !items.length) return
+    initiateCheckoutSent.current = true
+    trackMetaInitiateCheckout(items)
+  }, [items])
 
   useEffect(() => {
     const controller = new AbortController()

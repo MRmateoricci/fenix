@@ -7,8 +7,8 @@
 > Si el cambio merece un commit con mensaje propio, merece una entrada acá.
 > Un ajuste de padding, no.
 
-**Última actualización:** 2 de septiembre de 2026
-**Commit de referencia:** `9fc5565` + cambios locales de esta tanda (nombres legibles en "Páginas más vistas")
+**Última actualización:** 10 de septiembre de 2026
+**Commit de referencia:** `808f7ad` + cambios locales de esta tanda (Meta Pixel)
 
 ---
 
@@ -36,6 +36,52 @@
 | SEO | ✅ Funcionando | Helmet + sitemap + robots |
 | Facturación electrónica ARCA | 🟡 Implementada, producción bloqueada | A/B para RI y C para Monotributo; falta confirmar habilitación A real de Fenix |
 | Analítica de visitas | ✅ Funcionando | Propia, sin servicio externo · pestaña **Visitas** en el panel · sin IP ni cookies |
+| Meta Pixel | ✅ Funcionando | PageView + ViewContent + AddToCart + InitiateCheckout + Purchase · solo navegador, sin Conversions API |
+
+---
+
+## Meta Pixel (2026-09-10)
+
+**Qué se agregó:** el pixel de Meta (ID `711144551940445`) con los eventos
+estándar de ecommerce. No reemplaza a la analítica propia de la pestaña
+**Visitas**: son dos destinos distintos y conviven.
+
+Todo el trato con `fbq` está en un único módulo, `src/utils/metaPixel.js`; el
+resto del frontend llama a helpers (`trackMetaViewContent`, `trackMetaAddToCart`,
+`trackMetaInitiateCheckout`, `trackMetaPurchase`) y nunca toca `window.fbq`.
+
+**Dónde se dispara cada evento:**
+
+| Evento | Lugar |
+|---|---|
+| `PageView` | `TrackPageView` en `App.jsx`, por cada cambio de ruta pública |
+| `ViewContent` | `ProductDetail.jsx`, al abrir la ficha |
+| `AddToCart` | `handleAdd` de `ProductDetail.jsx` y de `ProductCard.jsx` |
+| `InitiateCheckout` | montaje de `Checkout.jsx` con carrito no vacío |
+| `Purchase` | `OrderConfirmation.jsx`, solo con estado `paid`/`preparing`/`shipped`/`delivered` |
+
+**Decisiones que importan:**
+
+- El snippet no va en `index.html` sino en JS, y **sin** el `fbq('track',
+  'PageView')` del final: en una SPA el tracker de rutas ya cubre la primera
+  pantalla, y dejar los dos contaba esa vista dos veces. En `index.html` quedó
+  solo el `<noscript>`.
+- `Purchase` se decide por el estado que devuelve el backend, nunca por haber
+  llegado a la pantalla de éxito: el retorno de MP puede adelantarse al webhook
+  y una transferencia bancaria sigue pendiente hasta que alguien verifica el
+  comprobante. `reserved` tampoco cuenta —esa reserva se paga en el local—, y el
+  id de la orden queda en `localStorage` para que recargar no repita la venta.
+- El evento de la ficha se posterga 250 ms y la última llamada pisa a la
+  anterior: la selección de variante se acomoda en un segundo render, así que sin
+  esa espera salían dos `ViewContent` (precio provisorio y definitivo).
+- El ID se puede sobreescribir con `VITE_META_PIXEL_ID`; vacío desactiva el
+  pixel, que es lo que conviene en desarrollo.
+
+**Pendiente:** la Conversions API (server-side). Hoy todo es del navegador, así
+que un bloqueador de anuncios se lleva puesto el evento, y una transferencia que
+se aprueba días después nunca genera `Purchase` porque el cliente ya no está en
+la pantalla. Los helpers ya mandan `eventID` en `Purchase` para poder unificar
+sin contar doble el día que se agregue.
 
 ---
 

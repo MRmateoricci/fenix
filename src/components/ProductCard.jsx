@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext'
 import { useFavorites } from '../context/FavoritesContext'
 import { precioSinIva } from '../config/tax'
 import { getPublicCoverVariantRule } from '../utils/productVariants'
+import { trackMetaAddToCart } from '../utils/metaPixel'
 
 const T = {
   paper:          '#F7F4EF',
@@ -87,6 +88,15 @@ export default function ProductCard({ product }) {
       // Peso para la vista previa del envío por tramo. POST /api/orders lo
       // vuelve a sumar contra la DB, igual que el precio.
       weightKg: Number(product.weightKg) || 0,
+    })
+    // AddToCart del Meta Pixel. Desde la tarjeta siempre se agrega una unidad;
+    // los productos con variantes no llegan acá (arriba se derivan a la ficha).
+    trackMetaAddToCart({
+      id: product.id,
+      name: product.name,
+      price: displayPrice,
+      category: product.category,
+      quantity: 1,
     })
     setAdded(true)
     setTimeout(() => setAdded(false), 1500)

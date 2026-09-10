@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useEffect } from 'react'
 import { trackPageView } from './utils/analytics'
+import { trackMetaPageView } from './utils/metaPixel'
 import { CartProvider } from './context/CartContext'
 import { AdminProvider, useAdmin } from './context/AdminContext'
 import { AuthProvider, useAuth } from './context/AuthContext'
@@ -72,13 +73,15 @@ function ScrollToTop() {
   return null
 }
 
-// Registra cada visita de página de la tienda. Vive dentro de Layout, que no
-// envuelve las rutas del panel, así que /admin nunca llega acá.
+// Registra cada visita de página de la tienda en los dos destinos: la
+// analítica propia (tabla page_views) y el Meta Pixel. Vive dentro de Layout,
+// que no envuelve las rutas del panel, así que /admin nunca llega acá.
 function TrackPageView() {
   const { pathname } = useLocation()
 
   useEffect(() => {
     trackPageView(pathname)
+    trackMetaPageView(pathname)
   }, [pathname])
 
   return null

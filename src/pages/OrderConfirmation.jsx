@@ -4,6 +4,7 @@ import { OrderItemsBlock } from '../components/OrderItemsBlock'
 import { useCart } from '../context/CartContext'
 import BankTransferPanel from '../components/BankTransferPanel'
 import { SEO as seoCfg } from '../config/seo'
+import { trackMetaPurchase } from '../utils/metaPixel'
 
 const API_BASE = import.meta.env.VITE_API_URL || ''
 
@@ -18,6 +19,10 @@ const STATUS_LABELS = {
   payment_failed:  'Pago rechazado',
   expired:         'Reserva vencida',
 }
+
+// Estados en los que el pago ya está cobrado y verificado del lado del
+// servidor. Es la única condición que habilita el Purchase del pixel.
+const PURCHASE_STATUSES = ['paid', 'preparing', 'shipped', 'delivered']
 
 export default function OrderConfirmation() {
   const { clearCart }       = useCart()
@@ -112,6 +117,22 @@ export default function OrderConfirmation() {
       clearCart()
     }
   }, [order?.status])
+
+  // Purchase del Meta Pixel. Se dispara por el estado que devolvió el backend,
+  // no por haber llegado a esta pantalla: llegar acá con `?status=success` no
+  // prueba nada (MP puede rebotar antes de que el webhook confirme, y una
+  // transferencia bancaria queda pendiente hasta que se verifica el
+  // comprobante). `reserved` tampoco entra: esa reserva se paga en el local.
+  // El helper guarda el id de la orden, así que recargar no repite el evento.
+  useEffect(() => {
+    if (!PURCHASE_STATUSES.includes(order?.status)) return
+    trackMetaPurchase({
+      orderId: order.id,
+      orderNumber: order.order_number,
+      items: order.items || [],
+      total: order.total_amount,
+    })
+  }, [order?.status, order?.id])
 
   // Sin parámetros → redirigir a home
   if (!orderId && !loading) return <Navigate to="/" replace />
