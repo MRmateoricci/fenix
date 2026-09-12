@@ -8,7 +8,7 @@
 > Un ajuste de padding, no.
 
 **Última actualización:** 12 de septiembre de 2026
-**Commit de referencia:** `adc46a3` + cambios locales de esta tanda (feed de catálogo para Meta)
+**Commit de referencia:** `9b8cf67` + cambios locales de esta tanda (imágenes rotas en Tienda)
 
 ---
 
@@ -41,6 +41,45 @@
 | Catálogo Meta (Commerce Manager) | ✅ Implementado | Feed CSV por URL en `/api/meta-catalog/products.csv` · mismo `id` que `content_ids` del Pixel · falta programarlo en el panel de Meta |
 
 ---
+
+## Imágenes rotas: filtro "Imagen rota" y "Limpiar todas" en Tienda (2026-09-12)
+
+**Problema:** productos con `image_url` cargada pero apuntando a un archivo que
+ya no existe (subidas anteriores al volumen persistente de Railway, catálogos
+de proveedor dados de baja). El panel los contaba como "con imagen", la fila
+mostraba el placeholder `?`, el feed de Meta los mandaba con un `image_link`
+que da 404, y **no se podían borrar**: al quitar la foto de la variante
+portada, `ProductModal.handleSave` volvía a `form.image` (la URL con la que se
+abrió el modal) y el PATCH la reinyectaba.
+
+**Qué se hizo:**
+
+- `AdminDashboard.jsx` (`handleSave`): la imagen del producto sale de la
+  portada, otra variante con foto, o `null`. Ya no se cae a `form.image`.
+- `backend/services/brokenImages.js` (+ test): clasifica cada URL. Cualquier
+  path `/uploads/...` (con cualquier host: el propio o el interno de Railway)
+  se verifica **en disco** contra `uploadsDir`; las externas con HEAD (reintento
+  GET si el servidor devuelve 405/501), 8 s de timeout, 8 en paralelo. Un
+  `..` en la URL no permite mirar fuera de la carpeta de subidas.
+- `GET /api/products/broken-images?search=&category=` (admin): reutiliza
+  `buildCatalogFilters` con `conImagen=true`, verifica en el momento y devuelve
+  `{ checked, items }` con la forma del catálogo más `motivoImagen`.
+- `POST /api/products/broken-images/clear` `{ items: [{ id, imageUrl }] }`:
+  pone `image_url = NULL` **sólo si la URL guardada sigue siendo la rota** (si
+  en el medio se subió una foto nueva, no se pisa) y borra esa misma URL de
+  `product_variant_rules`, porque el modal la volvería a subir como portada.
+- Pestaña **Tienda**: cuarto chip **Imagen rota**, paginado en cliente (el
+  servidor devuelve la lista entera), motivo en rojo bajo cada fila, texto
+  "Revisadas N · rotas M", y botón **Limpiar todas (M)** con confirmación.
+  `AdminContext` expone `fetchBrokenImages` y `clearBrokenImages`.
+
+**Medido en la base local:** 1.967 fotos, todas subidas propias → 48 ms,
+67 rotas. Con URLs externas de proveedor tardaría segundos (HEAD por foto).
+
+**No se tocó:** el `COALESCE` de `PATCH /:id/variant-rules` (el PATCH del
+producto corre antes y ya manda `null`); el feed de Meta (omite solos los
+productos que quedan sin imagen); `hover_image_url` y `gallery_images` no se
+verifican. Pendiente: verificación en dispositivo móvil real.
 
 ## Feed de catálogo para Meta Commerce Manager (2026-09-12)
 

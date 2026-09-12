@@ -6,6 +6,9 @@ import { unlink } from 'fs/promises'
 import { pool } from '../db/pool.js'
 import { requireAdmin } from '../middleware/requireAdmin.js'
 import { uploadsDir } from '../config/uploads.js'
+import { SELECT_FIELDS, mapRow, buildCatalogFilters } from './catalog.js'
+import { findBrokenImages } from '../services/brokenImages.js'
+import { resolveFeedBaseUrl } from '../services/metaCatalogFeed.js'
 import {
   normalizeCodigo,
   toNumber,
@@ -848,6 +851,74 @@ router.delete('/supplier-settings/:supplier/mappings/:codigo', async (req, res) 
   } catch (err) {
     console.error('[DELETE /api/products/supplier-settings/:supplier/mappings/:codigo]', err)
     res.status(500).json({ error: 'No se pudo quitar la asociación del código' })
+  }
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/products/broken-images — publicados cuya `image_url` no responde.
+// Verifica en el momento (disco para /uploads, HEAD para el resto), así que
+// tarda unos segundos con muchas fotos externas; por eso acepta los mismos
+// filtros que el listado de Tienda y sólo revisa el subconjunto pedido.
+// Devuelve la misma forma que el catálogo más `motivoImagen`, para que la
+// pestaña Tienda muestre estas filas con su componente habitual.
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/broken-images', async (req, res) => {
+  try {
+    const { where, params } = buildCatalogFilters({ ...req.query, conImagen: 'true' })
+    const { rows } = await pool.query(
+      `SELECT ${SELECT_FIELDS} FROM products ${where} ORDER BY updated_at DESC`,
+      params
+    )
+    const broken = await findBrokenImages(rows, { baseUrl: resolveFeedBaseUrl() })
+    res.json({
+      checked: rows.length,
+      items: broken.map(row => ({ ...mapRow(row), motivoImagen: row.motivo_imagen })),
+    })
+  } catch (err) {
+    console.error('[GET /api/products/broken-images]', err)
+    res.status(500).json({ error: 'No se pudieron verificar las imágenes' })
+  }
+})
+
+// POST /api/products/broken-images/clear — vacía `image_url` de los productos
+// indicados. Recibe `{ items: [{ id, imageUrl }] }` y sólo limpia si la URL
+// guardada sigue siendo la que se verificó rota: si en el medio alguien le
+// subió una foto nueva, no se pisa. También borra esa misma URL de las
+// variantes del producto, porque el modal la volvería a subir como portada.
+router.post('/broken-images/clear', async (req, res) => {
+  const items = Array.isArray(req.body?.items) ? req.body.items : []
+  const pairs = items
+    .map(item => ({ id: String(item?.id || '').trim(), imageUrl: String(item?.imageUrl || '').trim() }))
+    .filter(item => item.id && item.imageUrl)
+  if (!pairs.length) return res.status(400).json({ error: 'No hay imágenes para limpiar' })
+  if (pairs.length > 5000) return res.status(400).json({ error: 'Demasiados productos en una sola limpieza' })
+
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+    const ids = pairs.map(item => item.id)
+    const urls = pairs.map(item => item.imageUrl)
+    const { rows } = await client.query(
+      `UPDATE products p SET image_url = NULL, updated_at = NOW()
+       FROM unnest($1::uuid[], $2::text[]) AS rota(id, url)
+       WHERE p.id = rota.id AND btrim(p.image_url) = rota.url
+       RETURNING p.id`,
+      [ids, urls]
+    )
+    await client.query(
+      `UPDATE product_variant_rules vr SET image_url = NULL, updated_at = NOW()
+       FROM unnest($1::uuid[], $2::text[]) AS rota(id, url)
+       WHERE vr.product_id = rota.id AND btrim(vr.image_url) = rota.url`,
+      [ids, urls]
+    )
+    await client.query('COMMIT')
+    res.json({ cleared: rows.length })
+  } catch (err) {
+    await client.query('ROLLBACK')
+    console.error('[POST /api/products/broken-images/clear]', err)
+    res.status(500).json({ error: 'No se pudieron limpiar las imágenes' })
+  } finally {
+    client.release()
   }
 })
 

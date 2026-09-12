@@ -153,6 +153,31 @@ export function AdminProvider({ children }) {
     return res.json()
   }, [])
 
+  // ── Imágenes rotas — publicados cuya foto ya no responde (sección Tienda) ──
+  // El servidor verifica cada URL en el momento, así que la respuesta tarda
+  // unos segundos; se piden con los mismos filtros de búsqueda y categoría
+  // para revisar sólo el subconjunto que el usuario está mirando.
+  const fetchBrokenImages = useCallback(async ({ search = '', category = '' } = {}) => {
+    const params = new URLSearchParams()
+    if (search.trim()) params.set('search', search.trim())
+    if (category) params.set('category', category)
+    const query = params.toString()
+    const res = await adminFetch(`${API_BASE}/api/products/broken-images${query ? `?${query}` : ''}`)
+    if (!res.ok) throw new Error('No se pudieron verificar las imágenes')
+    return res.json()
+  }, [])
+
+  const clearBrokenImages = useCallback(async items => {
+    const res = await adminFetch(`${API_BASE}/api/products/broken-images/clear`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items: items.map(item => ({ id: item.id, imageUrl: item.image })) }),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(data.error || 'No se pudieron limpiar las imágenes')
+    return data
+  }, [])
+
   const login = async (pwd) => {
     const response = await adminFetch(`${API_BASE}/api/admin/session`, {
       method: 'POST',
@@ -1193,7 +1218,7 @@ export function AdminProvider({ children }) {
 
   return (
     <AdminContext.Provider value={{
-      isAdmin, adminAuthLoading, products, productsLoading, productsError, fetchCatalog, fetchStoreProducts,
+      isAdmin, adminAuthLoading, products, productsLoading, productsError, fetchCatalog, fetchStoreProducts, fetchBrokenImages, clearBrokenImages,
       login, logout,
       updateProduct, addProduct, deleteProduct,
       orders, ordersTotal, invoiceSummary, ordersLoading, ordersError,

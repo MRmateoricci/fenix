@@ -2224,7 +2224,7 @@ function BankTransferSettingsCard() {
 const STORE_PAGE_SIZE = 40
 
 function StoreTab({ onUpdate, onDelete }) {
-  const { fetchInventoryItem, fetchCatalog, fetchStoreProducts, categoryTree } = useAdmin()
+  const { fetchInventoryItem, fetchCatalog, fetchStoreProducts, fetchBrokenImages, clearBrokenImages, categoryTree } = useAdmin()
   const categoryOptions = categoryTree.map(node => ({ value: getCategoryValue(node), label: node.label }))
   const [search, setSearch]     = useState('')
   const [appliedSearch, setAppliedSearch] = useState('')
@@ -2241,6 +2241,8 @@ function StoreTab({ onUpdate, onDelete }) {
   const [loadingProductId, setLoadingProductId] = useState(null)
   const [loadError, setLoadError] = useState('')
   const [confirmId, setConfirmId] = useState(null)
+  const [confirmClearBroken, setConfirmClearBroken] = useState(false)
+  const [clearingBroken, setClearingBroken] = useState(false)
   const [hoveredRow, setHoveredRow] = useState(null)
 
   // Debounce de la búsqueda: recién dispara el fetch (y vuelve a la página 1)
@@ -2250,28 +2252,35 @@ function StoreTab({ onUpdate, onDelete }) {
     return () => clearTimeout(t)
   }, [search])
 
+  // "Imagen rota" no es un filtro de la base: el servidor verifica cada foto
+  // en el momento y devuelve la lista completa, así que acá se pagina en
+  // cliente y las píldoras de arriba conservan los conteos de la última carga.
+  const brokenMode = imgFilter === 'rotas'
+
   useEffect(() => {
     let cancelled = false
     setListLoading(true)
     setListError('')
-    fetchStoreProducts({
-      page,
-      pageSize: STORE_PAGE_SIZE,
-      search: appliedSearch,
-      category: catFilter === 'Todas' ? '' : catFilter,
-      conImagen: imgFilter,
-    })
-      .then(result => { if (!cancelled) setPageData(result) })
+    const category = catFilter === 'Todas' ? '' : catFilter
+    const request = brokenMode
+      ? fetchBrokenImages({ search: appliedSearch, category })
+          .then(result => prev => ({ ...prev, items: result.items, total: result.items.length, hasMore: false, checked: result.checked }))
+      : fetchStoreProducts({ page, pageSize: STORE_PAGE_SIZE, search: appliedSearch, category, conImagen: imgFilter })
+          .then(result => () => result)
+    request
+      .then(update => { if (!cancelled) setPageData(update) })
       .catch(err => { if (!cancelled) setListError(err.message || 'No se pudieron cargar los productos') })
       .finally(() => { if (!cancelled) setListLoading(false) })
     return () => { cancelled = true }
-  }, [fetchStoreProducts, page, appliedSearch, catFilter, imgFilter, reloadNonce])
+  }, [fetchStoreProducts, fetchBrokenImages, brokenMode, page, appliedSearch, catFilter, imgFilter, reloadNonce])
 
   const reload = () => setReloadNonce(n => n + 1)
   const changeCat = value => { setCat(value); setPage(1) }
   const changeImgFilter = value => { setImgFilter(value); setPage(1) }
 
-  const items = pageData.items
+  const items = brokenMode
+    ? pageData.items.slice((page - 1) * STORE_PAGE_SIZE, page * STORE_PAGE_SIZE)
+    : pageData.items
   const totalPages = Math.max(1, Math.ceil(pageData.total / STORE_PAGE_SIZE))
   const rangeStart = pageData.total === 0 ? 0 : (page - 1) * STORE_PAGE_SIZE + 1
   const rangeEnd = (page - 1) * STORE_PAGE_SIZE + items.length
@@ -2350,7 +2359,7 @@ function StoreTab({ onUpdate, onDelete }) {
       {/* Filtro por imagen cargada */}
       <div style={{ display: 'flex', gap: 6, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
         <span style={{ fontSize: 11, color: C.text3, fontWeight: 600, letterSpacing: '0.04em' }}>IMAGEN</span>
-        {[{ value: '', label: 'Todas' }, { value: 'true', label: 'Con imagen' }, { value: 'false', label: 'Sin imagen' }].map(f => (
+        {[{ value: '', label: 'Todas' }, { value: 'true', label: 'Con imagen' }, { value: 'false', label: 'Sin imagen' }, { value: 'rotas', label: 'Imagen rota' }].map(f => (
           <button
             key={f.value || 'all'}
             onClick={() => changeImgFilter(f.value)}
@@ -2365,7 +2374,23 @@ function StoreTab({ onUpdate, onDelete }) {
             {f.label}
           </button>
         ))}
+        {brokenMode && !listLoading && pageData.items.length > 0 && (
+          <button
+            onClick={() => setConfirmClearBroken(true)}
+            disabled={clearingBroken}
+            style={{ ...outlineBtn, marginLeft: 'auto', fontSize: 11, padding: '6px 14px', color: C.red, borderColor: C.red, opacity: clearingBroken ? 0.6 : 1 }}
+          >
+            {clearingBroken ? 'Limpiando…' : `Limpiar todas (${pageData.items.length})`}
+          </button>
+        )}
       </div>
+      {brokenMode && (
+        <p style={{ margin: '-6px 0 16px', color: C.muted, fontSize: 12 }}>
+          Se verifica cada foto en el momento, así que puede tardar unos segundos.
+          {!listLoading && pageData.checked != null && ` Revisadas: ${pageData.checked} · rotas: ${pageData.items.length}.`}
+          {' '}Limpiar deja al producto sin imagen: pasa a "Sin imagen", sale del feed de Meta hasta que le cargues una foto y sigue publicado.
+        </p>
+      )}
 
       {listError && (
         <DismissibleErrorNotice key={listError} marginBottom={16} fontSize={12.5}>{listError}</DismissibleErrorNotice>
@@ -2375,7 +2400,7 @@ function StoreTab({ onUpdate, onDelete }) {
       <div style={{ background: C.white, borderRadius: 10, border: `1px solid ${C.border}`, overflow: 'hidden', opacity: listLoading ? 0.6 : 1, transition: 'opacity 0.12s' }}>
         {listLoading && items.length === 0 && (
           <div style={{ padding: '40px 20px', textAlign: 'center', color: C.muted, fontSize: 14 }}>
-            Cargando productos…
+            {brokenMode ? 'Verificando imágenes…' : 'Cargando productos…'}
           </div>
         )}
         {!listLoading && items.length === 0 && (
@@ -2411,6 +2436,11 @@ function StoreTab({ onUpdate, onDelete }) {
               <div style={{ fontSize: 11, color: C.text3, marginTop: 2 }}>
                 {p.category}{p.subcategory ? ` · ${p.subcategory}` : ''}
               </div>
+              {p.motivoImagen && (
+                <div style={{ fontSize: 11, color: C.red, marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={p.image}>
+                  Imagen rota: {p.motivoImagen}
+                </div>
+              )}
             </div>
 
             {/* Price */}
@@ -2514,6 +2544,31 @@ function StoreTab({ onUpdate, onDelete }) {
             else reload()
           }}
           onCancel={() => setConfirmId(null)}
+        />
+      )}
+
+      {confirmClearBroken && (
+        <ConfirmModal
+          message={`¿Quitar la imagen de ${pageData.items.length} producto${pageData.items.length === 1 ? '' : 's'}? Quedan publicados pero sin foto, y dejan de salir en el feed de Meta hasta que les cargues una nueva. Si a alguno le subiste una foto mientras tanto, no se toca.`}
+          onConfirm={async () => {
+            if (clearingBroken) return
+            setClearingBroken(true)
+            setListError('')
+            try {
+              await clearBrokenImages(pageData.items)
+              setConfirmClearBroken(false)
+              setPage(1)
+              reload()
+              fetchCatalog().catch(() => {})
+            } catch (err) {
+              setListError(err.message || 'No se pudieron limpiar las imágenes')
+              setConfirmClearBroken(false)
+            } finally {
+              setClearingBroken(false)
+            }
+          }}
+          onCancel={() => setConfirmClearBroken(false)}
+          confirmLabel={clearingBroken ? 'Limpiando…' : 'Limpiar'}
         />
       )}
     </div>
