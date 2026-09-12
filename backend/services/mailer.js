@@ -277,3 +277,38 @@ export function adminNewOrderEmail(order) {
   `
   return { subject, html }
 }
+
+// ── Botón de arrepentimiento ───────────────────────────────────────────────────────────
+
+// Al consumidor: la Res. 424/2020 exige informarle el número de trámite dentro
+// de las 24 h. Se lo mandamos en el acto.
+export function revocationRequestCustomerEmail(request) {
+  return {
+    subject: `Solicitud de arrepentimiento ${request.code} — Fénix Iluminación`,
+    html: `
+      <div style="font-family:Arial,sans-serif;color:#16110B;line-height:1.6;max-width:560px">
+        <h2>Recibimos tu solicitud de arrepentimiento</h2>
+        <p>Hola ${escapeHtml(request.full_name)}. Registramos tu pedido de revocación de la compra con el número de trámite:</p>
+        <p style="font-size:22px;font-weight:700;letter-spacing:.04em;margin:18px 0">${escapeHtml(request.code)}</p>
+        ${request.order_number ? `<p>Pedido: <strong>${escapeHtml(request.order_number)}</strong></p>` : ''}
+        <p>Nos vamos a comunicar con vos dentro de las 24 horas hábiles para coordinar la devolución del producto y el reintegro. Los gastos de devolución corren por nuestra cuenta.</p>
+        <p style="font-size:13px;color:#6B6257">Fecha de la solicitud: ${fmtDateTime(request.created_at)}. Guardá este correo como constancia.</p>
+      </div>
+    `,
+  }
+}
+
+export function revocationRequestAdminEmail(request) {
+  return {
+    subject: `Arrepentimiento ${request.code}${request.order_number ? ` — pedido ${request.order_number}` : ''}`,
+    html: `<div style="font-family:Arial,sans-serif;color:#16110B;line-height:1.6">
+      <h2>Nueva solicitud de arrepentimiento</h2>
+      <p>Trámite <strong>${escapeHtml(request.code)}</strong> · ${fmtDateTime(request.created_at)}</p>
+      <p>Cliente: <strong>${escapeHtml(request.full_name)}</strong><br>Email: ${escapeHtml(request.email)}<br>
+      Pedido: <strong>${escapeHtml(request.order_number || 'no informado')}</strong>${request.order_id ? '' : request.order_number ? ' (no se encontró un pedido con ese número)' : ''}</p>
+      ${request.reason ? `<p>Motivo: ${escapeHtml(request.reason)}</p>` : ''}
+      <p style="background:#FDF0DC;color:#8A5A00;padding:10px 14px;border-radius:6px;">Hay que responderle dentro de las 24 h y coordinar el retiro del producto sin costo para el cliente (Res. 424/2020).</p>
+    </div>`,
+  }
+}
+

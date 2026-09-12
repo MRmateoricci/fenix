@@ -32,6 +32,7 @@ import Favorites from './pages/Favorites'
 import Orders from './pages/Orders'
 import VerifyEmail from './pages/VerifyEmail'
 import Policy from './pages/Policy'
+import Arrepentimiento from './pages/Arrepentimiento'
 import ForgotPassword from './pages/ForgotPassword'
 import ResetPassword from './pages/ResetPassword'
 import OrderDetail from './pages/OrderDetail'
@@ -163,6 +164,7 @@ export default function App() {
                   <Route path="/register" element={<Register />} />
                   <Route path="/verify-email" element={<VerifyEmail />} />
                   <Route path="/policies/:slug" element={<Policy />} />
+                  <Route path="/arrepentimiento" element={<Arrepentimiento />} />
                   <Route
                     path="/account"
                     element={

@@ -28,6 +28,7 @@ import customersRouter from './routes/customers.js'
 import analyticsRouter from './routes/analytics.js'
 import arcaRouter from './routes/arca.js'
 import invoicesRouter from './routes/invoices.js'
+import revocationsRouter from './routes/revocations.js'
 import { initializeArcaCredentials } from './config/arca.js'
 import { uploadsDir } from './config/uploads.js'
 import { createCorsOptionsDelegate } from './config/cors.js'
@@ -113,6 +114,7 @@ app.use('/api/newsletter', newsletterRouter)
 app.use('/api/coupons', couponsRouter)
 app.use('/api/customers', customersRouter)
 app.use('/api/analytics', analyticsRouter)
+app.use('/api/revocations', revocationsRouter)
 
 // Mercado Pago no acepta back_urls con localhost. En desarrollo la preferencia
 // vuelve primero por APP_BASE_URL (por ejemplo, ngrok) y este puente redirige

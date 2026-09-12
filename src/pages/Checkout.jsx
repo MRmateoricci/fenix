@@ -8,6 +8,7 @@ import { trackMetaInitiateCheckout } from '../utils/metaPixel'
 import { getShippingForCP, SHIPPING_SERVICES } from '../config/shipping'
 import mercadoPagoLogo from '../assets/mercado-pago-horizontal.svg'
 import { POLICIES } from './Policy'
+import PolicyBody from '../components/PolicyBody'
 import { applyInvoiceMode, documentKindForNumber } from '../utils/checkoutInvoice'
 import {
   plazoMaximo,
@@ -1496,7 +1497,7 @@ function SinglePageCheckout({
         <button type="button" onClick={() => setActivePolicy('refunds')}>Política de reembolso</button>
         <button type="button" onClick={() => setActivePolicy('shipping')}>Envíos</button>
         <button type="button" onClick={() => setActivePolicy('privacy')}>Política de privacidad</button>
-        <button type="button" onClick={() => setActivePolicy('terms')}>Términos del servicio</button>
+        <button type="button" onClick={() => setActivePolicy('terms')}>Términos y condiciones</button>
       </nav>
 
       {policy && (
@@ -1519,10 +1520,10 @@ function SinglePageCheckout({
               {policy.sections.map(([title, body]) => (
                 <article key={title}>
                   <h3>{title}</h3>
-                  <p>{body}</p>
+                  <PolicyBody body={body} />
                 </article>
               ))}
-              <p className="fnx-policy-modal-updated">Última actualización: agosto de 2026</p>
+              <p className="fnx-policy-modal-updated">Última actualización: {policy.updated}</p>
             </div>
             <footer>
               <button type="button" onClick={() => setActivePolicy(null)}>Cerrar</button>

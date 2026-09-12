@@ -1064,3 +1064,21 @@ ALTER TABLE coupons ADD CONSTRAINT coupons_per_customer_limit_check
 -- El chequeo "este cliente ya usó el cupón" filtra orders por código de cupón.
 CREATE INDEX IF NOT EXISTS idx_orders_coupon_code_upper
   ON orders(UPPER(coupon_code)) WHERE coupon_code IS NOT NULL;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Botón de arrepentimiento (Res. 424/2020, art. 34 Ley 24.240)
+-- ─────────────────────────────────────────────────────────────────────────────
+-- La norma obliga a entregarle al consumidor un número de trámite y a poder
+-- demostrar que la solicitud se recibió y cuándo. El mail al negocio es
+-- best-effort (mailer.js nunca tira), así que si el correo cae la solicitud
+-- igual tiene que quedar registrada: esta tabla es la prueba, el mail el aviso.
+CREATE TABLE IF NOT EXISTS revocation_requests (
+  id           UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+  code         VARCHAR(20)  UNIQUE NOT NULL,
+  order_number VARCHAR(20),
+  order_id     UUID,
+  email        VARCHAR(200) NOT NULL,
+  full_name    VARCHAR(200) NOT NULL,
+  reason       TEXT,
+  created_at   TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+);

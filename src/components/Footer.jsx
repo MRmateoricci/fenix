@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom'
 import FenixLogo from '../assets/FenixLogo'
+import { SEO as seoCfg } from '../config/seo'
 
 function scrollTo(id) {
   const el = document.getElementById(id)
@@ -81,7 +82,18 @@ export default function Footer() {
               <Link to="/policies/refunds" style={LINK} onMouseEnter={enter} onMouseLeave={leave}>Política de reembolso</Link>
               <Link to="/policies/shipping" style={LINK} onMouseEnter={enter} onMouseLeave={leave}>Envíos</Link>
               <Link to="/policies/privacy" style={LINK} onMouseEnter={enter} onMouseLeave={leave}>Privacidad</Link>
-              <Link to="/policies/terms" style={LINK} onMouseEnter={enter} onMouseLeave={leave}>Términos del servicio</Link>
+              <Link to="/policies/terms" style={LINK} onMouseEnter={enter} onMouseLeave={leave}>Términos y condiciones</Link>
+              {/* Obligatorios para venta online: Res. 424/2020 (botón de
+                  arrepentimiento en la página de inicio) y el link a la
+                  Ventanilla Única de Defensa del Consumidor con ese texto. */}
+              <Link to="/arrepentimiento" style={LINK} onMouseEnter={enter} onMouseLeave={leave}>Botón de arrepentimiento</Link>
+              <a
+                href={seoCfg.legal.consumerDefenseUrl}
+                target="_blank" rel="noopener noreferrer"
+                style={LINK} onMouseEnter={enter} onMouseLeave={leave}
+              >
+                Defensa de las y los consumidores. Para reclamos ingresá aquí
+              </a>
             </div>
 
           {/* Contacto */}
@@ -127,7 +139,16 @@ export default function Footer() {
           fontFamily: "var(--font-sans)", fontSize: 11, color: '#6B6151',
         }}>
           <span>© 1977–{year} Fénix Electricidad e Iluminación</span>
-          <span>City Bell · La Plata · Buenos Aires</span>
+          {/* Identificación del proveedor (Res. 270/2020) y QR Data Fiscal
+              (Formulario 960/NM de ARCA), que aparece cuando se carga el link. */}
+          <span style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+            <span>{seoCfg.legal.companyName} · CUIT {seoCfg.legal.cuit} · {seoCfg.legal.address}</span>
+            {seoCfg.legal.dataFiscalUrl && (
+              <a href={seoCfg.legal.dataFiscalUrl} target="_F960AFIPInfo" rel="noopener noreferrer" title="Data Fiscal — ARCA">
+                <img src="/data-fiscal.png" alt="QR Data Fiscal de ARCA" width="44" height="60" style={{ display: 'block' }} />
+              </a>
+            )}
+          </span>
         </div>
       </div>
     </footer>

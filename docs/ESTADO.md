@@ -7,8 +7,8 @@
 > Si el cambio merece un commit con mensaje propio, merece una entrada acá.
 > Un ajuste de padding, no.
 
-**Última actualización:** 10 de septiembre de 2026
-**Commit de referencia:** `655a82a` (búsqueda por palabras) + cambios locales de esta tanda (columna P. c/IVA en la tabla de productos)
+**Última actualización:** 11 de septiembre de 2026
+**Commit de referencia:** `c0557c1` + cambios locales de esta tanda (documentos legales)
 
 ---
 
@@ -36,7 +36,53 @@
 | SEO | ✅ Funcionando | Helmet + sitemap + robots |
 | Facturación electrónica ARCA | 🟡 Implementada, producción bloqueada | A/B para RI y C para Monotributo; falta confirmar habilitación A real de Fenix |
 | Analítica de visitas | ✅ Funcionando | Propia, sin servicio externo · pestaña **Visitas** en el panel · sin IP ni cookies |
+| Documentos legales | ✅ Funcionando | Privacidad (Ley 25.326 + Meta Pixel), Términos, Cambios, Envíos · botón de arrepentimiento · falta QR Data Fiscal e inscripción en la AAIP |
 | Meta Pixel | ✅ Funcionando | PageView + ViewContent + AddToCart + InitiateCheckout + Purchase · solo navegador, sin Conversions API |
+
+---
+
+## Documentos legales y botón de arrepentimiento (2026-09-11)
+
+**Qué había:** cuatro políticas de tres párrafos, placeholder. Sin identificación
+del vendedor, sin mención de cookies ni del Meta Pixel, sin garantía legal, sin
+derecho de revocación, sin botón de arrepentimiento, sin link a Defensa del
+Consumidor. Los términos hablaban de "stock" y de que la compra se confirma
+"cuando Mercado Pago aprueba", con la transferencia bancaria ya en producción.
+
+**Qué se hizo:**
+
+- `src/config/seo.js` → bloque `legal` (razón social, CUIT, domicilio, email,
+  `dataFiscalUrl`, `consumerDefenseUrl`). Única fuente para footer y políticas.
+- `src/pages/Policy.jsx` → los cuatro documentos reescritos completos, con
+  fecha propia (`updated`). Privacidad cubre Ley 25.326 (responsable, finalidades,
+  cesiones, plazos, derechos, las dos leyendas obligatorias de la AAIP), cookies,
+  Meta Pixel con matching avanzado y opt-out, analítica propia sin IP. Términos
+  cubren perfeccionamiento por MP / transferencia / reserva, revocación, garantía
+  legal (art. 11), facturación, jurisdicción (art. 36).
+- `src/components/PolicyBody.jsx` → renderer compartido entre la página y el
+  modal del checkout: párrafos, listas y links `[texto](url)`.
+- **Botón de arrepentimiento** (Res. 424/2020): página `/arrepentimiento`,
+  `POST /api/revocations`, tabla `revocation_requests`, mails al cliente (con
+  número de trámite `ARR-XXXXXX`) y al negocio (`ADMIN_NOTIFICATION_EMAIL`).
+  Sin cuenta ni pedido válido: la norma prohíbe ponerle trabas.
+- Footer: links a arrepentimiento y a la Ventanilla Única de Defensa del
+  Consumidor (texto obligatorio), razón social + CUIT + domicilio, y el QR Data
+  Fiscal que aparece cuando se cargue `legal.dataFiscalUrl` + `public/data-fiscal.png`.
+- Dominio corregido a `fenixelectricidadiluminacion.com` en `seo.js`, `robots.txt`,
+  `sitemap.xml` y `Nosotros.jsx`. Sitemap con las páginas legales.
+
+**Decisiones a confirmar por el dueño (son comerciales, no legales):** cambios
+por otro producto dentro de 30 días; 48 h para reportar daño de envío; reintegro
+de transferencia en 5 días hábiles; reenvío a cargo del cliente si el domicilio
+era incorrecto.
+
+**Pendiente fuera del código:**
+
+- Generar el QR Data Fiscal en ARCA (Formulario 960/NM) y cargarlo.
+- Inscribir la base de datos en el Registro Nacional de Bases de Datos (AAIP).
+- Que un contador o abogado revise los textos antes de una campaña grande.
+- El sitemap sigue listando `/products/1` a `/products/16`, ids de demo que ya
+  no existen: habría que generarlo desde el catálogo real.
 
 ---
 

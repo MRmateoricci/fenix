@@ -18,7 +18,7 @@ const FAQ_SCHEMA = {
   '@type': 'AboutPage',
   name: 'Historia de Fénix Iluminación — Desde 1977, City Bell',
   description: 'Tres generaciones de la familia Fénix iluminando hogares de City Bell y La Plata desde 1977.',
-  url: 'https://fenixiluminacion.com.ar/nosotros',
+  url: 'https://fenixelectricidadiluminacion.com/nosotros',
   mainEntity: {
     '@type': 'LocalBusiness',
     name: 'Fénix Electricidad e Iluminación',
