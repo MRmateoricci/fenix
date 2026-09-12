@@ -1183,7 +1183,10 @@ function ProductModal({ product, onSave, onClose, onVariantsChanged, publishOnSa
     out.priceWithTax = variantSummary.tax === '' ? null : variantSummary.tax
     out.stock = variantSummary.stock
 
-    out.image = coverRule?.image || primaryRule?.image || form.image || null
+    // La foto del producto es la de la portada. No se vuelve a `form.image`:
+    // es la URL con la que se abrió el modal y, si el usuario quitó la foto de
+    // la portada, reinyectarla dejaba una imagen rota imposible de borrar.
+    out.image = coverRule?.image || primaryRule?.image || form.variantRules.find(rule => rule.image)?.image || null
     // El hover identifica visualmente al producto en el listado. Las variantes
     // conservan su imagen principal propia, pero comparten esta segunda imagen.
     out.hoverImage = form.hoverImage || null
