@@ -11,7 +11,7 @@ import { resolvePublicOptionPrice, resolvePublicPrice } from '../services/public
 // ─────────────────────────────────────────────────────────────────────────────
 const router = Router()
 
-const SELECT_FIELDS = `
+export const SELECT_FIELDS = `
   id, name, codigo, descripcion, category, subcategory, precio_venta, precio_venta_usd, precio_iva, precio_iva_usd,
   original_price, original_price_usd, price_currency,
   COALESCE((SELECT usd_ars_rate FROM store_settings WHERE id = 1), 1510) AS usd_ars_rate,

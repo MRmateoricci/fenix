@@ -7,8 +7,8 @@
 > Si el cambio merece un commit con mensaje propio, merece una entrada acá.
 > Un ajuste de padding, no.
 
-**Última actualización:** 11 de septiembre de 2026
-**Commit de referencia:** `c0557c1` + cambios locales de esta tanda (documentos legales)
+**Última actualización:** 12 de septiembre de 2026
+**Commit de referencia:** `adc46a3` + cambios locales de esta tanda (feed de catálogo para Meta)
 
 ---
 
@@ -38,6 +38,53 @@
 | Analítica de visitas | ✅ Funcionando | Propia, sin servicio externo · pestaña **Visitas** en el panel · sin IP ni cookies |
 | Documentos legales | ✅ Funcionando | Privacidad (Ley 25.326 + Meta Pixel), Términos, Cambios, Envíos · botón de arrepentimiento · falta QR Data Fiscal e inscripción en la AAIP |
 | Meta Pixel | ✅ Funcionando | PageView + ViewContent + AddToCart + InitiateCheckout + Purchase · solo navegador, sin Conversions API |
+| Catálogo Meta (Commerce Manager) | ✅ Implementado | Feed CSV por URL en `/api/meta-catalog/products.csv` · mismo `id` que `content_ids` del Pixel · falta programarlo en el panel de Meta |
+
+---
+
+## Feed de catálogo para Meta Commerce Manager (2026-09-12)
+
+**Qué se agregó:** `GET /api/meta-catalog/products.csv`, un CSV con la
+plantilla oficial de Meta (`Catalog_Products_Template.csv`, 28 columnas) que
+el Commerce Manager consulta por URL programada. No hay archivo que subir a
+mano: cada vez que Meta lo pide, sale con los productos publicados, sus precios
+y su disponibilidad actuales.
+
+**Archivos:** `backend/services/metaCatalogFeed.js` (+ test) arma las filas y
+el CSV; `backend/routes/metaCatalog.js` hace la consulta y responde;
+`backend/index.js` lo monta; `routes/catalog.js` exporta `SELECT_FIELDS`.
+
+**URL para el panel de Meta** (Commerce Manager → Catálogo → Orígenes de datos
+→ Agregar → Feed de datos → Programar):
+`https://fenixelectricidadiluminacion.com/api/meta-catalog/products.csv`
+
+**Decisiones que importan:**
+
+- **El `id` del catálogo es `products.id` (UUID en texto)**, el mismo que
+  `src/utils/metaPixel.js` manda en `content_ids` de ViewContent, AddToCart,
+  InitiateCheckout y Purchase. Es lo que permite los anuncios dinámicos: si
+  alguna vez cambia uno, cambia el otro.
+- El precio es el de `mapRow` de `routes/catalog.js`: exactamente el que ve el
+  cliente en la tienda (con IVA, USD ya convertido). Formato Meta: `1234.50 ARS`.
+  Con precio tachado, `price` es el de lista y `sale_price` el vigente.
+- Disponibilidad: `in stock` si `stock_inmediato`, `available for order` si no.
+  Nunca `out of stock` ni cantidades — la tienda no lleva stock (CLAUDE.md §4.4)
+  y todo lo publicado es comprable.
+- `brand` sale de `grupo` (marca/fabricante del inventario); si está vacío va
+  el nombre de la casa, porque Meta rechaza la fila sin marca.
+- Las variantes color/medida/tono **no** son ítems separados: una fila por
+  producto, con el precio base y la foto de portada. Meta tolera que el
+  precio del evento (variante elegida) difiera del catálogo.
+- Se omiten (y se loguean en Railway) las filas sin imagen o sin precio: Meta
+  rechazaría el archivo entero si las incluyera.
+- `link`/`image_link` se arman con `FRONTEND_BASE_URL` → `APP_BASE_URL` →
+  dominio productivo. Las imágenes relativas (`/uploads/...`) se vuelven
+  absolutas.
+
+**Pendiente:** cargar la URL en el Commerce Manager y asociar el catálogo al
+pixel `711144551940445`; cargar `grupo` en los productos que no lo tengan;
+verificar en el panel de Meta el "match rate" entre eventos y catálogo una vez
+que corra.
 
 ---
 

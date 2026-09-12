@@ -16,6 +16,7 @@ import subcategoriesRouter from './routes/subcategories.js'
 import productTypesRouter from './routes/productTypes.js'
 import categoryCustomizationsRouter from './routes/categoryCustomizations.js'
 import catalogRouter  from './routes/catalog.js'
+import metaCatalogRouter from './routes/metaCatalog.js'
 import googleReviewsRouter from './routes/googleReviews.js'
 import shippingRouter from './routes/shipping.js'
 import paymentsRouter from './routes/payments.js'
@@ -106,6 +107,7 @@ app.use('/api/subcategories', subcategoriesRouter)
 app.use('/api/product-types', productTypesRouter)
 app.use('/api/category-customizations', categoryCustomizationsRouter)
 app.use('/api/catalog',  catalogRouter)
+app.use('/api/meta-catalog', metaCatalogRouter)
 app.use('/api/google-reviews', googleReviewsRouter)
 app.use('/api/shipping', shippingRouter)
 app.use('/api/payments', paymentsRouter)
