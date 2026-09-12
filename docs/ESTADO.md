@@ -45,7 +45,7 @@
 ## Feed de catálogo para Meta Commerce Manager (2026-09-12)
 
 **Qué se agregó:** `GET /api/meta-catalog/products.csv`, un CSV con la
-plantilla oficial de Meta (`Catalog_Products_Template.csv`, 28 columnas) que
+plantilla de Meta (`catalog_products.csv`, 31 columnas, mismo orden) que
 el Commerce Manager consulta por URL programada. No hay archivo que subir a
 mano: cada vez que Meta lo pide, sale con los productos publicados, sus precios
 y su disponibilidad actuales.
@@ -67,9 +67,10 @@ el CSV; `backend/routes/metaCatalog.js` hace la consulta y responde;
 - El precio es el de `mapRow` de `routes/catalog.js`: exactamente el que ve el
   cliente en la tienda (con IVA, USD ya convertido). Formato Meta: `1234.50 ARS`.
   Con precio tachado, `price` es el de lista y `sale_price` el vigente.
-- Disponibilidad: `in stock` si `stock_inmediato`, `available for order` si no.
-  Nunca `out of stock` ni cantidades — la tienda no lleva stock (CLAUDE.md §4.4)
-  y todo lo publicado es comprable.
+- Disponibilidad: siempre `in stock` (la plantilla sólo admite `in stock` /
+  `out of stock`, y `out of stock` saca el producto de los anuncios). Todo lo
+  publicado es comprable (CLAUDE.md §4.4); `stock_inmediato` sólo cambia el
+  plazo y eso lo explica la ficha. Nunca se informa cantidad.
 - `brand` sale de `grupo` (marca/fabricante del inventario); si está vacío va
   el nombre de la casa, porque Meta rechaza la fila sin marca.
 - Las variantes color/medida/tono **no** son ítems separados: una fila por

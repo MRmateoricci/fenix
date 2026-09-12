@@ -12,14 +12,17 @@
 // tiene que cambiar el otro: sin ese match Meta no puede asociar un ViewContent
 // o Purchase con el producto del catálogo, y los anuncios dinámicos no funcionan.
 
-// Encabezado de la plantilla de Meta, tal cual la baja el Commerce Manager.
+// Encabezado de la plantilla `catalog_products.csv` del Commerce Manager, en
+// el mismo orden. La plantilla trae arriba una fila de ayuda que empieza con
+// `#`; acá no se emite: Meta la ignora y sólo necesita el encabezado.
 export const META_FEED_COLUMNS = [
-  'id', 'title', 'description', 'availability', 'condition', 'price', 'link',
-  'image_link', 'brand', 'google_product_category', 'fb_product_category',
+  'id', 'title', 'description', 'availability', 'condition', 'link',
+  'image_link', 'brand', 'price', 'google_product_category', 'fb_product_category',
   'quantity_to_sell_on_facebook', 'sale_price', 'sale_price_effective_date',
   'item_group_id', 'gender', 'color', 'size', 'age_group', 'material', 'pattern',
-  'shipping', 'shipping_weight', 'gtin', 'video[0].url', 'video[0].tag[0]',
-  'product_tags[0]', 'style[0]',
+  'shipping', 'shipping_weight', 'offer_disclaimer', 'offer_disclaimer_url',
+  'video[0].url', 'video[0].tag[0]', 'gtin', 'product_tags[0]', 'product_tags[1]',
+  'style[0]',
 ]
 
 // La tienda publica siempre en pesos (publicPricing.js convierte USD antes).
@@ -67,11 +70,13 @@ function cleanText(value, max) {
   return text.length > max ? `${text.slice(0, max - 1).trimEnd()}…` : text
 }
 
-// Bandera de disponibilidad de la tienda → vocabulario de Meta. Todo lo
-// publicado es comprable, así que nunca sale `out of stock`: lo que no está en
-// el local se pide al proveedor, que es exactamente `available for order`.
-export function toMetaAvailability(product) {
-  return product.stockInmediato ? 'in stock' : 'available for order'
+// Disponibilidad en el vocabulario de la plantilla (`in stock` / `out of
+// stock`). Todo lo publicado es comprable (CLAUDE.md §4.4): lo que no está en
+// el local se pide al proveedor y se vende igual, así que siempre va `in
+// stock`. `stock_inmediato` sólo cambia el plazo, y eso lo explica la ficha.
+// Mandar `out of stock` sacaría el producto de los anuncios.
+export function toMetaAvailability() {
+  return 'in stock'
 }
 
 // Una fila del feed a partir de un producto ya mapeado por `mapRow` (más
@@ -108,10 +113,10 @@ export function buildMetaFeedRow(product, { baseUrl } = {}) {
       description,
       availability: toMetaAvailability(product),
       condition: 'new',
-      price: formatMetaPrice(listPrice),
       link: `${base}/products/${encodeURIComponent(id)}`,
       image_link: imageLink,
       brand: cleanText(product.brand, 100) || DEFAULT_BRAND,
+      price: formatMetaPrice(listPrice),
       google_product_category: '',
       fb_product_category: '',
       // La tienda no lleva stock (CLAUDE.md §4.4): nunca se informa cantidad.
@@ -129,10 +134,13 @@ export function buildMetaFeedRow(product, { baseUrl } = {}) {
       pattern: '',
       shipping: '',
       shipping_weight: Number.isFinite(weightKg) && weightKg > 0 ? `${weightKg} kg` : '',
-      gtin: '',
+      offer_disclaimer: '',
+      offer_disclaimer_url: '',
       'video[0].url': '',
       'video[0].tag[0]': '',
+      gtin: '',
       'product_tags[0]': '',
+      'product_tags[1]': '',
       'style[0]': '',
     },
     skipped: null,

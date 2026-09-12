@@ -58,9 +58,16 @@ test('la fila cumple los campos obligatorios de la plantilla de Meta', () => {
   assert.deepEqual(Object.keys(row), META_FEED_COLUMNS)
 })
 
-test('sin stock inmediato el producto sigue comprable: available for order', () => {
+test('sin stock inmediato el producto sigue comprable: in stock igual', () => {
   const { row } = buildMetaFeedRow(product({ stockInmediato: false }), { baseUrl: BASE })
-  assert.equal(row.availability, 'available for order')
+  assert.equal(row.availability, 'in stock')
+})
+
+test('el encabezado es el de la plantilla catalog_products.csv de Meta', () => {
+  assert.equal(
+    META_FEED_COLUMNS.join(','),
+    'id,title,description,availability,condition,link,image_link,brand,price,google_product_category,fb_product_category,quantity_to_sell_on_facebook,sale_price,sale_price_effective_date,item_group_id,gender,color,size,age_group,material,pattern,shipping,shipping_weight,offer_disclaimer,offer_disclaimer_url,video[0].url,video[0].tag[0],gtin,product_tags[0],product_tags[1],style[0]'
+  )
 })
 
 test('con precio tachado, price es el de lista y sale_price el vigente', () => {
