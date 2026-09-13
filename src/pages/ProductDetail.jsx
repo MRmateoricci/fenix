@@ -93,7 +93,10 @@ export default function ProductDetail() {
   const selectedDetailsRule = resolvePublicVariantRule(product?.variantRules, ruleSelection, 'productData')
   const variantData = selectedDetailsRule?.productData || {}
   const variantValue = (field, fallback) => variantData[field] !== '' && variantData[field] != null ? variantData[field] : fallback
-  const displayName = variantValue('name', product?.name)
+  // El título es siempre el nombre de tienda del producto (el mismo que la tarjeta).
+  // La variante se distingue por color/medida/tono y por su ficha, no por el título:
+  // el "nombre individual" de la ficha suele traer el nombre crudo del proveedor.
+  const displayName = product?.name
   const displayDescription = variantValue('description', product?.description)
   const displayCategory = variantValue('category', product?.category)
   const variantSpecs = [
