@@ -145,7 +145,7 @@ export default function Footer() {
             <span>{seoCfg.legal.companyName} · CUIT {seoCfg.legal.cuit} · {seoCfg.legal.address}</span>
             {seoCfg.legal.dataFiscalUrl && (
               <a href={seoCfg.legal.dataFiscalUrl} target="_F960AFIPInfo" rel="noopener noreferrer" title="Data Fiscal — ARCA">
-                <img src="/data-fiscal.png" alt="QR Data Fiscal de ARCA" width="44" height="60" style={{ display: 'block' }} />
+                <img src="/data-fiscal.jpg" alt="QR Data Fiscal de ARCA" width="44" height="60" style={{ display: 'block' }} />
               </a>
             )}
           </span>

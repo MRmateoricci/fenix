@@ -32,9 +32,11 @@ export const SEO = {
     cuit:        '33-71836841-9',
     address:     'Cantilo 745, City Bell, La Plata, Provincia de Buenos Aires',
     email:       'fenixcitybell@gmail.com',
-    // Link del QR "Data Fiscal" (Formulario 960/NM de ARCA). Se genera con clave
-    // fiscal y se pega acá; mientras esté en null el footer no muestra el QR.
-    dataFiscalUrl: null,
+    // Link del QR "Data Fiscal" (Formulario 960/NM de ARCA), generado con clave
+    // fiscal. Queda en http a propósito: qr.afip.gob.ar no responde por https.
+    // Es un link de navegación, no contenido embebido, así que no rompe el
+    // candado del sitio. La imagen sí está copiada en public/ por eso mismo.
+    dataFiscalUrl: 'http://qr.afip.gob.ar/?qr=dFuhgr25fyRe3hTNTWh2Zg,,',
     // Ventanilla Única Federal de Defensa del Consumidor. El link con este texto
     // es obligatorio en sitios de venta online (Secretaría de Comercio).
     consumerDefenseUrl: 'https://www.argentina.gob.ar/produccion/defensadelconsumidor/formulario',

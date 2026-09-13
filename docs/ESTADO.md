@@ -36,7 +36,7 @@
 | SEO | ✅ Funcionando | Helmet + sitemap + robots |
 | Facturación electrónica ARCA | 🟡 Implementada, producción bloqueada | A/B para RI y C para Monotributo; falta confirmar habilitación A real de Fenix |
 | Analítica de visitas | ✅ Funcionando | Propia, sin servicio externo · pestaña **Visitas** en el panel · sin IP ni cookies |
-| Documentos legales | ✅ Funcionando | Privacidad (Ley 25.326 + Meta Pixel), Términos, Cambios, Envíos · botón de arrepentimiento · falta QR Data Fiscal e inscripción en la AAIP |
+| Documentos legales | ✅ Funcionando | Privacidad (Ley 25.326 + Meta Pixel), Términos, Cambios, Envíos · botón de arrepentimiento · falta inscripción en la AAIP |
 | Meta Pixel | ✅ Funcionando | PageView + ViewContent + AddToCart + InitiateCheckout + Purchase · solo navegador, sin Conversions API |
 | Catálogo Meta (Commerce Manager) | ✅ Implementado | Feed CSV por URL en `/api/meta-catalog/products.csv` · mismo `id` que `content_ids` del Pixel · falta programarlo en el panel de Meta |
 
@@ -154,7 +154,8 @@ Consumidor. Los términos hablaban de "stock" y de que la compra se confirma
   Sin cuenta ni pedido válido: la norma prohíbe ponerle trabas.
 - Footer: links a arrepentimiento y a la Ventanilla Única de Defensa del
   Consumidor (texto obligatorio), razón social + CUIT + domicilio, y el QR Data
-  Fiscal que aparece cuando se cargue `legal.dataFiscalUrl` + `public/data-fiscal.png`.
+  Fiscal (`legal.dataFiscalUrl` + `public/data-fiscal.jpg`, imagen copiada de ARCA
+  porque la original va por http y el sitio es https).
 - Dominio corregido a `fenixelectricidadiluminacion.com` en `seo.js`, `robots.txt`,
   `sitemap.xml` y `Nosotros.jsx`. Sitemap con las páginas legales.
 
@@ -165,7 +166,6 @@ era incorrecto.
 
 **Pendiente fuera del código:**
 
-- Generar el QR Data Fiscal en ARCA (Formulario 960/NM) y cargarlo.
 - Inscribir la base de datos en el Registro Nacional de Bases de Datos (AAIP).
 - Que un contador o abogado revise los textos antes de una campaña grande.
 - El sitemap sigue listando `/products/1` a `/products/16`, ids de demo que ya
