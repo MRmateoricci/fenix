@@ -8,7 +8,7 @@
 > Un ajuste de padding, no.
 
 **Última actualización:** 12 de septiembre de 2026
-**Commit de referencia:** `9b8cf67` + cambios locales de esta tanda (imágenes rotas en Tienda)
+**Commit de referencia:** `c545cd7` + cambios locales de esta tanda (búsqueda abierta en la tienda)
 
 ---
 
@@ -39,6 +39,31 @@
 | Documentos legales | ✅ Funcionando | Privacidad (Ley 25.326 + Meta Pixel), Términos, Cambios, Envíos · botón de arrepentimiento · falta inscripción en la AAIP |
 | Meta Pixel | ✅ Funcionando | PageView + ViewContent + AddToCart + InitiateCheckout + Purchase · solo navegador, sin Conversions API |
 | Catálogo Meta (Commerce Manager) | ✅ Implementado | Feed CSV por URL en `/api/meta-catalog/products.csv` · mismo `id` que `content_ids` del Pixel · falta programarlo en el panel de Meta |
+
+---
+
+## Búsqueda abierta en la tienda (2026-09-12)
+
+**Problema:** el buscador (desplegable del navbar y filtro del catálogo) hacía
+`includes()` literal sobre el nombre: sin tilde no encontraba nada
+("lampara" ≠ "Lámpara"), y las palabras tenían que aparecer juntas y en el
+mismo orden ("lampara 22w" no encontraba "Lámpara grande cálida 22W").
+
+**Qué se hizo:**
+
+- `src/utils/productSearch.js` (+ test): normaliza sin tildes ni signos,
+  compara palabra por palabra en cualquier orden, acepta plurales
+  ("lamparas" → "lámpara"), busca en nombre, categoría, subcategoría, tipo,
+  material y descripción, y ordena por relevancia (nombre pesa más que el
+  resto; palabra entera más que fragmento).
+- Si ningún producto cumple **todas** las palabras, devuelve las
+  coincidencias parciales (las que más palabras cumplen primero) en vez de
+  "Sin resultados".
+- `Navbar.jsx` y `Products.jsx` usan el mismo util. En el catálogo, con orden
+  "default" se ve el ranking; los otros órdenes (precio, A-Z) lo pisan.
+
+**Fuera de alcance:** la búsqueda del panel admin (tiene la suya, por
+palabras, ver entrada del 2026-09-10) y cualquier búsqueda server-side.
 
 ---
 

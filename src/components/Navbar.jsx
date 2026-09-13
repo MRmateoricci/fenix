@@ -7,6 +7,7 @@ import CartDrawer from './CartDrawer'
 import FenixLogo from '../assets/FenixLogo'
 import { NAVBAR_HEIGHT, ANNOUNCEMENT_BAR_HEIGHT, PAGE_CONTENT_OFFSET } from '../config/layout'
 import { DEFAULT_HEADER_CATEGORY_VALUES, getCategoryValue } from '../data/categoryTree'
+import { searchProducts } from '../utils/productSearch'
 
 const fmtPrice = (n) =>
   new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(n)
@@ -129,9 +130,8 @@ export default function Navbar() {
   }
 
   const searchMatches = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase()
-    if (!q) return []
-    return products.filter(p => p.name.toLowerCase().includes(q)).slice(0, 6)
+    if (!searchQuery.trim()) return []
+    return searchProducts(products, searchQuery).slice(0, 6)
   }, [searchQuery, products])
 
   const showSearchDropdown = searchFocused && searchQuery.trim() !== ''
