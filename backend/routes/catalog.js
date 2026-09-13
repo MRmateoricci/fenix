@@ -150,6 +150,14 @@ export function mapRow(r) {
   }
 }
 
+// Lo que ve la tienda: publicado y con foto de portada. Un producto publicado
+// sin imagen no se lista, no entra en "más vendidos" ni se abre por id hasta que
+// se le cargue una desde el panel. Es la única excepción a "todo lo publicado
+// es comprable": una tarjeta en blanco no vende y ensucia el catálogo. El
+// listado paginado del panel (sección Tienda) sí lo muestra, para poder
+// encontrarlo con el filtro "Sin imagen" y completarlo.
+export const STORE_VISIBLE = `published = TRUE AND image_url IS NOT NULL AND btrim(image_url) <> ''`
+
 // Arma el WHERE para el listado paginado del panel (sección Tienda). Siempre
 // filtra por published = TRUE; los demás filtros son opcionales. `conImagen`
 // separa lo que ya tiene foto cargada de lo que todavía no, para poder revisar
@@ -189,7 +197,7 @@ router.get('/', async (req, res) => {
     // tienda pública. Con `page` responde paginado para el panel de admin.
     if (!('page' in req.query)) {
       const { rows } = await pool.query(
-        `SELECT ${SELECT_FIELDS} FROM products WHERE published = TRUE ORDER BY updated_at DESC`
+        `SELECT ${SELECT_FIELDS} FROM products WHERE ${STORE_VISIBLE} ORDER BY updated_at DESC`
       )
       return res.json(rows.map(mapRow))
     }
@@ -244,6 +252,7 @@ router.get('/best-sellers', async (req, res) => {
        FROM orders o
        CROSS JOIN LATERAL jsonb_array_elements(o.items) AS item
        INNER JOIN products p ON p.id::text = item->>'id' AND p.published = TRUE
+         AND p.image_url IS NOT NULL AND btrim(p.image_url) <> ''
        WHERE o.paid_at >= NOW() - ($1 * INTERVAL '1 day')
        GROUP BY item->>'id'
        ORDER BY units_sold DESC, product_id
@@ -267,7 +276,7 @@ router.get('/best-sellers', async (req, res) => {
 router.get('/:id', async (req, res) => {
   try {
     const { rows } = await pool.query(
-      `SELECT ${SELECT_FIELDS} FROM products WHERE id = $1 AND published = TRUE`,
+      `SELECT ${SELECT_FIELDS} FROM products WHERE id = $1 AND ${STORE_VISIBLE}`,
       [req.params.id]
     )
     if (!rows.length) return res.status(404).json({ error: 'Producto no encontrado' })

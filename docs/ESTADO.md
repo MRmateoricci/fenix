@@ -7,8 +7,8 @@
 > Si el cambio merece un commit con mensaje propio, merece una entrada acá.
 > Un ajuste de padding, no.
 
-**Última actualización:** 12 de septiembre de 2026
-**Commit de referencia:** `c545cd7` + cambios locales de esta tanda (búsqueda abierta en la tienda)
+**Última actualización:** 13 de septiembre de 2026
+**Commit de referencia:** `64d50f7` + cambios locales de esta tanda (productos sin imagen ocultos en la tienda)
 
 ---
 

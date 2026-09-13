@@ -2374,6 +2374,9 @@ function StoreTab({ onUpdate, onDelete }) {
             {f.label}
           </button>
         ))}
+        {imgFilter === 'false' && (
+          <span style={{ fontSize: 11, color: C.text3 }}>Ocultos en la tienda hasta que se les cargue una imagen.</span>
+        )}
         {brokenMode && !listLoading && pageData.items.length > 0 && (
           <button
             onClick={() => setConfirmClearBroken(true)}
