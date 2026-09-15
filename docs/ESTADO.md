@@ -8,7 +8,7 @@
 > Un ajuste de padding, no.
 
 **Última actualización:** 15 de septiembre de 2026
-**Commit de referencia:** `a3e1d3e` + cambios locales de esta tanda (integración con la API de Correo Argentino)
+**Commit de referencia:** `154abba` + cambios locales de esta tanda (vista previa de precios: asociar en ráfaga y ajuste de códigos)
 
 ---
 
@@ -42,6 +42,51 @@
 | Documentos legales | ✅ Funcionando | Privacidad (Ley 25.326 + Meta Pixel), Términos, Cambios, Envíos · botón de arrepentimiento · falta inscripción en la AAIP |
 | Meta Pixel | ✅ Funcionando | PageView + ViewContent + AddToCart + InitiateCheckout + Purchase · solo navegador, sin Conversions API |
 | Catálogo Meta (Commerce Manager) | ✅ Implementado | Feed CSV por URL en `/api/meta-catalog/products.csv` · mismo `id` que `content_ids` del Pixel · falta programarlo en el panel de Meta |
+
+---
+
+## Vista previa de listas de precios: asociar en ráfaga y ajuste de códigos (2026-09-15)
+
+**Problema:** al importar la lista de Candil (1.290 productos, 4,5 MB) casi
+todo salía como alta porque la tienda los tiene cargados como `CA-1790/NG` y
+el Excel trae `1790/NG`. Asociar cada alta a mano era inviable: cada clic
+volvía a subir el Excel entero, lo re-parseaba y rehacía la vista previa
+completa, y mientras tanto bloqueaba el modal.
+
+**Qué se hizo:**
+
+- `src/pages/admin/AdminDashboard.jsx` — al elegir un candidato la fila pasa
+  a *Actualizar* al instante y los contadores se recalculan localmente; el
+  guardado es por fila (no bloquea a las demás) y la vista previa completa se
+  recalcula **una sola vez** ~2 s después del último clic, o con "Recalcular
+  ahora". Confirmar solo espera a los guardados en vuelo: el backend rehace
+  todo desde `supplier_product_mappings` al importar.
+- Ajuste de códigos por hoja en el modal "Elegir hojas y columnas": **quitar
+  del inicio** y **agregar al inicio** (`codeStripPrefix` / `codeAddPrefix`),
+  con ejemplo en vivo. Se aplica en `parseSupplierPriceSheet`, así que el
+  código ajustado es el que se compara, el que se asocia y el que queda en los
+  productos nuevos. Primero quita, después agrega, sin repetir lo que el
+  código ya trae.
+- `supplier_price_settings.code_strip_prefix` / `code_add_prefix` — se
+  recuerda el último ajuste usado por proveedor y se precarga la próxima vez.
+  Solo se crea la fila si hay algo que recordar.
+
+**Decisiones:**
+
+- **El diferencial de precio no se inventa.** Hasta el recálculo, las filas
+  asociadas muestran `? → precio nuevo`; el candidato no trae los precios
+  actuales del producto y adivinarlos mostraría un cambio falso.
+- **Las asociaciones guardadas con el código sin ajustar dejan de aplicar**
+  al activar un ajuste (quedan bajo `1790/NG` y la lista pasa a leerse como
+  `CA-1790/NG`). En el caso normal no importa: el match exacto por código da
+  el mismo destino.
+- Solo el flujo masivo (inspeccionar → hojas/columnas → vista previa →
+  importar) conoce el ajuste. El endpoint viejo `/import/prices/parse` no.
+
+**Pendiente:** verificar en el navegador con el archivo real de Candil. Para
+ese archivo, la hoja a usar es **IMPORTACION** (renombrar `Id` → `Codigo` y
+`Precio Vigente` → `Precio Costo`), moneda ARS, agregar `CA-`. `Precio
+Vigente` es precio de lista, no el costo neto con el 10+10 de PARAMETROS.
 
 ---
 

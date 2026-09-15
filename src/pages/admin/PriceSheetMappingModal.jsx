@@ -1,9 +1,10 @@
 import { useState } from 'react'
-import { buildSheetSelection, excelColumnLabel, priceColumnFields, sheetSelectionError } from '../../utils/priceSheetSelection'
+import { CODE_AFFIX_MAX_LENGTH, buildSheetSelection, excelColumnLabel, previewCodeAffixes, priceColumnFields, sheetSelectionError } from '../../utils/priceSheetSelection'
 
-export default function PriceSheetMappingModal({ setup, defaultCurrency = 'ARS', busy, error, onContinue, onClose, theme: C }) {
+export default function PriceSheetMappingModal({ setup, defaultCurrency = 'ARS', defaultCodeAffixes = {}, busy, error, onContinue, onClose, theme: C }) {
   const [sheets, setSheets] = useState(() => setup.draftSheets || setup.data.files.flatMap(file => file.sheets.map(sheet => ({
     ...sheet, fileIndex: file.fileIndex, fileName: file.fileName, currency: sheet.currency || defaultCurrency,
+    codeStripPrefix: defaultCodeAffixes.codeStripPrefix || '', codeAddPrefix: defaultCodeAffixes.codeAddPrefix || '',
   }))))
   const [activeIndex, setActiveIndex] = useState(0)
   const [sampleLimits, setSampleLimits] = useState({})
@@ -18,6 +19,10 @@ export default function PriceSheetMappingModal({ setup, defaultCurrency = 'ARS',
   const sampleLimit = sampleLimits[activeIndex] || 25
   const sample = displayRows.slice(active?.headerRow || 0, (active?.headerRow || 0) + sampleLimit)
   const hasMoreSample = !!active && active.headerRow + sample.length < displayRows.length
+  const affixesActive = !!active && Boolean(String(active.codeStripPrefix || '').trim() || String(active.codeAddPrefix || '').trim())
+  const sampleCode = active && active.columns.codeIndex >= 0
+    ? sample.map(row => String(row[active.columns.codeIndex] ?? '').trim()).find(Boolean) || ''
+    : ''
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 2600, background: 'rgba(17,24,39,.62)', display: 'grid', placeItems: 'center', padding: 16 }}>
       <div role="dialog" aria-modal="true" aria-labelledby="price-sheet-title" style={{ width: 'min(1150px, 97vw)', maxHeight: '94vh', display: 'flex', flexDirection: 'column', background: C.white, color: C.ink, borderRadius: 12, overflow: 'hidden' }}>
@@ -69,6 +74,19 @@ export default function PriceSheetMappingModal({ setup, defaultCurrency = 'ARS',
                 </label>
               </div>
               <p style={{ margin: '6px 0 14px', fontSize: 12, color: C.muted }}>{active.currencyHint} Los precios se toman tal como figuran; no se descuenta IVA ni se convierte un precio por metro a precio por rollo.</p>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 12 }}>
+                <label style={{ fontSize: 12 }}>Quitar del inicio del código
+                  <input type="text" maxLength={CODE_AFFIX_MAX_LENGTH} value={active.codeStripPrefix || ''} onChange={event => patch({ codeStripPrefix: event.target.value })} placeholder="Ej.: CA-" style={input} />
+                </label>
+                <label style={{ fontSize: 12 }}>Agregar al inicio del código
+                  <input type="text" maxLength={CODE_AFFIX_MAX_LENGTH} value={active.codeAddPrefix || ''} onChange={event => patch({ codeAddPrefix: event.target.value })} placeholder="Ej.: CA-" style={input} />
+                </label>
+              </div>
+              <p style={{ margin: '6px 0 14px', fontSize: 12, color: affixesActive ? C.text2 : C.muted }}>
+                {affixesActive
+                  ? <>Los códigos de esta hoja se leen ajustados{sampleCode ? <>: <code>{sampleCode.toUpperCase()}</code> → <code>{previewCodeAffixes(sampleCode, active) || '(vacío)'}</code></> : ''}. Así se comparan con tus productos y así quedan los que se creen. Se recuerda para la próxima lista de {setup.supplier}.</>
+                  : 'Si el proveedor usa otra convención de códigos que tus productos (por ejemplo, tus productos tienen "CA-" adelante y la lista no), ajustalo acá para que coincidan en vez de crearse de nuevo.'}
+              </p>
               {!!active.warnings?.length && <div style={{ padding: 10, marginBottom: 12, background: C.amberLight, color: C.amberDark, fontSize: 12 }}>{active.warnings.map((warning, index) => <div key={index}>{warning}</div>)}</div>}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 12 }}>
                 {priceColumnFields.map(([field, label]) => <label key={field} style={{ fontSize: 12 }}>{label}

@@ -1,5 +1,5 @@
 import path from 'node:path'
-import { parseSupplierPrices, parseSupplierPriceSheet, readPriceWorkbook } from './excelImport.js'
+import { normalizeCodeAffix, parseSupplierPrices, parseSupplierPriceSheet, readPriceWorkbook } from './excelImport.js'
 
 export function priceCurrencyFromFilename(filename) {
   const name = path.parse(path.basename(String(filename || ''))).name
@@ -15,6 +15,22 @@ export function supplierCurrencyDefaults(files) {
   }
   return [...currencies].filter(([, values]) => values.size === 1)
     .map(([supplier, values]) => ({ supplier, currency: [...values][0] }))
+}
+
+// Ajuste de códigos a recordar por proveedor: el que se usó en esta carga. Si
+// las hojas de un mismo proveedor no coinciden, no se guarda nada y la próxima
+// vez se vuelve a pedir.
+export function supplierCodeAffixDefaults(files) {
+  const affixes = new Map()
+  for (const file of files) {
+    const value = JSON.stringify([file.codeStripPrefix || '', file.codeAddPrefix || ''])
+    if (!affixes.has(file.supplier)) affixes.set(file.supplier, new Set())
+    affixes.get(file.supplier).add(value)
+  }
+  return [...affixes].filter(([, values]) => values.size === 1).map(([supplier, values]) => {
+    const [codeStripPrefix, codeAddPrefix] = JSON.parse([...values][0])
+    return { supplier, codeStripPrefix, codeAddPrefix }
+  })
 }
 
 // Una selección explícita se valida completa antes de consultar o escribir productos.
@@ -38,6 +54,10 @@ export function parseBulkPriceUploads(files, supplier, rawSelection) {
       const key = JSON.stringify([entry.fileIndex, entry.sheetName])
       if (keys.has(key)) throw new Error(`La hoja “${entry.sheetName}” está seleccionada más de una vez.`)
       keys.add(key)
+      for (const field of ['codeStripPrefix', 'codeAddPrefix']) {
+        if (entry[field] != null && typeof entry[field] !== 'string') throw new Error('Revisá el texto a agregar o quitar de los códigos.')
+        entry[field] = normalizeCodeAffix(entry[field])
+      }
     }
   }
   const parsedFiles = []

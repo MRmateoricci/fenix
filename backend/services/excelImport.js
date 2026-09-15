@@ -7,6 +7,29 @@ export function normalizeCodigo(raw) {
   return s || null
 }
 
+// Un proveedor puede cambiar la convención de códigos de un año a otro
+// (Candil pasó de "1790/NG" a "CA-1790/NG"), o la tienda cargarlos con un
+// prefijo propio que la lista no trae. Sin esto, cada lista nueva aparece como
+// mil altas que en realidad ya existen. Primero se quita, después se agrega,
+// y ninguna de las dos se repite si el código ya está como se pide.
+export const CODE_AFFIX_MAX_LENGTH = 40
+
+export function normalizeCodeAffix(value) {
+  const affix = String(value ?? '').trim().toUpperCase()
+  if (affix.length > CODE_AFFIX_MAX_LENGTH) {
+    throw new Error(`El texto a agregar o quitar del código no puede superar los ${CODE_AFFIX_MAX_LENGTH} caracteres.`)
+  }
+  return affix
+}
+
+export function applyCodeAffixes(codigo, { codeStripPrefix = '', codeAddPrefix = '' } = {}) {
+  if (!codigo) return codigo
+  let result = codigo
+  if (codeStripPrefix && result.startsWith(codeStripPrefix)) result = result.slice(codeStripPrefix.length).trim()
+  if (codeAddPrefix && !result.startsWith(codeAddPrefix)) result = `${codeAddPrefix}${result}`
+  return result || null
+}
+
 export function toNumber(cell) {
   if (cell === null || cell === undefined || cell === '') return null
   if (typeof cell === 'number') return Number.isFinite(cell) ? cell : null
@@ -113,6 +136,10 @@ export function parseSupplierPriceSheet(workbook, options = {}) {
   if (!detected && !options.columns) {
     fail('No se encontraron encabezados de código y descripción en las primeras 100 filas. Usá una fila con “Código”, “Descripción” y “Precio Costo” (o “Precio”). Cada producto debe ocupar una fila.')
   }
+  const affixes = {
+    codeStripPrefix: normalizeCodeAffix(options.codeStripPrefix),
+    codeAddPrefix: normalizeCodeAffix(options.codeAddPrefix),
+  }
   let headerRowIndex, headers, codeIndex, descriptionIndex, costIndex, saleIndex, taxIndex
   if (options.columns) {
     if (!Number.isInteger(options.headerRow) || options.headerRow < 1 || options.headerRow > rowsRaw.length) {
@@ -171,7 +198,7 @@ export function parseSupplierPriceSheet(workbook, options = {}) {
   const invalidRows = []
 
   for (const { row, rowNumber } of dataRows) {
-    const codigo = normalizeCodigo(row?.[codeIndex])
+    const codigo = applyCodeAffixes(normalizeCodigo(row?.[codeIndex]), affixes)
     const precioCosto = costIndex >= 0 ? toNumber(row?.[costIndex]) : null
     const precioVenta = saleIndex >= 0 ? toNumber(row?.[saleIndex]) : null
     const precioIva = taxIndex >= 0 ? toNumber(row?.[taxIndex]) : null
@@ -224,6 +251,7 @@ export function parseSupplierPriceSheet(workbook, options = {}) {
     skipped,
     invalidRows,
     columns: { codeIndex, descriptionIndex, costIndex, saleIndex, taxIndex },
+    ...affixes,
   }
 }
 

@@ -8064,7 +8064,10 @@ function PriceTargetCell({ row, supplier, canMap, busy, onMap }) {
   }, [picking, query, supplier, searchProducts])
 
   const closePicker = () => { setPicking(false); setQuery(''); setResults([]) }
-  const choose = (productId) => { closePicker(); onMap(row.codigo, productId) }
+  const choose = (product) => {
+    closePicker()
+    onMap(row.codigo, product.id, null, { targetCode: product.codigo, targetName: product.nombre || product.name || product.descripcion || '' })
+  }
 
   const linkBtn = {
     border: 'none', background: 'none', padding: 0, marginTop: 5,
@@ -8087,13 +8090,14 @@ function PriceTargetCell({ row, supplier, canMap, busy, onMap }) {
           {row.targetName}{row.variant ? ` · ${row.variant}` : ''}
         </span>
         {canMap && busy && <div style={{ marginTop: 5, fontSize: 10, color: C.muted }}>Guardando...</div>}
+        {canMap && !busy && row.optimistic && <div style={{ marginTop: 5, fontSize: 10, color: C.green }}>Asociación guardada</div>}
         {canMap && !busy && !!row.groupedTarget && (
           <div style={{ display: 'grid', gap: 3, marginTop: 6 }}>
             {row.groupedTarget.rules.map(rule => (
               <button
                 type="button"
                 key={rule.id}
-                onClick={() => onMap(row.codigo, row.targetProductId, rule.id)}
+                onClick={() => onMap(row.codigo, row.targetProductId, rule.id, { targetCode: row.targetCode, targetName: row.targetName, variant: rule.label })}
                 title={`${row.codigo} pasa a actualizar el precio de esta variante en cada lista futura`}
                 style={candidateBtn(false)}
               >
@@ -8126,7 +8130,7 @@ function PriceTargetCell({ row, supplier, canMap, busy, onMap }) {
                 <button
                   type="button"
                   key={product.id}
-                  onClick={() => choose(product.id)}
+                  onClick={() => choose(product)}
                   title={`Los precios de ${row.codigo} van a ${product.codigo} en vez de crear un producto nuevo`}
                   style={candidateBtn(product.renamed)}
                 >
@@ -8158,7 +8162,7 @@ function PriceTargetCell({ row, supplier, canMap, busy, onMap }) {
           {!searching && !!results.length && (
             <div style={{ display: 'grid', gap: 3, marginTop: 5, maxHeight: 150, overflowY: 'auto' }}>
               {results.map(product => (
-                <button type="button" key={product.id} onClick={() => choose(product.id)} style={candidateBtn(false)}>
+                <button type="button" key={product.id} onClick={() => choose(product)} style={candidateBtn(false)}>
                   <strong>{product.codigo}</strong>
                   <span style={{ display: 'block', color: C.muted }}>{product.name || product.descripcion || 'Sin descripción'}</span>
                 </button>
@@ -8185,22 +8189,70 @@ function PriceImportWarnings({ files = [] }) {
   )
 }
 
-function BulkPriceReviewModal({ preview, supplier = '', saving = false, readOnly = false, error = '', onConfirm, onCurrencyOverride, onMapCode, onClose, onBack }) {
+function BulkPriceReviewModal({ preview, supplier = '', saving = false, readOnly = false, error = '', refreshing = false, onConfirm, onCurrencyOverride, onMapCode, onRefresh, onClose, onBack }) {
   const initialFilter = preview.updated ? 'update' : preview.created ? 'create' : preview.unchanged ? 'unchanged' : 'all'
   const [filter, setFilter] = useState(initialFilter)
   const [search, setSearch] = useState('')
   const [savingCurrencyKey, setSavingCurrencyKey] = useState(null)
-  const [savingMappingKey, setSavingMappingKey] = useState(null)
+  // Asociaciones ya elegidas que la vista previa del servidor todavía no refleja,
+  // por código. La fila se muestra como actualización al instante para que el
+  // usuario siga con la siguiente sin esperar el recálculo.
+  const [pendingMappings, setPendingMappings] = useState({})
+  const [savingMappingCodes, setSavingMappingCodes] = useState(() => new Set())
   const [overrideError, setOverrideError] = useState('')
-  const rows = useMemo(() => (preview.files || []).flatMap(file =>
-    (file.items || []).map((item, index) => ({
-      ...item,
-      fileName: file.fileName,
-      supplier: file.supplier,
-      fileCurrency: file.currency,
-      rowKey: `${file.fileName}:${index}:${item.status}:${item.codigo || item.rowNumber || ''}`,
-    }))
-  ), [preview.files])
+  useEffect(() => {
+    // Cuando llega una vista previa nueva, las asociaciones que ya aparecen
+    // resueltas dejan de ser pendientes; las demás siguen esperando el próximo recálculo.
+    setPendingMappings(current => {
+      const codes = Object.keys(current)
+      if (!codes.length) return current
+      const statusByCode = new Map((preview.files || []).flatMap(file =>
+        (file.items || []).map(item => [item.codigo, item.status])))
+      // Un alta asociada a un producto agrupado vuelve como "variant": ahí hay que
+      // mostrar el selector de variante, no seguir fingiendo que ya está resuelta.
+      const stillPending = code => {
+        const status = statusByCode.get(code)
+        return status === 'create' || (status === 'variant' && Boolean(current[code].variant))
+      }
+      const next = Object.fromEntries(codes.filter(stillPending).map(code => [code, current[code]]))
+      return Object.keys(next).length === codes.length ? current : next
+    })
+  }, [preview.files])
+  const rows = useMemo(() => {
+    const takenIds = new Set(Object.values(pendingMappings).map(mapping => mapping.productId))
+    return (preview.files || []).flatMap(file =>
+      (file.items || []).map((item, index) => {
+        const pending = ['create', 'variant'].includes(item.status) ? pendingMappings[item.codigo] : null
+        const base = {
+          ...item,
+          fileName: file.fileName,
+          supplier: file.supplier,
+          fileCurrency: file.currency,
+          rowKey: `${file.fileName}:${index}:${item.codigo || item.rowNumber || ''}`,
+        }
+        if (pending) {
+          return {
+            ...base,
+            status: 'update',
+            optimistic: true,
+            matchType: 'saved',
+            targetProductId: pending.productId,
+            targetCode: pending.targetCode,
+            targetName: pending.targetName,
+            variant: pending.variant || null,
+            groupedTarget: null,
+            suggestions: [],
+            reason: 'Asociado. El diferencial contra el precio actual aparece al recalcular la vista previa.',
+          }
+        }
+        // Un producto ya elegido como destino no puede ser además candidato de otra alta.
+        if (item.status === 'create' && item.suggestions?.length && takenIds.size) {
+          return { ...base, suggestions: item.suggestions.filter(product => !takenIds.has(product.id)) }
+        }
+        return base
+      })
+    )
+  }, [preview.files, pendingMappings])
   const normalizedSearch = search.trim().toLocaleLowerCase('es-AR')
   const visibleRows = rows.filter(row => {
     if (filter !== 'all' && row.status !== filter) return false
@@ -8213,22 +8265,39 @@ function BulkPriceReviewModal({ preview, supplier = '', saving = false, readOnly
     counts[row.status] = (counts[row.status] || 0) + 1
     return counts
   }, {})
+  const pendingCount = Object.keys(pendingMappings).length
+  const changeCount = (statusCounts.create || 0) + (statusCounts.update || 0)
   const priceText = (value, currency) => {
     if (value == null) return '—'
     return currency === 'USD' ? fmtUsd(value) : fmt(value)
   }
   const canOverrideCurrency = !readOnly && typeof onCurrencyOverride === 'function'
   const canMapCodes = !readOnly && typeof onMapCode === 'function' && Boolean(supplier)
-  async function handleMapCode(row, productId, variantRuleId = null) {
-    if (savingMappingKey) return
+  // Cada fila guarda por su cuenta: elegir un candidato no bloquea las demás.
+  // `target` describe el destino elegido para mostrarlo antes del recálculo;
+  // quitar una asociación (productId null) no tiene qué mostrar y espera al servidor.
+  async function handleMapCode(row, productId, variantRuleId = null, target = null) {
+    if (savingMappingCodes.has(row.codigo)) return
     setOverrideError('')
-    setSavingMappingKey(row.rowKey)
+    setSavingMappingCodes(current => new Set(current).add(row.codigo))
+    const previousPending = pendingMappings[row.codigo] || null
+    setPendingMappings(current => {
+      if (productId && target) return { ...current, [row.codigo]: { productId, ...target } }
+      if (!current[row.codigo]) return current
+      const { [row.codigo]: _removed, ...rest } = current
+      return rest
+    })
     try {
       await onMapCode(row.codigo, productId, variantRuleId)
     } catch (err) {
-      setOverrideError(err.message || 'No se pudo asociar el código con el producto')
+      // Falló el guardado: la fila vuelve a como estaba antes del clic.
+      setPendingMappings(current => {
+        const { [row.codigo]: _removed, ...rest } = current
+        return previousPending ? { ...rest, [row.codigo]: previousPending } : rest
+      })
+      setOverrideError(`${row.codigo}: ${err.message || 'No se pudo asociar el código con el producto'}`)
     } finally {
-      setSavingMappingKey(null)
+      setSavingMappingCodes(current => { const next = new Set(current); next.delete(row.codigo); return next })
     }
   }
   async function handleCurrencyOverride(row, currency) {
@@ -8265,13 +8334,25 @@ function BulkPriceReviewModal({ preview, supplier = '', saving = false, readOnly
             <span style={pill('#EEF2FF', '#4338CA')}>{preview.processedFiles} de {preview.totalFiles} archivos</span>
             {preview.processedSheets != null && <span style={pill('#EEF2FF', '#4338CA')}>{preview.processedSheets} hojas</span>}
             <span style={pill('#F3F4F6', C.text3)}>{preview.totalRows} filas leídas</span>
-            <span style={pill(C.greenLight, C.green)}>{preview.created || 0} a crear</span>
-            <span style={pill(C.amberLight, C.amberDark)}>{preview.updated || 0} a actualizar</span>
+            <span style={pill(C.greenLight, C.green)}>{statusCounts.create || 0} a crear</span>
+            <span style={pill(C.amberLight, C.amberDark)}>{statusCounts.update || 0} a actualizar</span>
             {!!preview.pendingVariant && <span style={pill('#FFEDD5', '#9A3412')}>{preview.pendingVariant} esperando variante</span>}
             {!!preview.unchanged && <span style={pill('#E0F2FE', '#0369A1')}>{preview.unchanged} sin cambios</span>}
             <span style={pill('#F3F4F6', C.text3)}>{preview.skipped || 0} omitidas</span>
             <span style={{ marginLeft: 'auto', color: C.muted, fontSize: 11 }}>Cotización: US$ 1 = {fmt(preview.exchangeRate)}</span>
           </div>
+          {(pendingCount > 0 || refreshing) && !readOnly && (
+            <div role="status" style={{ marginTop: 10, padding: '8px 10px', borderRadius: 7, background: '#EEF2FF', color: '#4338CA', fontSize: 11.5, display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span style={{ flex: 1 }}>
+                {refreshing
+                  ? 'Recalculando la vista previa con las asociaciones nuevas...'
+                  : `${pendingCount === 1 ? '1 asociación guardada' : `${pendingCount} asociaciones guardadas`}. Los diferenciales de precio aparecen al recalcular; podés seguir asociando mientras tanto.`}
+              </span>
+              {!refreshing && onRefresh && (
+                <button type="button" onClick={onRefresh} disabled={savingMappingCodes.size > 0} style={{ ...outlineBtn, padding: '5px 9px', fontSize: 10.5 }}>Recalcular ahora</button>
+              )}
+            </div>
+          )}
           {!!preview.pendingVariant && (
             <div style={{ marginTop: 10, padding: '8px 10px', borderRadius: 7, background: '#FFEDD5', color: '#9A3412', fontSize: 11.5 }}>
               {preview.pendingVariant === 1
@@ -8373,12 +8454,17 @@ function BulkPriceReviewModal({ preview, supplier = '', saving = false, readOnly
                         row={row}
                         supplier={supplier || row.supplier}
                         canMap={canMapCodes && !['invalid', 'duplicate'].includes(row.status) && Boolean(row.codigo)}
-                        busy={savingMappingKey === row.rowKey}
-                        onMap={(codigo, productId, variantRuleId) => handleMapCode(row, productId, variantRuleId)}
+                        busy={savingMappingCodes.has(row.codigo)}
+                        onMap={(codigo, productId, variantRuleId, target) => handleMapCode(row, productId, variantRuleId, target)}
                       />
                     </td>
                     <td style={{ padding: 10, minWidth: 260 }}>
-                      {(row.changes || []).length ? (row.changes || []).map(change => (
+                      {row.optimistic ? (row.changes || []).map(change => (
+                        <div key={change.field} style={{ display: 'grid', gridTemplateColumns: '88px 1fr', gap: 6, marginBottom: 3, color: C.muted }}>
+                          <span>{change.label}</span>
+                          <span>? <strong style={{ color: C.text2 }}>→ {priceText(change.next, row.currency)}</strong></span>
+                        </div>
+                      )) : (row.changes || []).length ? (row.changes || []).map(change => (
                         <div key={change.field} style={{ display: 'grid', gridTemplateColumns: '88px 1fr', gap: 6, marginBottom: 3, color: change.changed ? C.text2 : C.muted }}>
                           <span>{change.label}</span>
                           <span>{row.status === 'create' ? priceText(change.next, row.currency) : <>{priceText(change.previous, row.currency)} <strong style={{ color: change.changed ? status.color : C.muted }}>→ {priceText(change.next, row.currency)}</strong></>}</span>
@@ -8409,8 +8495,8 @@ function BulkPriceReviewModal({ preview, supplier = '', saving = false, readOnly
           <span style={{ color: (error || overrideError) ? C.red : C.muted, fontSize: 11.5 }}>{error || overrideError || `${visibleRows.length} de ${rows.length} filas visibles`}</span>
           <div style={{ display: 'flex', gap: 8 }}>
             {!readOnly && <button type="button" onClick={onClose} disabled={saving} style={outlineBtn}>Cancelar</button>}
-            {!readOnly && <button type="button" onClick={onConfirm} disabled={saving || !(preview.created || preview.updated)} style={{ ...solidBtn, background: C.green, color: C.white, opacity: saving || !(preview.created || preview.updated) ? .55 : 1 }}>
-              {saving ? 'Importando...' : `Confirmar ${Number(preview.created || 0) + Number(preview.updated || 0)} cambios`}
+            {!readOnly && <button type="button" onClick={onConfirm} disabled={saving || savingMappingCodes.size > 0 || !changeCount} title={savingMappingCodes.size > 0 ? 'Esperá a que terminen de guardarse las asociaciones' : undefined} style={{ ...solidBtn, background: C.green, color: C.white, opacity: saving || savingMappingCodes.size > 0 || !changeCount ? .55 : 1 }}>
+              {saving ? 'Importando...' : `Confirmar ${changeCount} cambios`}
             </button>}
             {readOnly && <button type="button" onClick={onClose} style={{ ...solidBtn, background: C.dark, color: C.white }}>Cerrar detalle</button>}
           </div>
@@ -8719,6 +8805,21 @@ function UnifiedProductsTab({ initialSupplier = '' }) {
   const [pricePreview, setPricePreview]     = useState(null)
   const [priceSetup, setPriceSetup]         = useState(null)
   const [pricePreviewError, setPricePreviewError] = useState('')
+  const [pricePreviewRefreshing, setPricePreviewRefreshing] = useState(false)
+  // La vista previa se recalcula subiendo el Excel entero, así que las
+  // asociaciones en ráfaga se juntan en un único recálculo diferido.
+  const pricePreviewRef = useRef(null)
+  const pricePreviewRefreshTimer = useRef(null)
+  const pricePreviewRefreshSeq = useRef(0)
+  useEffect(() => {
+    pricePreviewRef.current = pricePreview
+    if (!pricePreview) {
+      // Cerrar el modal cancela el recálculo pendiente y descarta el que esté en vuelo.
+      clearTimeout(pricePreviewRefreshTimer.current)
+      pricePreviewRefreshSeq.current++
+      setPricePreviewRefreshing(false)
+    }
+  }, [pricePreview])
   const [resultDetailOpen, setResultDetailOpen] = useState(false)
   const [catalogSupplier, setCatalogSupplier] = useState('')
   const [catalogParsing, setCatalogParsing]   = useState(false)
@@ -8874,18 +8975,43 @@ function UnifiedProductsTab({ initialSupplier = '' }) {
     if (!pricePreview) return
     if (currency) await setPriceCodeCurrency(pricePreview.supplier, codigo, currency)
     else await clearPriceCodeCurrency(pricePreview.supplier, codigo)
-    const data = await previewPriceFiles(pricePreview.files, pricePreview.supplier, pricePreview.sheetSelection)
-    setPricePreview(current => (current ? { ...current, data } : current))
+    clearTimeout(pricePreviewRefreshTimer.current)
+    await refreshPricePreview()
   }
 
-  // Asociar o desasociar recalcula la vista previa entera: la fila deja de ser
-  // un alta y pasa a mostrar el diferencial de precios contra el producto real.
+  // Recalcular la vista previa vuelve a subir y parsear el Excel entero. Cada
+  // asociación queda guardada en el servidor al instante; el recálculo sólo
+  // sirve para mostrar el diferencial real, así que se difiere y se agrupa:
+  // asociar veinte códigos seguidos cuesta una sola vista previa, no veinte.
+  async function refreshPricePreview() {
+    const current = pricePreviewRef.current
+    if (!current) return
+    const seq = ++pricePreviewRefreshSeq.current
+    setPricePreviewRefreshing(true)
+    try {
+      const data = await previewPriceFiles(current.files, current.supplier, current.sheetSelection)
+      // Si mientras tanto se pidió otro recálculo, éste ya quedó viejo.
+      if (seq !== pricePreviewRefreshSeq.current) return
+      setPricePreview(existing => (existing ? { ...existing, data } : existing))
+    } catch (err) {
+      if (seq === pricePreviewRefreshSeq.current) setPricePreviewError(err.message || 'No se pudo recalcular la vista previa')
+    } finally {
+      if (seq === pricePreviewRefreshSeq.current) setPricePreviewRefreshing(false)
+    }
+  }
+
+  function schedulePricePreviewRefresh(delay = 2000) {
+    clearTimeout(pricePreviewRefreshTimer.current)
+    pricePreviewRefreshTimer.current = setTimeout(refreshPricePreview, delay)
+  }
+
+  // Asociar o desasociar guarda al instante; la fila cambia de estado en el
+  // modal sin esperar, y el diferencial de precios llega con el recálculo diferido.
   async function handlePriceCodeMapping(codigo, productId, variantRuleId = null) {
     if (!pricePreview) return
     if (productId) await setPriceCodeMapping(pricePreview.supplier, codigo, productId, variantRuleId)
     else await clearPriceCodeMapping(pricePreview.supplier, codigo)
-    const data = await previewPriceFiles(pricePreview.files, pricePreview.supplier, pricePreview.sheetSelection)
-    setPricePreview(current => (current ? { ...current, data } : current))
+    schedulePricePreviewRefresh(productId ? 2000 : 0)
   }
 
   async function handleSupplierCurrencySave(supplier, currency) {
@@ -9421,6 +9547,7 @@ function UnifiedProductsTab({ initialSupplier = '' }) {
         <PriceSheetMappingModal
           setup={priceSetup}
           defaultCurrency={supplierSettings.find(setting => setting.supplier === priceSetup.supplier)?.currency || 'ARS'}
+          defaultCodeAffixes={supplierSettings.find(setting => setting.supplier === priceSetup.supplier) || {}}
           busy={priceParsing}
           error={pricePreviewError}
           onContinue={handlePriceSheetsContinue}
@@ -9437,6 +9564,8 @@ function UnifiedProductsTab({ initialSupplier = '' }) {
           onConfirm={handlePriceFilesConfirm}
           onCurrencyOverride={handlePriceCodeCurrency}
           onMapCode={handlePriceCodeMapping}
+          refreshing={pricePreviewRefreshing}
+          onRefresh={() => { clearTimeout(pricePreviewRefreshTimer.current); refreshPricePreview() }}
           supplier={pricePreview.supplier}
           onBack={() => { setPricePreview(null); setPricePreviewError('') }}
           onClose={() => { if (!importLoading) { setPricePreview(null); setPriceSetup(null); setPricePreviewError('') } }}

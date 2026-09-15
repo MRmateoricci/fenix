@@ -1103,3 +1103,15 @@ ALTER TABLE orders ADD CONSTRAINT orders_shipping_delivery_option_check CHECK (
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS shipping_agency_code VARCHAR(20);
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS shipping_agency_name VARCHAR(160);
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS shipping_agency_address VARCHAR(255);
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Ajuste de códigos por proveedor al importar listas de precios
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Un proveedor puede cambiar su convención de códigos (Candil pasó de
+-- "1790/NG" a "CA-1790/NG") o la tienda cargar los suyos con un prefijo que la
+-- lista no trae. Sin ajuste, cada lista nueva aparece como cientos de altas que
+-- ya existen con otro código. Se recuerda el último ajuste usado para ese
+-- proveedor porque es una decisión estable: la próxima lista viene igual.
+-- Se aplica primero el que quita y después el que agrega.
+ALTER TABLE supplier_price_settings ADD COLUMN IF NOT EXISTS code_strip_prefix VARCHAR(40) NOT NULL DEFAULT '';
+ALTER TABLE supplier_price_settings ADD COLUMN IF NOT EXISTS code_add_prefix   VARCHAR(40) NOT NULL DEFAULT '';

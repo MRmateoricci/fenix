@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import XLSX from 'xlsx'
 import { inspectSupplierPrices, parseSupplierPrices } from './excelImport.js'
-import { parseBulkPriceUploads, supplierCurrencyDefaults } from './supplierPriceUpload.js'
+import { parseBulkPriceUploads, supplierCodeAffixDefaults, supplierCurrencyDefaults } from './supplierPriceUpload.js'
 
 function file(sheets, bookType = 'xlsx') {
   const workbook = XLSX.utils.book_new()
@@ -57,6 +57,27 @@ test('la asignación manual permite nombres propios, columnas reordenadas y otra
   assert.deepEqual(result.parsedFiles[0].rows[0], {
     codigo: 'MANUAL-1', descripcion: 'Producto', precio_costo: null, precio_venta: 42, precio_iva: null,
   })
+})
+
+test('agrega y quita un prefijo a los códigos sin repetirlo, y lo recuerda por proveedor', () => {
+  const upload = file({ Lista: [['Código', 'Descripción', 'Precio'], ['1790/NG', 'Pipo negro', 100], ['ca-1790/BL', 'Pipo blanco', 100], ['  ', 'Sin código', 5]] })
+  const conPrefijo = parseBulkPriceUploads([upload], 'CANDIL', [option('Lista', { codeAddPrefix: ' ca- ' })])
+  assert.deepEqual(conPrefijo.parsedFiles[0].rows.map(row => row.codigo), ['CA-1790/NG', 'CA-1790/BL'])
+  assert.deepEqual(supplierCodeAffixDefaults(conPrefijo.parsedFiles), [{ supplier: 'CANDIL', codeStripPrefix: '', codeAddPrefix: 'CA-' }])
+
+  const sinPrefijo = parseBulkPriceUploads([upload], 'CANDIL', [option('Lista', { codeStripPrefix: 'CA-' })])
+  assert.deepEqual(sinPrefijo.parsedFiles[0].rows.map(row => row.codigo), ['1790/NG', '1790/BL'])
+
+  const reemplazo = parseBulkPriceUploads([upload], 'CANDIL', [option('Lista', { codeStripPrefix: 'CA-', codeAddPrefix: 'CAN-' })])
+  assert.deepEqual(reemplazo.parsedFiles[0].rows.map(row => row.codigo), ['CAN-1790/NG', 'CAN-1790/BL'])
+
+  // Dos hojas del mismo proveedor con ajustes distintos no definen uno para recordar.
+  const mixto = parseBulkPriceUploads([file({ A: [['Código', 'Descripción', 'Precio'], ['X', 'x', 1]], B: [['Código', 'Descripción', 'Precio'], ['Y', 'y', 1]] })], 'CANDIL',
+    [option('A', { codeAddPrefix: 'CA-' }), option('B')])
+  assert.deepEqual(supplierCodeAffixDefaults(mixto.parsedFiles), [])
+
+  assert.throws(() => parseBulkPriceUploads([upload], 'CANDIL', [option('Lista', { codeAddPrefix: 'X'.repeat(41) })]), /40 caracteres/)
+  assert.throws(() => parseBulkPriceUploads([upload], 'CANDIL', [option('Lista', { codeStripPrefix: 7 })]))
 })
 
 test('separa archivos con hojas del mismo nombre y respeta las hojas excluidas', () => {

@@ -18,7 +18,7 @@ import {
   parseSaleVoucher,
   parseKianPurchaseOrder,
 } from '../services/excelImport.js'
-import { parseBulkPriceUploads, supplierCurrencyDefaults } from '../services/supplierPriceUpload.js'
+import { parseBulkPriceUploads, supplierCurrencyDefaults, supplierCodeAffixDefaults } from '../services/supplierPriceUpload.js'
 import { parseInvoicePdf } from '../services/pdfInvoiceImport.js'
 import {
   applyCleosCatalogProducts,
@@ -542,6 +542,8 @@ router.get('/supplier-settings', async (_req, res) => {
                      THEN 'USD' ELSE 'ARS' END
               ) AS currency,
               (setting.currency IS NOT NULL) AS configured,
+              COALESCE(setting.code_strip_prefix, '') AS code_strip_prefix,
+              COALESCE(setting.code_add_prefix, '') AS code_add_prefix,
               setting.updated_at,
               last_import.created_at AS last_import_at,
               last_import.created_count AS last_import_created,
@@ -557,7 +559,7 @@ router.get('/supplier-settings', async (_req, res) => {
          ORDER BY supplier, created_at DESC
        ) last_import ON last_import.supplier = product.supplier
        WHERE product.supplier IS NOT NULL AND BTRIM(product.supplier) <> ''
-       GROUP BY product.supplier, setting.currency, setting.updated_at,
+       GROUP BY product.supplier, setting.currency, setting.code_strip_prefix, setting.code_add_prefix, setting.updated_at,
                 last_import.created_at, last_import.created_count, last_import.updated_count,
                 last_import.unchanged_count, last_import.pending_variant_count
        ORDER BY product.supplier`
@@ -566,6 +568,8 @@ router.get('/supplier-settings', async (_req, res) => {
       supplier: row.supplier,
       currency: row.currency,
       configured: row.configured,
+      codeStripPrefix: row.code_strip_prefix,
+      codeAddPrefix: row.code_add_prefix,
       productCount: Number(row.product_count),
       updatedAt: row.updated_at || null,
       lastImport: row.last_import_at ? {
@@ -1834,6 +1838,28 @@ router.post('/import/prices/bulk', upload.array('files', 100), async (req, res) 
        FROM jsonb_to_recordset($1::jsonb) AS entry(supplier text, currency text)
        ON CONFLICT (supplier) DO NOTHING`,
       [JSON.stringify(supplierCurrencyDefaults(parsedFiles))]
+    )
+    // El ajuste de códigos sí se pisa con el de esta carga: si el admin lo
+    // cambió, es porque la lista cambió, y la próxima va a venir igual.
+    // Sin fila previa sólo se crea si hay algo que recordar: crearla vacía
+    // dejaría al proveedor como "moneda configurada" sin que nadie la eligiera.
+    const codeAffixes = JSON.stringify(supplierCodeAffixDefaults(parsedFiles))
+    await client.query(
+      `UPDATE supplier_price_settings AS setting
+       SET code_strip_prefix = entry."codeStripPrefix", code_add_prefix = entry."codeAddPrefix", updated_at = NOW()
+       FROM jsonb_to_recordset($1::jsonb) AS entry(supplier text, "codeStripPrefix" text, "codeAddPrefix" text)
+       WHERE setting.supplier = entry.supplier
+         AND (setting.code_strip_prefix IS DISTINCT FROM entry."codeStripPrefix"
+              OR setting.code_add_prefix IS DISTINCT FROM entry."codeAddPrefix")`,
+      [codeAffixes]
+    )
+    await client.query(
+      `INSERT INTO supplier_price_settings (supplier, code_strip_prefix, code_add_prefix)
+       SELECT entry.supplier, entry."codeStripPrefix", entry."codeAddPrefix"
+       FROM jsonb_to_recordset($1::jsonb) AS entry(supplier text, "codeStripPrefix" text, "codeAddPrefix" text)
+       WHERE (entry."codeStripPrefix" <> '' OR entry."codeAddPrefix" <> '')
+         AND NOT EXISTS (SELECT 1 FROM supplier_price_settings existing WHERE existing.supplier = entry.supplier)`,
+      [codeAffixes]
     )
     const preview = await previewSupplierPriceDrafts(client, parsedFiles, usdArsRate)
     const result = await createSupplierPriceDrafts(client, parsedFiles, usdArsRate, preview)
