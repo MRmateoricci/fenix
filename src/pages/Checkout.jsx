@@ -237,6 +237,10 @@ export default function Checkout() {
   const [agenciesLoading, setAgenciesLoading] = useState(false)
   // Localidades sugeridas para el CP escrito, para el datalist de "Ciudad".
   const [localitySuggestions, setLocalitySuggestions] = useState([])
+  // Qué valor de ciudad/provincia completamos nosotros a partir del CP. Sirve
+  // para distinguir lo que escribió el cliente de lo que sugerimos: al cambiar
+  // el CP, lo sugerido se reemplaza (quedó viejo) y lo escrito a mano se respeta.
+  const autoFilledRef = useRef({ ciudad: null, provincia: null })
 
   // Días hábiles de preparación del carrito: el mayor de sus items, porque se
   // despacha todo junto. El plazo se re-lee del catálogo (`/api/catalog`, ya
@@ -640,9 +644,10 @@ export default function Checkout() {
   // de Correo (única fuente real que tenemos), así que es una ayuda y no una
   // validación: si no hay sugerencia, los campos siguen siendo texto libre.
   //
-  // La provincia se completa sola sólo si está vacía. Pisarle al cliente lo que
-  // escribió sería peor que no sugerir nada: el que vive en un borde provincial
-  // sabe mejor que nosotros en qué provincia está.
+  // La provincia se completa sola sólo si está vacía o si todavía tiene lo que
+  // sugerimos por un CP anterior. Pisarle al cliente lo que escribió sería peor
+  // que no sugerir nada: el que vive en un borde provincial sabe mejor que
+  // nosotros en qué provincia está.
   useEffect(() => {
     if (formData.deliveryType !== 'delivery') return undefined
     const cp = formData.codigoPostal.trim()
@@ -661,13 +666,27 @@ export default function Checkout() {
         const sugeridas = [...new Set([...(data.localities || []), ...(data.provinceLocalities || [])])]
         setLocalitySuggestions(sugeridas)
         if (data.province) {
-          setFormData((prev) => (prev.provincia.trim() ? prev : { ...prev, provincia: data.province }))
-          // La ciudad se completa sola sólo si el CP resolvió a una única
-          // localidad y el campo está vacío. Con varias, se ofrecen como
-          // sugerencias y elige el cliente.
-          if ((data.localities || []).length === 1) {
-            setFormData((prev) => (prev.ciudad.trim() ? prev : { ...prev, ciudad: data.localities[0] }))
-          }
+          // Un campo se puede pisar si está vacío o si sigue con el valor que
+          // autocompletamos antes: en los dos casos no hay nada del cliente.
+          const pisable = (valor, campo) =>
+            !valor.trim() || valor.trim() === autoFilledRef.current[campo]
+          const localidades = data.localities || []
+          setFormData((prev) => {
+            const next = { ...prev }
+            if (pisable(prev.provincia, 'provincia')) {
+              next.provincia = data.province
+              autoFilledRef.current.provincia = data.province
+            }
+            // La ciudad se completa sola sólo si el CP resolvió a una única
+            // localidad. Con varias, se ofrecen como sugerencias y elige el
+            // cliente; la que quedó de un CP anterior se limpia para que no
+            // quede una localidad de otra provincia.
+            if (pisable(prev.ciudad, 'ciudad')) {
+              next.ciudad = localidades.length === 1 ? localidades[0] : ''
+              autoFilledRef.current.ciudad = next.ciudad || null
+            }
+            return next
+          })
         }
       } catch (err) {
         if (err.name !== 'AbortError') setLocalitySuggestions([])
