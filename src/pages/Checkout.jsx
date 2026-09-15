@@ -108,13 +108,18 @@ function validateInvoiceRecipient(d, invoiceOptions) {
   return e
 }
 
-function validateStep2(d, shippingZone, handlingDays = 0) {
+function validateStep2(d, shippingZone, handlingDays = 0, shippingQuotePending = false) {
   const e = {}
   if (d.deliveryType === 'delivery') {
     if (!d.direccion.trim())    e.direccion    = 'La dirección es requerida'
     if (!d.ciudad.trim())       e.ciudad       = 'La ciudad es requerida'
     if (!d.provincia.trim())    e.provincia    = 'La provincia es requerida'
     if (!d.codigoPostal.trim()) e.codigoPostal = 'El código postal es requerido'
+    // Mientras se cotiza no hay precio, pero no es un fallo: pedir que espere
+    // en vez de mandarlo a WhatsApp.
+    else if (shippingQuotePending) {
+      e.codigoPostal = 'Estamos calculando el envío, esperá un momento'
+    }
     else if (!shippingZone || shippingZone.price === null) {
       e.codigoPostal = 'No pudimos calcular el envío para esta zona — escribinos por WhatsApp'
     }
@@ -222,6 +227,10 @@ export default function Checkout() {
 
   const [deliveryEstimate, setDeliveryEstimate] = useState(null)
   const [deliveryEstimateLoading, setDeliveryEstimateLoading] = useState(false)
+  // Para qué CP/servicio/modalidad falló la última cotización. El tarifario
+  // local se usa sólo cuando la API no respondió: si se mostrara mientras se
+  // cotiza, el cliente vería un precio y medio segundo después otro distinto.
+  const [deliveryEstimateFailedFor, setDeliveryEstimateFailedFor] = useState(null)
   // Sucursales de Correo de la provincia elegida. Vienen del backend, que las
   // cachea: no se pide la lista de nuevo en cada tecla del formulario.
   const [agencies, setAgencies] = useState([])
@@ -451,6 +460,12 @@ export default function Checkout() {
     deliveryEstimate?.postalCode === normalizedPostalCode &&
     deliveryEstimate?.service === formData.shippingService &&
     deliveryEstimate?.deliveryOption === formData.deliveryOption
+  const deliveryEstimateFailed =
+    deliveryEstimateFailedFor?.postalCode === normalizedPostalCode &&
+    deliveryEstimateFailedFor?.service === formData.shippingService &&
+    deliveryEstimateFailedFor?.deliveryOption === formData.deliveryOption
+  // Sin cotización de la API y sin fallo registrado, el costo está pendiente:
+  // no se muestra ningún precio hasta que la cotización vuelva o falle.
   const shippingZone = deliveryEstimateMatches
     ? {
         id: deliveryEstimate.zone.id,
@@ -459,7 +474,14 @@ export default function Checkout() {
         service: deliveryEstimate.service,
         price: deliveryEstimate.zone.cost,
       }
-    : localShippingZone
+    : deliveryEstimateFailed
+      ? localShippingZone
+      : null
+  const shippingQuotePending =
+    formData.deliveryType === 'delivery' &&
+    normalizedPostalCode.length >= 4 &&
+    !deliveryEstimateMatches &&
+    !deliveryEstimateFailed
   const shippingCost   = shippingZone?.price ?? null
   // El envío a sucursal sólo se ofrece si la API de Correo está configurada:
   // es la única que devuelve la lista de sucursales y su tarifa.
@@ -477,6 +499,7 @@ export default function Checkout() {
     if (delModalidad.length > 0) {
       return [...delModalidad].sort((a, b) => a.cost - b.cost)
     }
+    if (shippingQuotePending) return []
     return [{
       service: 'clasico',
       serviceLabel: SHIPPING_SERVICES.find((s) => s.id === 'clasico')?.label || 'Clásico',
@@ -484,7 +507,7 @@ export default function Checkout() {
       transitMin: null,
       transitMax: null,
     }]
-  }, [deliveryOptionQuotes, formData.deliveryOption, shippingZone])
+  }, [deliveryOptionQuotes, formData.deliveryOption, shippingZone, shippingQuotePending])
   const transferDiscountAmount = formData.paymentMethod === 'bank_transfer'
     ? Math.round(totalPrice * Number(paymentConfig.bankTransfer?.discountPercent || 0)) / 100
     : 0
@@ -565,8 +588,14 @@ export default function Checkout() {
     }
 
     setDeliveryEstimate(null)
+    setDeliveryEstimateFailedFor(null)
     setDeliveryEstimateLoading(true)
     const controller = new AbortController()
+    const fallo = () => setDeliveryEstimateFailedFor({
+      postalCode: cp.replace(/\s/g, '').toUpperCase(),
+      service: formData.shippingService,
+      deliveryOption: formData.deliveryOption,
+    })
     const t = setTimeout(async () => {
       try {
         const params = new URLSearchParams({
@@ -589,10 +618,10 @@ export default function Checkout() {
         const res = await fetch(`${API_BASE}/api/shipping/estimate?${params}`, {
           signal: controller.signal,
         })
-        if (!res.ok) { setDeliveryEstimate(null); return }
+        if (!res.ok) { setDeliveryEstimate(null); fallo(); return }
         setDeliveryEstimate(await res.json())
       } catch (err) {
-        if (err.name !== 'AbortError') setDeliveryEstimate(null)
+        if (err.name !== 'AbortError') { setDeliveryEstimate(null); fallo() }
       } finally {
         if (!controller.signal.aborted) setDeliveryEstimateLoading(false)
       }
@@ -720,7 +749,7 @@ export default function Checkout() {
   // con un servicio elegido que ninguna fila muestra y que el backend va a
   // cambiar por Clásico igual. Mejor que lo vea antes de pagar.
   useEffect(() => {
-    if (deliveryOptionQuotes.length === 0) return
+    if (deliveryOptionQuotes.length === 0 || serviceChoices.length === 0) return
     if (serviceChoices.some((choice) => choice.service === formData.shippingService)) return
     setFormData((prev) => ({ ...prev, shippingService: serviceChoices[0].service }))
   }, [deliveryOptionQuotes, serviceChoices, formData.shippingService])
@@ -830,7 +859,7 @@ export default function Checkout() {
   }
 
   async function handleStep2() {
-    const e = validateStep2(formData, shippingZone, handlingDays)
+    const e = validateStep2(formData, shippingZone, handlingDays, shippingQuotePending)
     if (Object.keys(e).length) { setErrors(e); return }
 
     if (user && formData.deliveryType === 'delivery') {
@@ -860,7 +889,7 @@ export default function Checkout() {
   async function handleConfirm() {
     const validationErrors = {
       ...validateStep1(formData),
-      ...validateStep2(formData, shippingZone, handlingDays),
+      ...validateStep2(formData, shippingZone, handlingDays, shippingQuotePending),
       ...validateBilling(formData),
       ...validateInvoiceRecipient(formData, invoiceOptions),
     }
@@ -980,6 +1009,7 @@ export default function Checkout() {
               deliveryType={formData.deliveryType}
               shippingZone={shippingZone}
               shippingCost={shippingCost}
+              shippingQuotePending={shippingQuotePending}
               orderTotal={orderTotal}
               shippingConfig={shippingConfig}
               discountCode={discountCode}
@@ -1007,6 +1037,7 @@ export default function Checkout() {
               deliveryEstimate={deliveryEstimate}
               deliveryEstimateMatches={deliveryEstimateMatches}
               deliveryEstimateLoading={deliveryEstimateLoading}
+              shippingQuotePending={shippingQuotePending}
               branchDeliveryEnabled={branchDeliveryEnabled}
               deliveryOptionQuotes={deliveryOptionQuotes}
               serviceChoices={serviceChoices}
@@ -1570,7 +1601,7 @@ const DELIVERY_OPTIONS = [
 
 function SinglePageCheckout({
   formData, errors, setField, handlingDays, user, onLogout, navigate, shippingZone,
-  deliveryEstimate, deliveryEstimateMatches, deliveryEstimateLoading,
+  deliveryEstimate, deliveryEstimateMatches, deliveryEstimateLoading, shippingQuotePending,
   branchDeliveryEnabled, deliveryOptionQuotes, serviceChoices, agencies, agenciesLoading, onSelectAgency,
   localitySuggestions,
   accountLoginRequired, profileError, submitError, submitting, onConfirm,
@@ -1778,6 +1809,9 @@ function SinglePageCheckout({
                     cotización, no una lista fija: el Expreso existe sólo si lo
                     cotizó la API de Correo (el tarifario de respaldo no lo
                     tarifa), así que con la API caída acá queda una sola fila. */}
+                {shippingQuotePending && (
+                  <div className="fnx-shipping-placeholder">Calculando el costo de envío...</div>
+                )}
                 {serviceChoices.map((choice) => {
                   const plazo = choice.transitMin && choice.transitMax
                     ? `${choice.transitMin} a ${choice.transitMax} días hábiles`
@@ -1808,11 +1842,13 @@ function SinglePageCheckout({
                   )
                 })}
                 <p className="fnx-delivery-estimate">
-                  {deliveryEstimateLoading
-                    ? 'Calculando la fecha de entrega...'
-                    : deliveryEstimateMatches
-                      ? `Tu pedido llega ${fmtVentanaEntrega(deliveryEstimate)}.`
-                      : ''}
+                  {shippingQuotePending
+                    ? ''
+                    : deliveryEstimateLoading
+                      ? 'Calculando la fecha de entrega...'
+                      : deliveryEstimateMatches
+                        ? `Tu pedido llega ${fmtVentanaEntrega(deliveryEstimate)}.`
+                        : ''}
                 </p>
               </>
             )}
@@ -2209,7 +2245,7 @@ function BillingAddress({ formData, errors, setField }) {
 
 // ─── Order Summary ─────────────────────────────────────────────────────────────
 function OrderSummary({
-  items, totalPrice, deliveryType, shippingZone, shippingCost, orderTotal, shippingConfig,
+  items, totalPrice, deliveryType, shippingZone, shippingCost, shippingQuotePending, orderTotal, shippingConfig,
   discountCode, onDiscountCodeChange, appliedCoupon, discountAmount, transferDiscountAmount,
   couponChecking, couponError,
   onApplyCoupon, onRemoveCoupon,
@@ -2360,7 +2396,7 @@ function OrderSummary({
             <span>Envío{shippingZone ? ` · ${shippingZone.label}` : ''}</span>
             <span style={{ color: shippingCost === 0 ? '#166534' : 'var(--color-text-muted)', fontWeight: shippingCost === 0 ? 600 : 400 }}>
               {shippingCost === null
-                ? 'A confirmar'
+                ? (shippingQuotePending ? 'Calculando...' : 'A confirmar')
                 : shippingCost === 0
                   ? 'Gratis'
                   : fmt(shippingCost)}
