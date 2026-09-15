@@ -8,7 +8,7 @@
     "preDeployCommand": [
       "npm run db:migrate"
     ],
-    "startCommand": "npm start",
+    "startCommand": "cd backend && exec node index.js",
     "healthcheckPath": "/api/health",
     "healthcheckTimeout": 300,
     "restartPolicyType": "ON_FAILURE",

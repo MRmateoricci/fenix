@@ -43,4 +43,8 @@ COPY --from=build /app/src ./src
 
 EXPOSE 3001
 
-CMD ["npm", "start"]
+# Node como PID 1, en forma exec (sin shell ni npm en el medio), para que el
+# SIGTERM que manda Railway al reemplazar el deploy llegue directo al handler de
+# apagado ordenado de index.js. Con "npm start" la señal moria en un sh intermedio.
+WORKDIR /app/backend
+CMD ["node", "index.js"]

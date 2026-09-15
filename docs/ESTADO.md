@@ -64,6 +64,21 @@ Railway interpreta ese código como crash. Era cosmético, no una caída real.
 - `jobs/expireReservations.js` y `jobs/prunePageViews.js` devuelven el handle del
   timer para poder frenarlo.
 
+**Segunda vuelta (mismo día):** con el handler desplegado siguió apareciendo el
+crash y sin ninguna línea `[shutdown]` en el log. La señal no llegaba a Node: con
+`startCommand: npm start` la cadena era `npm → sh → npm → sh → node`, y un `sh` no
+interactivo muere con el SIGTERM sin reenviárselo a su hijo. Node quedaba huérfano
+hasta el SIGKILL. Se cambió `railway.json` a
+`startCommand: "cd backend && exec node index.js"` para que `exec` reemplace al
+shell y Node sea el PID 1 que recibe la señal. `npm start` sigue existiendo para uso
+local.
+
+**Corrección:** Railway **sí** construye con el `Dockerfile` (lo detecta
+automáticamente y gana sobre `builder: RAILPACK` de `railway.json`). El `CMD ["npm",
+"start"]` del Dockerfile era el origen de la cadena de shells. Se cambió a
+`WORKDIR /app/backend` + `CMD ["node", "index.js"]` (forma exec) para que sea
+coherente con el `startCommand`, que de todas formas lo pisa.
+
 **Verificación:** disparando `process.emit('SIGTERM')` con el server levantado:
 `[shutdown] SIGTERM recibido → listo → exit code 0`. En Windows no se puede probar
 con `kill` (mata sin entregar la señal); en Linux/Railway sí llega al handler.
