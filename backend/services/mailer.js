@@ -76,6 +76,12 @@ function deliveryLine(order) {
   }
   const when = ventanaEntrega(order)
   const service = order.shipping_service ? ` ${order.shipping_service}` : ''
+  // Un envío a sucursal no llega a la casa del cliente: decirle que sí sería
+  // hacerlo esperar en su domicilio un paquete que tiene que ir a buscar.
+  if (order.shipping_delivery_option === 'branch') {
+    const sucursal = [order.shipping_agency_name, order.shipping_agency_address].filter(Boolean).join(' — ')
+    return `Envío${service} a sucursal de Correo Argentino${sucursal ? ` — ${sucursal}` : ''}.${when ? ` Tu pedido llega ${when}; te avisan cuando esté disponible para retirar.` : ''}`
+  }
   return `Envío${service} a ${order.address}, ${order.city}${order.postal_code ? ` (CP ${order.postal_code})` : ''}.${when ? ` Tu pedido llega ${when}.` : ''}`
 }
 

@@ -7,20 +7,19 @@
 // CP. Prometer un día exacto sería inventar precisión que el correo no da —
 // y la fecha inventada es la que después genera el reclamo.
 //
-// TODO(integración real): falta la documentación del endpoint y las
-// credenciales de Correo Argentino (CORREO_ARGENTINO_API_URL/CLIENT_ID/
-// CLIENT_SECRET en .env). Cuando lleguen, reemplazar el cuerpo de
-// fetchCarrierTransit por la llamada real a su API de cotización, manteniendo
-// la firma (recibe un código postal, devuelve { min, max } de días hábiles de
-// tránsito). Hasta entonces usa el tarifario de config/shipping.js para que el
-// checkout nunca se rompa por falta de credenciales.
+// El tránsito sale de dos lados. Cuando la cotización vino de la API de Correo
+// Argentino trae `deliveryTimeMin/Max` reales y esos mandan; cuando se cotizó
+// con el tarifario propio se usan las bandas de CP de config/shipping.js. Por
+// eso el tránsito se recibe como parámetro en vez de consultarse acá: quien
+// cotiza (services/shippingQuotes.js) ya hizo la llamada de red y repetirla
+// sería pagar dos veces el mismo viaje.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { getTransitBusinessDays } from '../config/shipping.js'
 import { addBusinessDays } from './businessDays.js'
 
-// Último recurso: sólo se usa si el CP no matchea ninguna zona, cosa que
-// getManualShippingQuote ya descarta antes de llegar acá.
+// Último recurso: sólo se usa si el CP no matchea ninguna banda, cosa que
+// quoteShipping ya descarta antes de llegar acá.
 const FALLBACK_TRANSIT = { min: 3, max: 7 }
 
 // Margen de preparación por defecto, en días hábiles. Sólo se usa cuando el
@@ -30,26 +29,19 @@ const FALLBACK_TRANSIT = { min: 3, max: 7 }
 // de reposición del proveedor.
 const DEFAULT_HANDLING_BUSINESS_DAYS = 3
 
-async function fetchCarrierTransit(postalCode) {
-  const apiUrl       = process.env.CORREO_ARGENTINO_API_URL
-  const clientId     = process.env.CORREO_ARGENTINO_CLIENT_ID
-  const clientSecret = process.env.CORREO_ARGENTINO_CLIENT_SECRET
+// Normaliza el tránsito que informó la API. Se descarta si viene incompleto o
+// con un mínimo mayor al máximo: un rango dado vuelta se mostraría como
+// "entre 7 y 3 días" y es preferible la banda propia, que siempre es coherente.
+function normalizeTransit(transit) {
+  const min = Math.round(Number(transit?.min))
+  const max = Math.round(Number(transit?.max))
+  if (!Number.isFinite(min) || !Number.isFinite(max)) return null
+  if (min < 0 || max < min) return null
+  return { min, max }
+}
 
-  const tarifario = getTransitBusinessDays(postalCode) || FALLBACK_TRANSIT
-
-  if (!apiUrl || !clientId || !clientSecret) {
-    return tarifario
-  }
-
-  try {
-    // TODO: reemplazar por la llamada real a la API de Correo Argentino una
-    // vez que tengamos su documentación (endpoint, auth, forma de la
-    // respuesta) para el código postal `postalCode`.
-    throw new Error('Integración real de Correo Argentino pendiente de credenciales/documentación')
-  } catch (err) {
-    console.error('[correoArgentino] Usando tarifario propio por error de API:', err.message)
-    return tarifario
-  }
+function resolveTransit(postalCode, transit) {
+  return normalizeTransit(transit) || getTransitBusinessDays(postalCode) || FALLBACK_TRANSIT
 }
 
 // ── estimateDeliveryDate — ventana de entrega, preparación incluida ─────────
@@ -58,22 +50,22 @@ async function fetchCarrierTransit(postalCode) {
 // porque depende de qué se compró, no del código postal, y se suma a los DOS
 // extremos: la preparación ocurre antes del envío en cualquier escenario.
 //
-// No debe llamarse dentro de una transacción de DB: es una llamada de red y no
-// debe sostener locks de Postgres mientras espera respuesta.
-export async function estimateDeliveryDate(postalCode, handlingBusinessDays) {
+// `transit` es el `{ min, max }` que devolvió la cotización (quote.transit).
+// Cuando no viene, se cae a las bandas de CP del tarifario propio.
+export async function estimateDeliveryDate(postalCode, handlingBusinessDays, { transit } = {}) {
   const handling = Number.isFinite(Number(handlingBusinessDays))
     ? Math.max(0, Math.round(Number(handlingBusinessDays)))
     : DEFAULT_HANDLING_BUSINESS_DAYS
 
-  const transit = await fetchCarrierTransit(postalCode)
-  const minBusinessDays = handling + transit.min
-  const maxBusinessDays = handling + transit.max
+  const carrierTransit = resolveTransit(postalCode, transit)
+  const minBusinessDays = handling + carrierTransit.min
+  const maxBusinessDays = handling + carrierTransit.max
   const today = new Date()
 
   return {
     handlingBusinessDays: handling,
-    carrierMinBusinessDays: transit.min,
-    carrierMaxBusinessDays: transit.max,
+    carrierMinBusinessDays: carrierTransit.min,
+    carrierMaxBusinessDays: carrierTransit.max,
     minBusinessDays,
     maxBusinessDays,
     minDate: addBusinessDays(today, minBusinessDays),

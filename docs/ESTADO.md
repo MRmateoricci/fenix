@@ -7,8 +7,8 @@
 > Si el cambio merece un commit con mensaje propio, merece una entrada acá.
 > Un ajuste de padding, no.
 
-**Última actualización:** 13 de septiembre de 2026
-**Commit de referencia:** `64d50f7` + cambios locales de esta tanda (productos sin imagen ocultos en la tienda)
+**Última actualización:** 15 de septiembre de 2026
+**Commit de referencia:** `a3e1d3e` + cambios locales de esta tanda (integración con la API de Correo Argentino)
 
 ---
 
@@ -23,7 +23,10 @@
 | Variantes (color × medida × tono) | ✅ Funcionando | Precio e imagen por combinación; el stock por celda quedó sin uso |
 | Carrito y checkout | ✅ Funcionando | Mercado Pago + transferencia manual + datos fiscales A/B/C |
 | Transferencia bancaria | ✅ Implementada | Descuento configurable, comprobante privado y validación manual |
-| Cotización de envío | 🟡 Provisorio | Tarifario Andreani manual: zona × peso + seguro + IVA **+ recargo fijo $4.000** · plazos de tránsito propios (Shipnow) · falta cargar peso real en productos |
+| Cotización de envío | ✅ Funcionando con la API | API MiCorreo de Correo Argentino (ambiente **prod**) con fallback al tarifario Andreani · verificada de punta a punta · falta cargar peso/medidas reales en productos |
+| Envío a sucursal de Correo | ✅ Funcionando | El cliente busca la sucursal por localidad, calle o nombre · 1297 sucursales sólo en Buenos Aires |
+| Servicio Clásico / Expreso | ✅ Funcionando | Las dos tarifas salen de la API · el Expreso sólo se ofrece si Correo lo cotizó |
+| Autocompletado de provincia y ciudad | ✅ Funcionando | Índice CP → localidad armado con las sucursales de Correo (1747 CP) · es sugerencia, no validación |
 | Envío gratis por monto | ✅ Funcionando | Umbral por env var (`ENVIO_GRATIS_MINIMO`) |
 | Envío gratis por localidad | ✅ Funcionando | City Bell, Gonnet y Villa Elisa (CP 1896/1897/1894), sin mínimo ni tope de peso |
 | Cupones de descuento | ✅ Funcionando | Límite global + opción "un solo uso por cliente" (por email o DNI) |
@@ -39,6 +42,109 @@
 | Documentos legales | ✅ Funcionando | Privacidad (Ley 25.326 + Meta Pixel), Términos, Cambios, Envíos · botón de arrepentimiento · falta inscripción en la AAIP |
 | Meta Pixel | ✅ Funcionando | PageView + ViewContent + AddToCart + InitiateCheckout + Purchase · solo navegador, sin Conversions API |
 | Catálogo Meta (Commerce Manager) | ✅ Implementado | Feed CSV por URL en `/api/meta-catalog/products.csv` · mismo `id` que `content_ids` del Pixel · falta programarlo en el panel de Meta |
+
+---
+
+## Integración con la API de Correo Argentino (2026-09-15)
+
+**Problema:** el costo de envío salía de un tarifario Andreani transcrito a mano
+(`SHIPPING_WEIGHT_TIERS`). Un tarifario copiado envejece sin avisar: el día que
+Andreani actualiza precios, la tienda sigue cobrando los viejos y nadie se
+entera hasta que no cierran los números. Además tenía huecos (20–25 kg y más de
+50 kg no cotizaban) que derivaban ventas a WhatsApp.
+
+**Qué se hizo:**
+
+- `backend/config/correoArgentino.js` — ambientes, credenciales, límites del
+  transportista (25 kg, 150 cm por lado) y códigos de provincia del PDF.
+- `backend/services/correoArgentinoApi.js` (+ test) — cliente HTTP: token con
+  caché en memoria, `/rates`, `/agencies` y `/users/validate`.
+- `backend/services/shippingQuotes.js` (+ test) — una sola regla: si la API
+  puede cotizar manda la API, si no manda el tarifario.
+- `backend/services/shippingPackage.js` (+ test) — arma el bulto (la API cotiza
+  por volumen; el tarifario no lo necesitaba).
+- Envío a sucursal: columnas nuevas en `orders`, `GET /api/shipping/agencies`
+  con caché de 6 h, selector en el checkout, y los textos del mail y del
+  seguimiento adaptados.
+- `npm --prefix backend run correo:test` — verifica credenciales contra la API
+  real sin escribir nada.
+
+**Decisiones:**
+
+- **La tarifa de la API se cobra tal cual.** No se le suma el seguro del 2 % ni
+  el IVA del 21 % ni el recargo fijo de $4.000: esa fórmula es del tarifario
+  Andreani, que se publica sin impuestos. La API informa el importe final.
+- **El fallback no se borra.** Sostiene el checkout cuando Correo no responde,
+  cubre los pesos que la API no acepta (25–50 kg) y es lo que queda si algún día
+  se deja de usar Correo.
+- **El token se cachea en memoria, no en disco.** Dura horas y un reinicio
+  cuesta una request; persistirlo sería una credencial más para custodiar.
+- **El vencimiento del token sale del claim `exp` del JWT, no del campo
+  `expires`.** `expires` viene en hora argentina sin zona: parsearlo en un
+  servidor en UTC daría tres horas de más y el token se usaría vencido.
+- **La sucursal se ofrece sólo con la API configurada.** Sin ella no hay lista
+  de sucursales ni tarifa para esa modalidad. Si la API se cae después de que el
+  cliente eligió sucursal, se le cobra la tarifa de domicilio (nunca más barata
+  que la de sucursal, así que no se subcobra) antes que frenarle la compra.
+
+**Verificado de punta a punta contra producción** (`api.correoargentino.com.ar`):
+token, cotización 1896 → 1900 y 1297 sucursales de Buenos Aires.
+
+- **El `customerId` es `0001941108`**, y va **con ceros a la izquierda hasta 10
+  dígitos**: `1941108` pelado responde “Cliente FAP no identificado”.
+- **Sólo existe en producción.** En `apitest` esa cuenta no está dada de alta,
+  así que `CORREO_ARGENTINO_ENV=prod`. `/rates` y `/agencies` son de sólo
+  lectura, no generan envíos.
+
+**Dos cosas que aparecieron al probar contra la API real:**
+
+- **Correo cotiza DOS productos por modalidad**, Clásico (`CP`) y Expreso
+  (`EP`), y el Expreso puede costar el triple (La Plata 2,5 kg: $9.320 contra
+  $10.253 a domicilio; Trelew: $12.934 contra $29.643). El código tomaba la
+  primera tarifa de cada modalidad, o sea que dependía del orden del array. Se
+  elige por `productType`, y si Correo no cotizó el Clásico se toma la más
+  barata — nunca la más cara por descarte.
+- **La primera conexión de un proceso recién arrancado se pasaba de los 8
+  segundos** (DNS + TLS en frío) y mandaba el primer checkout al tarifario. El
+  token tiene ahora su propio presupuesto de 20 s; `/rates` se queda en 8 s,
+  que es donde la espera la paga el cliente.
+
+**Segunda tanda del mismo día — elección de servicio, buscador y autocompletado:**
+
+- **Clásico o Expreso los elige el cliente.** Qué servicios se pueden elegir lo
+  dice la cotización, no una lista fija: el tarifario de respaldo no tarifa el
+  Expreso, así que con la API caída queda una sola fila. Si alguien tenía
+  Expreso elegido y la API se cae, el pedido se registra como Clásico —cobrar
+  tarifa de Clásico por un Expreso sería vender más caro de lo que se cobra— y
+  el cliente lo ve en la confirmación.
+- **Buscador de sucursales** (`AgencyPicker`): se busca por localidad, calle o
+  nombre, palabra por palabra y en cualquier orden; las de la ciudad que escribió
+  el cliente van primero y se muestran de a ocho. El `<select>` de 1297 opciones
+  no se podía usar.
+- **Provincia y ciudad se autocompletan por CP.** El índice sale de las
+  sucursales de Correo (`/agencies` informa `postalCode`, `locality` y
+  `province`): 1747 CP, armado una vez y cacheado 24 h. Es deliberado **no**
+  escribir a mano una tabla de rangos de CP por provincia — los bordes
+  provinciales no siguen los bloques numéricos y una tabla adivinada completaría
+  provincias equivocadas. Mientras el índice está frío devuelve vacío y el
+  formulario queda como texto libre.
+- **`fetch failed` ya no oculta la causa.** Node tira siempre ese mensaje y
+  esconde el motivo en `cause`; ahora el log dice la cadena real
+  (`UND_ERR_CONNECT_TIMEOUT`, `ENOTFOUND`, …). Se agregó **un reintento** ante
+  fallas de conexión, nunca ante timeouts: una conexión que no se abrió falla en
+  menos de un segundo, un timeout ya esperó lo que había que esperar.
+
+**Pendiente:**
+
+- Cargar las env vars en Railway (`CORREO_ARGENTINO_USER`, `_PASSWORD`,
+  `_CUSTOMER_ID=0001941108`, `_ENV=prod`); local ya quedó configurado.
+- Verificación en dispositivo real del buscador de sucursales en mobile.
+- CP sin sucursal de Correo no tienen sugerencia de localidad. Son pocos y el
+  campo sigue siendo libre, pero es el límite de usar `/agencies` como fuente.
+- `/shipping/import` y `/shipping/tracking` quedaron **fuera de alcance**: hoy
+  el despacho se carga a mano en MiCorreo.
+- Cargar `weight_kg` y medidas reales en los productos. Sin eso el bulto se arma
+  con la caja por defecto (30 × 20 × 15 cm) y la cotización es optimista.
 
 ---
 

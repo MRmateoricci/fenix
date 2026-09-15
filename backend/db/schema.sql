@@ -1082,3 +1082,24 @@ CREATE TABLE IF NOT EXISTS revocation_requests (
   reason       TEXT,
   created_at   TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 );
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Envío a sucursal de Correo Argentino
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Un envío ahora puede terminar en el domicilio del cliente o en una sucursal
+-- que el cliente elige, y son dos precios distintos que cotiza la API de
+-- MiCorreo. La modalidad se guarda porque sin ella un pedido viejo no se puede
+-- releer: el costo quedaría sin explicación y el mail de confirmación diría
+-- "llega a tu casa" sobre un envío que hay que ir a buscar.
+--
+-- El código de sucursal es el que Correo exige para despachar; el nombre y la
+-- dirección se copian al crear el pedido para que el pedido siga siendo legible
+-- si esa sucursal después cierra o cambia de domicilio.
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS shipping_delivery_option VARCHAR(10);
+ALTER TABLE orders DROP CONSTRAINT IF EXISTS orders_shipping_delivery_option_check;
+ALTER TABLE orders ADD CONSTRAINT orders_shipping_delivery_option_check CHECK (
+  shipping_delivery_option IS NULL OR shipping_delivery_option IN ('home', 'branch')
+);
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS shipping_agency_code VARCHAR(20);
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS shipping_agency_name VARCHAR(160);
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS shipping_agency_address VARCHAR(255);

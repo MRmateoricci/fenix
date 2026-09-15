@@ -303,6 +303,9 @@ export default function OrderTracking() {
                 deliveryType={order.delivery_type}
                 address={order.address}
                 city={order.city}
+                deliveryOption={order.shipping_delivery_option}
+                agencyName={order.shipping_agency_name}
+                agencyAddress={order.shipping_agency_address}
                 estimatedDeliveryMinDate={order.estimated_delivery_date}
                 estimatedDeliveryMaxDate={order.estimated_delivery_max_date}
                 showDeliveryLabel={false}

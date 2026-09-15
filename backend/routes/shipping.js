@@ -6,7 +6,10 @@ import {
   qualifiesForFreeShipping,
   isFreeShippingPostalCode,
 } from '../config/shipping.js'
-import { quoteShipping } from '../services/shippingQuotes.js'
+import { getProvinceCode, isCorreoArgentinoConfigured } from '../config/correoArgentino.js'
+import { quoteShipping, normalizeDeliveryOption } from '../services/shippingQuotes.js'
+import { fetchAgencies } from '../services/correoArgentinoApi.js'
+import { localitiesForProvince, lookupPostalCode } from '../services/correoArgentinoLocalities.js'
 import { estimateDeliveryDate } from '../services/correoArgentino.js'
 
 const router = Router()
@@ -20,16 +23,88 @@ router.get('/config', (_req, res) => {
   res.json({
     freeShippingThreshold: FREE_SHIPPING_THRESHOLD,
     freeShippingLocalities: FREE_SHIPPING_LOCALITIES,
+    // Le dice al checkout si tiene sentido ofrecer envío a sucursal. Sin la API
+    // de Correo no hay lista de sucursales ni tarifa propia para esa modalidad.
+    branchDeliveryEnabled: isCorreoArgentinoConfigured(),
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/shipping/agencies?province=Buenos%20Aires
+// Público — sucursales de Correo Argentino donde el cliente puede retirar.
+//
+// Se cachea en memoria: la lista de sucursales de una provincia no cambia entre
+// dos checkouts, y cada consulta sin caché es un viaje a la API de Correo con
+// el cliente esperando en el formulario.
+// ─────────────────────────────────────────────────────────────────────────────
+const AGENCIES_CACHE_TTL_MS = 6 * 60 * 60 * 1000
+const agenciesCache = new Map() // provinceCode → { at, agencies }
+
+router.get('/agencies', async (req, res) => {
+  try {
+    const provinceCode = getProvinceCode(req.query.provinceCode || req.query.province)
+    if (!provinceCode) {
+      return res.status(400).json({ error: 'Provincia inválida' })
+    }
+
+    // Sin API configurada no hay sucursales que ofrecer. Se responde una lista
+    // vacía y no un error: para el checkout esto no es una falla, es que la
+    // modalidad no está disponible.
+    if (!isCorreoArgentinoConfigured()) {
+      return res.json({ provinceCode, agencies: [] })
+    }
+
+    const cached = agenciesCache.get(provinceCode)
+    if (cached && Date.now() - cached.at < AGENCIES_CACHE_TTL_MS) {
+      return res.json({ provinceCode, agencies: cached.agencies })
+    }
+
+    const agencies = await fetchAgencies(provinceCode)
+    agenciesCache.set(provinceCode, { at: Date.now(), agencies })
+    res.json({ provinceCode, agencies })
+  } catch (err) {
+    // Que Correo no conteste no puede romper el checkout: se ofrece el envío a
+    // domicilio, que siempre tiene precio por el tarifario propio.
+    console.error('[GET /api/shipping/agencies]', err.message)
+    res.json({ provinceCode: null, agencies: [] })
+  }
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/shipping/locality?postalCode=2000
+// Público — sugiere provincia y localidad a partir del código postal, para no
+// hacerle escribir al cliente lo que Correo ya sabe.
+//
+// Devuelve `{ province: null, localities: [] }` cuando todavía no se puede
+// sugerir nada (índice frío, CP sin sucursal, API sin configurar). El
+// formulario sigue siendo texto libre: esto ayuda, no condiciona.
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/locality', (req, res) => {
+  const encontrado = lookupPostalCode(req.query.postalCode)
+  if (!encontrado) {
+    return res.json({ province: null, provinceCode: null, localities: [] })
+  }
+  res.json({
+    province: encontrado.province,
+    provinceCode: encontrado.provinceCode,
+    localities: encontrado.localities,
+    // Todas las de la provincia, por si el cliente vive en una localidad sin
+    // sucursal propia y su CP resuelve al pueblo de al lado.
+    provinceLocalities: localitiesForProvince(encontrado.provinceCode),
   })
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/shipping/estimate?postalCode=1900&subtotal=85000&weight=3.2
-// Público — le da al Checkout el costo (zona + peso + seguro + IVA) y la fecha
-// estimada de entrega. `subtotal` y `weight` son solo para la vista previa: la
-// creación real de la orden (POST /api/orders) vuelve a resolver zona, peso y
-// envío gratis contra la DB, nunca contra estos valores. `subtotal` es además
-// el valor declarado con el que se calcula el seguro (2 %).
+// Público — le da al Checkout el costo del envío y la fecha estimada de
+// entrega. `subtotal`, `weight` y las medidas del bulto son solo para la vista
+// previa: la creación real de la orden (POST /api/orders) vuelve a resolver
+// destino, bulto y envío gratis contra la DB, nunca contra estos valores.
+//
+// `length`, `width` y `height` son las medidas del bulto en centímetros. La API
+// de Correo cotiza por volumen además de por peso, así que si el checkout no
+// las manda la vista previa puede no coincidir con lo que termina cobrando el
+// pedido.
 // ─────────────────────────────────────────────────────────────────────────────
 router.get('/estimate', async (req, res) => {
   try {
@@ -37,11 +112,28 @@ router.get('/estimate', async (req, res) => {
     const service = String(req.query.service || 'clasico').toLowerCase()
     const subtotal = Number(req.query.subtotal) || 0
     const weightKg = Number(req.query.weight) || 0
+    const deliveryOption = normalizeDeliveryOption(req.query.deliveryOption)
     if (!SHIPPING_SERVICES.includes(service)) {
       return res.status(400).json({ error: 'Servicio de envío inválido' })
     }
 
-    const quote = await quoteShipping({ postalCode, service, weightKg, declaredValue: subtotal })
+    // Bulto de la vista previa: un único paquete con las medidas que mandó el
+    // carrito. Si no vinieron, quoteShipping usa la caja por defecto.
+    const lengthCm = Number(req.query.length) || 0
+    const heightCm = Number(req.query.height) || 0
+    const widthCm = Number(req.query.width) || 0
+    const items = lengthCm || widthCm || heightCm || weightKg
+      ? [{ quantity: 1, weightKg, lengthCm, widthCm, heightCm }]
+      : null
+
+    const quote = await quoteShipping({
+      postalCode,
+      service,
+      weightKg,
+      declaredValue: subtotal,
+      deliveryOption,
+      items,
+    })
     if (!quote) {
       return res.status(404).json({
         error: 'No pudimos calcular el envío automáticamente — escribinos por WhatsApp y lo coordinamos',
@@ -55,7 +147,7 @@ router.get('/estimate', async (req, res) => {
     // carrito. Es sólo para la vista previa: POST /api/orders lo vuelve a
     // calcular contra products.stock_inmediato y nunca contra este valor.
     const handlingDays = req.query.handlingDays == null ? undefined : Number(req.query.handlingDays)
-    const estimate = await estimateDeliveryDate(postalCode, handlingDays)
+    const estimate = await estimateDeliveryDate(postalCode, handlingDays, { transit: quote.transit })
 
     res.json({
       zone: {
@@ -67,6 +159,15 @@ router.get('/estimate', async (req, res) => {
       freeShipping,
       postalCode: quote.postalCode,
       service: quote.service,
+      serviceLabel: quote.serviceLabel,
+      deliveryOption: quote.deliveryOption,
+      // Todas las combinaciones cotizadas (domicilio/sucursal × clásico/expreso)
+      // con su precio y su plazo, para que el checkout las muestre sin volver a
+      // pedir cotización cada vez que el cliente cambia de opción.
+      deliveryOptions: (quote.options || []).map((option) => ({
+        ...option,
+        cost: freeShipping ? 0 : option.cost,
+      })),
       source: quote.source,
       // Ventana de entrega, no una fecha: el tránsito varía según la localidad
       // dentro de la zona del CP (ver config/shipping.js).

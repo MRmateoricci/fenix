@@ -891,6 +891,37 @@
 .fnx-shipping-methods > button strong, .fnx-shipping-methods > .fnx-shipping-single strong { font-size: 11px; white-space: nowrap; }
 .fnx-delivery-estimate { min-height: 14px; margin: 6px 0 0; color: var(--color-text-muted); font-size: 10px; }
 
+/* Domicilio vs. sucursal. Van en fila en pantallas cómodas y se apilan cuando
+   no entran: son dos opciones con texto, no dos íconos. */
+.fnx-delivery-options { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; }
+.fnx-delivery-options > button { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px; border: 1px solid var(--color-border); border-radius: 8px; background: #fff; color: var(--color-text); text-align: left; cursor: pointer; }
+.fnx-delivery-options > button.is-active { border-color: var(--color-text); }
+.fnx-delivery-options > button span { display: flex; flex-direction: column; gap: 3px; font-size: 11px; }
+.fnx-delivery-options > button small { color: var(--color-text-muted); font-size: 10px; font-weight: 400; }
+.fnx-delivery-options > button strong { font-size: 11px; white-space: nowrap; }
+@media (max-width: 540px) {
+  .fnx-delivery-options { grid-template-columns: 1fr; }
+}
+
+/* Buscador de sucursales de Correo. Buenos Aires tiene ~1300: se busca y se
+   muestran de a pocas, nunca la lista entera. */
+.fnx-agency-picker { margin-bottom: 10px; }
+.fnx-agency-picker > label { display: block; margin-bottom: 6px; font-size: 10.5px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--color-text-muted); }
+.fnx-agency-picker > input { width: 100%; padding: 0.7rem 0.9rem; border: 1.5px solid var(--color-border); border-radius: 0.625rem; background: var(--color-surface-2); color: var(--color-text); font-size: 0.85rem; outline: none; }
+.fnx-agency-list { max-height: 230px; margin: 8px 0 0; padding: 0; overflow-y: auto; list-style: none; border: 1px solid var(--color-border); border-radius: 8px; }
+.fnx-agency-list > li + li { border-top: 1px solid var(--color-border); }
+.fnx-agency-list button { display: flex; flex-direction: column; gap: 2px; width: 100%; padding: 9px 12px; border: 0; background: #fff; color: var(--color-text); text-align: left; cursor: pointer; }
+.fnx-agency-list button:hover { background: var(--color-surface-2); }
+.fnx-agency-list b { font-size: 11px; }
+.fnx-agency-list small { color: var(--color-text-muted); font-size: 10px; }
+.fnx-agency-empty { margin: 8px 0 0; color: var(--color-text-muted); font-size: 10.5px; }
+.fnx-agency-error { margin: 6px 0 0; color: var(--color-primary); font-size: 10.5px; }
+.fnx-agency-picked { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; padding: 11px 12px; border: 1px solid var(--color-text); border-radius: 8px; background: #fff; }
+.fnx-agency-picked div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.fnx-agency-picked b { font-size: 11px; }
+.fnx-agency-picked small { color: var(--color-text-muted); font-size: 10px; }
+.fnx-agency-picked button { flex-shrink: 0; padding: 5px 10px; border: 1px solid var(--color-border); border-radius: 6px; background: var(--color-surface-2); color: var(--color-text); font-size: 10.5px; cursor: pointer; }
+
 .fnx-section-caption { margin: -7px 0 10px; color: var(--color-text-muted); font-size: 10.5px; }
 .fnx-payment-option { overflow: hidden; border: 1px solid var(--color-border); border-radius: 9px; }
 .fnx-payment-option > div { display: flex; align-items: center; gap: 9px; padding: 12px; background: #fff; font-size: 11.5px; }

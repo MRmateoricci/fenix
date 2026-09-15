@@ -1,4 +1,5 @@
 import { createContext, useContext, useReducer, useEffect, useState } from 'react'
+import { buildShippingPackage } from '../config/shipping'
 
 const CartContext = createContext(null)
 
@@ -99,10 +100,16 @@ export function CartProvider({ children }) {
   // de cargar weight_kg) suma 0 y el tarifario cae al tramo más barato; POST
   // /api/orders vuelve a sumar el peso contra la DB, igual que el precio.
   const totalWeight = items.reduce((sum, item) => sum + (Number(item.weightKg) || 0) * item.quantity, 0)
+  // Medidas del bulto para la vista previa del envío. La API de Correo cotiza
+  // por volumen además de por peso, así que mandarlas evita que el checkout
+  // muestre un precio y el pedido termine cobrando otro. Un carrito guardado
+  // antes de este cambio no las tiene y cae a la caja por defecto.
+  const shippingPackage = buildShippingPackage(items)
 
   return (
     <CartContext.Provider value={{
       items, addItem, removeItem, updateQuantity, clearCart, totalItems, totalPrice, totalWeight,
+      shippingPackage,
       lastAdded, dismissAddedNotification: () => setLastAdded(null),
       shippingConfig,
     }}>

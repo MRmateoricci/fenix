@@ -21,6 +21,10 @@ export function MapPinIcon() {
 // OrderTracking y el historial de pedidos (Orders.jsx).
 export function OrderItemsBlock({
   items, totalAmount, deliveryType, address, city,
+  // Un envío puede terminar en el domicilio o en una sucursal de Correo que el
+  // cliente eligió. Sin esto, un pedido a sucursal diría "Envío a <tu casa>" y
+  // el cliente esperaría en su casa un paquete que tiene que ir a buscar.
+  deliveryOption, agencyName, agencyAddress,
   estimatedDeliveryMinDate, estimatedDeliveryMaxDate,
   showDeliveryLabel = true,
   imageSizeClass = 'w-12 h-12',
@@ -79,11 +83,20 @@ export function OrderItemsBlock({
           <p className="text-sm" style={{ color: 'var(--color-text)' }}>
             {deliveryType === 'pickup'
               ? 'Retiro en local — 473 entre 14C y 15, City Bell'
-              : `Envío a ${address}, ${city}`}
+              : deliveryOption === 'branch'
+                ? `Retirás en sucursal de Correo Argentino${agencyName ? ` — ${agencyName}` : ''}`
+                : `Envío a ${address}, ${city}`}
           </p>
+          {deliveryType === 'delivery' && deliveryOption === 'branch' && agencyAddress && (
+            <p className="text-xs mt-1" style={{ color: 'var(--color-text-muted)' }}>
+              {agencyAddress}
+            </p>
+          )}
           {deliveryType === 'delivery' && deliveryWindow && (
             <p className="text-xs mt-1" style={{ color: 'var(--color-text-muted)' }}>
-              Tu pedido llega {deliveryWindow}.
+              {deliveryOption === 'branch'
+                ? `Llega a la sucursal ${deliveryWindow}; te avisan cuando puedas retirarlo.`
+                : `Tu pedido llega ${deliveryWindow}.`}
             </p>
           )}
         </div>

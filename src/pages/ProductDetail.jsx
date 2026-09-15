@@ -278,8 +278,13 @@ export default function ProductDetail() {
         // /api/orders lo vuelve a resolver contra la DB, igual que el precio.
         stockInmediato,
         diasEntrega,
-        // Peso para la vista previa del envío por tramo (se recalcula server-side).
+        // Peso y medidas para la vista previa del envío (se recalcula
+        // server-side). Las medidas las pide la API de Correo, que cotiza por
+        // volumen además de por peso.
         weightKg: Number(product.weightKg) || 0,
+        lengthCm: Number(product.lengthCm) || 0,
+        widthCm:  Number(product.widthCm)  || 0,
+        heightCm: Number(product.heightCm) || 0,
       })
     }
     // Un solo AddToCart por click: la cantidad viaja dentro del evento, no como

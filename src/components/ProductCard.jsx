@@ -85,9 +85,13 @@ export default function ProductCard({ product }) {
       // recalcula contra la DB, pero la fecha de la vista previa quedaba corta.
       stockInmediato: Boolean(product.stockInmediato),
       diasEntrega: Number(product.diasEntrega) || 3,
-      // Peso para la vista previa del envío por tramo. POST /api/orders lo
-      // vuelve a sumar contra la DB, igual que el precio.
+      // Peso y medidas para la vista previa del envío. POST /api/orders los
+      // vuelve a leer de la DB, igual que el precio. Las medidas las pide la
+      // API de Correo, que cotiza por volumen además de por peso.
       weightKg: Number(product.weightKg) || 0,
+      lengthCm: Number(product.lengthCm) || 0,
+      widthCm:  Number(product.widthCm)  || 0,
+      heightCm: Number(product.heightCm) || 0,
     })
     // AddToCart del Meta Pixel. Desde la tarjeta siempre se agrega una unidad;
     // los productos con variantes no llegan acá (arriba se derivan a la ficha).

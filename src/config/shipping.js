@@ -2,9 +2,14 @@
 // autoridad y vuelve a cotizar siempre antes de crear la orden. Si tocás
 // tarifas, zonas o la fórmula acá, replicá EXACTAMENTE el cambio en el backend.
 
-// `expreso` está fuera de circulación. Con un solo servicio el checkout no
-// muestra selector: elegir entre una opción no es elegir.
-export const SHIPPING_SERVICES = [{ id: 'clasico', label: 'Clásico' }]
+// Catálogo de etiquetas de servicio. Cuáles se pueden ELEGIR no sale de acá:
+// sale de la cotización del backend (`deliveryOptions`), porque el Expreso sólo
+// existe si lo cotizó la API de Correo — el tarifario de respaldo no lo tarifa.
+// Esta lista es sólo para traducir el id que guarda la base a un nombre.
+export const SHIPPING_SERVICES = [
+  { id: 'clasico', label: 'Clásico' },
+  { id: 'expreso', label: 'Expreso' },
+]
 
 // El tarifario de Andreani viene sin IVA ni seguro. Ambos se agregan acá para
 // mostrar, como en el resto del sitio, un importe final.
@@ -13,6 +18,37 @@ export const SHIPPING_IVA_RATE = 0.21
 
 // Peso que se asume cuando el carrito no trae pesos cargados: tramo más barato.
 const FALLBACK_WEIGHT_KG = 0.5
+
+// Caja por defecto y armado del bulto. Espejo de backend/config/correoArgentino.js
+// y backend/services/shippingPackage.js: la API de Correo cotiza por volumen
+// además de por peso, así que si la vista previa mandara otras medidas que las
+// que usa el pedido, el cliente vería un precio y pagaría otro.
+const DEFAULT_PACKAGE = { lengthCm: 30, widthCm: 20, heightCm: 15 }
+const MAX_SIDE_CM = 150
+
+// Bulto del carrito: base del producto más grande, alto apilado. Devuelve
+// centímetros enteros, que es lo que acepta la API.
+export function buildShippingPackage(items = []) {
+  let lengthCm = 0
+  let widthCm = 0
+  let heightCm = 0
+
+  for (const item of items) {
+    const quantity = Math.max(1, Math.round(Number(item?.quantity) || 1))
+    const unitLength = Number(item?.lengthCm) > 0 ? Number(item.lengthCm) : DEFAULT_PACKAGE.lengthCm
+    const unitWidth = Number(item?.widthCm) > 0 ? Number(item.widthCm) : DEFAULT_PACKAGE.widthCm
+    const unitHeight = Number(item?.heightCm) > 0 ? Number(item.heightCm) : DEFAULT_PACKAGE.heightCm
+
+    lengthCm = Math.max(lengthCm, unitLength)
+    widthCm = Math.max(widthCm, unitWidth)
+    heightCm += unitHeight * quantity
+  }
+
+  if (items.length === 0) return { ...DEFAULT_PACKAGE }
+
+  const clamp = (value) => Math.min(Math.max(1, Math.round(value)), MAX_SIDE_CM)
+  return { lengthCm: clamp(lengthCm), widthCm: clamp(widthCm), heightCm: clamp(heightCm) }
+}
 
 // Espejo de backend/config/shipping.js. Envío sin cargo a City Bell (1896),
 // Gonnet (1897) y Villa Elisa (1894); recargo fijo sobre el total al resto.

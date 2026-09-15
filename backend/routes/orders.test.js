@@ -31,15 +31,23 @@ test('el reintento autenticado reconstruye facturación y dirección completas',
     postal_code: '1900', province: 'Buenos Aires', billing_same_as_shipping: false,
     billing_address: 'Calle 20 456', billing_address_extra: 'PB', billing_city: 'City Bell',
     billing_postal_code: '1896', billing_province: 'Buenos Aires',
+    shipping_delivery_option: 'branch', shipping_agency_code: 'B0107',
+    shipping_agency_name: 'Monte Grande', shipping_agency_address: 'Vicente Lopez 448, Monte Grande',
     pickup_person_name: 'Lucía', pickup_person_last_name: 'Pérez',
   })
 
   assert.deepEqual(data, {
     nombre: 'Mateo José', apellido: 'Ricci', email: 'mateo@example.com', telefono: '2213628621',
     invoiceName: 'Mateo Ricci', invoiceDocType: '96', invoiceDocNumber: '42172999', invoiceVatConditionId: '5',
-    // El pedido original fue 'expreso', que ya no se ofrece: el reintento tiene
-    // que caer al servicio vigente o el POST posterior lo rechazaría.
-    deliveryType: 'delivery', paymentMethod: 'mercadopago', shippingService: 'clasico', pickupDate: '',
+    // El servicio del intento anterior se conserva: Expreso volvió a ofrecerse
+    // desde que Correo lo cotiza. Un servicio que ya no exista igual cae al
+    // vigente por normalizeShippingService, o el POST posterior lo rechazaría.
+    deliveryType: 'delivery', paymentMethod: 'mercadopago', shippingService: 'expreso',
+    // La sucursal elegida vuelve al formulario: sin esto el reintento sería un
+    // envío a domicilio, que no es la compra que el cliente quiso hacer.
+    deliveryOption: 'branch', shippingAgencyCode: 'B0107', shippingAgencyName: 'Monte Grande',
+    shippingAgencyAddress: 'Vicente Lopez 448, Monte Grande',
+    pickupDate: '',
     direccion: 'Calle 10 123', piso: '2 B', ciudad: 'La Plata', codigoPostal: '1900', provincia: 'Buenos Aires',
     billingSameAsShipping: false, billingAddress: 'Calle 20 456', billingAddressExtra: 'PB',
     billingCity: 'City Bell', billingPostalCode: '1896', billingProvince: 'Buenos Aires',

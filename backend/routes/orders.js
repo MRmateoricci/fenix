@@ -15,7 +15,7 @@ import {
   qualifiesForFreeShipping,
   isFreeShippingPostalCode,
 } from '../config/shipping.js'
-import { quoteShipping } from '../services/shippingQuotes.js'
+import { quoteShipping, normalizeDeliveryOption } from '../services/shippingQuotes.js'
 import { sendBankTransferInstructions, sendOrderConfirmationNotifications } from '../services/orderNotifications.js'
 import { PaymentReconciliationError, reconcileMercadoPagoReturn } from '../services/mercadopagoPayments.js'
 import { sendReviewInvitationForOrder } from '../services/reviewInvitations.js'
@@ -114,6 +114,13 @@ export function buildRetryCheckoutData(order) {
     deliveryType: order?.delivery_type || 'delivery',
     paymentMethod: order?.payment_method || 'mercadopago',
     shippingService: normalizeShippingService(order?.shipping_service),
+    // Modalidad y sucursal del intento anterior: si no se repusieran, un pedido
+    // que iba a sucursal volvería al formulario como envío a domicilio y el
+    // cliente reintentaría una compra distinta de la que quiso hacer.
+    deliveryOption: normalizeDeliveryOption(order?.shipping_delivery_option),
+    shippingAgencyCode: order?.shipping_agency_code || '',
+    shippingAgencyName: order?.shipping_agency_name || '',
+    shippingAgencyAddress: order?.shipping_agency_address || '',
     pickupDate: dateInputValue(order?.pickup_date),
     direccion: order?.address || '',
     piso: order?.address_extra || '',
@@ -275,6 +282,14 @@ router.post('/', attachUserIfPresent, async (req, res) => {
     const pickupDate    = customer?.pickupDate
     const paymentMethod = customer?.paymentMethod || 'mercadopago'
     const shippingService = String(customer?.shippingService || SHIPPING_SERVICES[0]).toLowerCase()
+    // Domicilio o sucursal de Correo. Para sucursal el destino no es la
+    // dirección del cliente sino la agencia elegida, pero la dirección se sigue
+    // pidiendo igual: es la que va en la factura cuando la de facturación
+    // coincide con la de envío.
+    const deliveryOption = normalizeDeliveryOption(customer?.deliveryOption)
+    const shippingAgencyCode = String(customer?.shippingAgencyCode || '').trim() || null
+    const shippingAgencyName = String(customer?.shippingAgencyName || '').trim() || null
+    const shippingAgencyAddress = String(customer?.shippingAgencyAddress || '').trim() || null
     let customerEmail   = normalizeEmail(customer?.email)
     let orderUserId     = req.userId || null
 
@@ -337,6 +352,11 @@ router.post('/', attachUserIfPresent, async (req, res) => {
     if (deliveryType === 'delivery' && (!customer?.direccion?.trim() || !customer?.ciudad?.trim() || !customer?.provincia?.trim())) {
       return res.status(400).json({ error: 'Completá la dirección de envío' })
     }
+    // Sin código de sucursal el envío no se puede despachar: Correo lo exige
+    // para importar el envío y el cliente no tendría dónde retirarlo.
+    if (deliveryType === 'delivery' && deliveryOption === 'branch' && !shippingAgencyCode) {
+      return res.status(400).json({ error: 'Elegí la sucursal de Correo donde vas a retirar el pedido' })
+    }
     if (!billingSameAsShipping && (
       !customer?.billingAddress?.trim() || !customer?.billingCity?.trim() ||
       !customer?.billingPostalCode?.trim() || !customer?.billingProvince?.trim()
@@ -358,7 +378,8 @@ router.post('/', attachUserIfPresent, async (req, res) => {
     const productIds = items.map((i) => i.id)
     const { rows: dbProducts } = await pool.query(
       `SELECT products.id, supplier, precio_venta, precio_iva, precio_venta_usd, precio_iva_usd, price_currency,
-              color_options, size_options, tone_options, variant_stock, weight_kg,
+              color_options, size_options, tone_options, variant_stock,
+              weight_kg, length_cm, width_cm, height_cm,
               COALESCE((SELECT usd_ars_rate FROM store_settings WHERE id=1),1510) AS usd_ars_rate,
               stock_inmediato,
               CASE WHEN stock_inmediato
@@ -424,6 +445,12 @@ router.post('/', attachUserIfPresent, async (req, res) => {
         // Peso unitario para cotizar el envío por tramo. Sin dato, el tarifario
         // cae al tramo más barato (ver backend/config/shipping.js).
         weightKg: dbProduct.weight_kg != null ? Number(dbProduct.weight_kg) : 0,
+        // Medidas unitarias en centímetros. Las pide la API de Correo, que
+        // cotiza por volumen además de por peso; sin ellas se arma el bulto con
+        // la caja por defecto (ver services/shippingPackage.js).
+        lengthCm: dbProduct.length_cm != null ? Number(dbProduct.length_cm) : null,
+        widthCm:  dbProduct.width_cm  != null ? Number(dbProduct.width_cm)  : null,
+        heightCm: dbProduct.height_cm != null ? Number(dbProduct.height_cm) : null,
       })
     }
     const productsTotal = roundMoney(itemsSnapshot.reduce((sum, i) => sum + i.subtotal, 0))
@@ -482,14 +509,18 @@ router.post('/', attachUserIfPresent, async (req, res) => {
     let estimatedDeliveryDate = null
     let estimatedDeliveryMaxDate = null
     if (deliveryType === 'delivery') {
-      // Valor declarado (para el seguro) = subtotal de productos con IVA, antes
-      // de cupón/descuento. Peso total = suma de weight_kg × cantidad.
+      // Valor declarado (para el seguro del tarifario manual) = subtotal de
+      // productos con IVA, antes de cupón/descuento. Peso total = suma de
+      // weight_kg × cantidad. `items` va entero porque la API de Correo cotiza
+      // también por volumen y necesita armar el bulto con las medidas reales.
       const totalWeightKg = itemsSnapshot.reduce((sum, i) => sum + (i.weightKg || 0) * i.quantity, 0)
       const quote = await quoteShipping({
         postalCode: customer.codigoPostal,
         service: shippingService,
         weightKg: totalWeightKg,
         declaredValue: productsTotal,
+        deliveryOption,
+        items: itemsSnapshot,
       })
       if (!quote) {
         return res.status(400).json({ error: 'No pudimos calcular el envío automáticamente — consultanos por WhatsApp y lo coordinamos' })
@@ -504,7 +535,11 @@ router.post('/', attachUserIfPresent, async (req, res) => {
         0,
         ...itemsSnapshot.map((i) => Number(i.diasEntregaPedido) || 0),
       )
-      const estimate = await estimateDeliveryDate(customer.codigoPostal, handlingBusinessDays)
+      // El tránsito sale de la propia cotización cuando la dio la API de Correo;
+      // si se cotizó con el tarifario viene null y se usan las bandas de CP.
+      const estimate = await estimateDeliveryDate(customer.codigoPostal, handlingBusinessDays, {
+        transit: quote.transit,
+      })
       estimatedDeliveryDate    = estimate.minDate
       estimatedDeliveryMaxDate = estimate.maxDate
     }
@@ -568,10 +603,13 @@ router.post('/', attachUserIfPresent, async (req, res) => {
             coupon_code, discount_amount, invoice_recipient_name, invoice_doc_type,
             invoice_doc_number, invoice_vat_condition_id, invoice_data_confirmed_at, invoice_concept,
             pickup_person_name, pickup_person_last_name, transfer_discount_amount,
-            bank_transfer_snapshot, customer_access_token_hash)
+            bank_transfer_snapshot, customer_access_token_hash,
+            shipping_delivery_option, shipping_agency_code, shipping_agency_name,
+            shipping_agency_address)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,
                  $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29,
-                 $30, $31, $32, $33, $34, NOW(), $35, $36, $37, $38, $39, $40)
+                 $30, $31, $32, $33, $34, NOW(), $35, $36, $37, $38, $39, $40,
+                 $41, $42, $43, $44)
          RETURNING *`,
         [
           orderNumber, initialStatus,
@@ -619,6 +657,12 @@ router.post('/', attachUserIfPresent, async (req, res) => {
             expiryHours: transferSettings.expiryHours,
           }) : null,
           customerAccessTokenHash,
+          // Modalidad y sucursal sólo tienen sentido en un envío. En un retiro
+          // en el local quedan nulas para que el pedido no diga dos cosas.
+          deliveryType === 'delivery' ? deliveryOption : null,
+          deliveryType === 'delivery' && deliveryOption === 'branch' ? shippingAgencyCode : null,
+          deliveryType === 'delivery' && deliveryOption === 'branch' ? shippingAgencyName : null,
+          deliveryType === 'delivery' && deliveryOption === 'branch' ? shippingAgencyAddress : null,
         ]
       )
       order = rows[0]
@@ -692,6 +736,7 @@ router.post('/', attachUserIfPresent, async (req, res) => {
 const PUBLIC_ORDER_FIELDS = `
   id, order_number, status, customer_name, delivery_type,
   address, city, postal_code, total_amount, shipping_cost, shipping_service,
+  shipping_delivery_option, shipping_agency_name, shipping_agency_address,
   payment_method, pickup_date, estimated_delivery_date, estimated_delivery_max_date,
   pickup_person_name, pickup_person_last_name,
   coupon_code, discount_amount, transfer_discount_amount,
@@ -810,6 +855,8 @@ router.get('/mine/:id/retry-data', requireAuth, async (req, res) => {
               o.billing_city, o.billing_province, o.billing_postal_code,
               o.invoice_recipient_name, o.invoice_doc_type, o.invoice_doc_number,
               o.invoice_vat_condition_id, o.payment_method, o.pickup_date, o.shipping_service,
+              o.shipping_delivery_option, o.shipping_agency_code, o.shipping_agency_name,
+              o.shipping_agency_address,
               o.pickup_person_name, o.pickup_person_last_name,
               u.first_name AS account_first_name, u.last_name AS account_last_name
        FROM orders o
@@ -840,6 +887,8 @@ router.get('/mine/:id', requireAuth, async (req, res) => {
               invoice_vat_condition_id, invoice_data_confirmed_at, invoice_concept,
               invoice_service_from, invoice_service_to, invoice_payment_due,
               total_amount, shipping_cost, shipping_service, payment_method,
+
+              shipping_delivery_option, shipping_agency_code, shipping_agency_name, shipping_agency_address,
               coupon_code, discount_amount, transfer_discount_amount,
               pickup_date, estimated_delivery_date, estimated_delivery_max_date,
               pickup_person_name, pickup_person_last_name,
@@ -904,6 +953,8 @@ router.get('/', requireAdmin, async (req, res) => {
         `SELECT o.id, o.order_number, o.status, o.customer_name, o.customer_email, o.customer_phone,
                 o.delivery_type, o.address, o.city, o.postal_code, o.total_amount,
                 o.shipping_cost, o.shipping_service, o.payment_method, o.mp_status,
+
+                o.shipping_delivery_option, o.shipping_agency_code, o.shipping_agency_name, o.shipping_agency_address,
                 o.pickup_date, o.estimated_delivery_date, o.estimated_delivery_max_date, o.items,
                 o.pickup_person_name, o.pickup_person_last_name,
                 o.coupon_code, o.discount_amount, o.transfer_discount_amount,

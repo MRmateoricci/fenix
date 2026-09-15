@@ -7,10 +7,18 @@
 // Sobre la tarifa base se suma el seguro (2 % del valor declarado) y recién
 // entonces el IVA (21 %): el tarifario de Andreani se informa sin IVA ni seguro.
 
-// Un solo servicio. El id 'clasico' se mantiene por compatibilidad con los
-// pedidos ya guardados (orders.shipping_service) y con el formulario de
-// reintento; la etiqueta no se muestra mientras haya un único servicio.
-export const SHIPPING_SERVICES = ['clasico']
+// Los dos productos que cotiza Correo Argentino: Clásico (`CP`) y Expreso
+// (`EP`). El Expreso llega en 1–3 días hábiles contra 2–5 del Clásico y puede
+// costar el triple.
+//
+// Ojo: el tarifario Andreani de más abajo **sólo tarifa el Clásico**. Cuando se
+// cotiza con él (API caída o sin credenciales) no hay Expreso que ofrecer —
+// cobrarlo a precio de Clásico sería vender un servicio más caro del que se
+// cobra. Eso lo resuelve services/shippingQuotes.js.
+export const SHIPPING_SERVICES = ['clasico', 'expreso']
+
+// El único servicio que sabe tarifar el tarifario propio.
+export const TARIFARIO_SERVICES = ['clasico']
 
 // Servicio por defecto y red de contención: un pedido viejo puede tener guardado
 // un servicio que ya no se ofrece (ej. 'expreso'), y al reintentar la compra
@@ -167,7 +175,8 @@ export function getManualShippingQuote({
   declaredValue = 0,
   service = DEFAULT_SHIPPING_SERVICE,
 } = {}) {
-  if (!SHIPPING_SERVICES.includes(service)) return null
+  // Sólo el Clásico: este tarifario nunca tuvo precios de Expreso.
+  if (!TARIFARIO_SERVICES.includes(service)) return null
 
   const normalized = normalizePostalCode(postalCode)
   if (!isValidArgentinePostalCode(normalized)) return null

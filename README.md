@@ -16,7 +16,7 @@ Un solo `npm install` instala las dependencias de ambas aplicaciones y `npm run 
 
 El proyecto compila correctamente con Node.js 24. Para Vite 8 se necesita Node.js `20.19+` o `22.12+`.
 
-La tienda puede ejecutarse localmente, pero para usar el checkout completo se necesita PostgreSQL y credenciales de Mercado Pago. Los correos y la futura integración con Correo Argentino son opcionales durante el desarrollo.
+La tienda puede ejecutarse localmente, pero para usar el checkout completo se necesita PostgreSQL y credenciales de Mercado Pago. Los correos son opcionales durante el desarrollo, y también las credenciales de Correo Argentino: sin ellas el envío se cotiza con el tarifario Andreani de respaldo.
 
 ## Funcionalidades
 
@@ -300,13 +300,28 @@ Abrir:
 | `GMAIL_USER` | No | Cuenta emisora de Gmail/Workspace. |
 | `GMAIL_APP_PASSWORD` | No | Contraseña de aplicación de Google. |
 | `ADMIN_NOTIFICATION_EMAIL` | No | Destinatario interno de nuevas compras/reservas. |
-| `CORREO_ARGENTINO_API_URL` | Todavía no funcional | Reservada para la integración futura. |
-| `CORREO_ARGENTINO_CLIENT_ID` | Todavía no funcional | Reservada para la integración futura. |
-| `CORREO_ARGENTINO_CLIENT_SECRET` | Todavía no funcional | Reservada para la integración futura. |
+| `CORREO_ARGENTINO_USER` | Para cotizar con Correo | Usuario del Basic Auth de `/token` (API MiCorreo). Sin esto se cotiza con el tarifario Andreani. |
+| `CORREO_ARGENTINO_PASSWORD` | Para cotizar con Correo | Contraseña del Basic Auth de `/token`. |
+| `CORREO_ARGENTINO_CUSTOMER_ID` | Para cotizar con Correo | Identificador de la cuenta MiCorreo, **con ceros a la izquierda hasta 10 dígitos** (`0001941108`). Sin los ceros `/rates` responde “Cliente FAP no identificado”. |
+| `CORREO_ARGENTINO_ENV` | Sí, en `prod` | `test` (predeterminado) o `prod`. La cuenta de Fénix sólo existe en producción: en `apitest` no está dada de alta. |
+| `CORREO_ARGENTINO_API_URL` | No | Fuerza una URL base distinta de la del ambiente. |
+| `CORREO_ARGENTINO_TIMEOUT_MS` | No | Corte de `/rates` y `/agencies`; predeterminado 8000. Al vencer se cotiza con el tarifario. |
+| `CORREO_ARGENTINO_TOKEN_TIMEOUT_MS` | No | Corte de `/token`; predeterminado 20000. Más largo porque la primera conexión de un proceso paga DNS y TLS en frío. |
+| `SHIPPING_PROVIDER` | No | `auto` (predeterminado): usa Correo si está configurado. `manual`: apaga la API y cotiza siempre con el tarifario. |
+| `ENVIO_CP_ORIGEN` | No | CP desde donde se despacha; predeterminado 1896 (City Bell). |
+| `ENVIO_CAJA_LARGO_CM` / `_ANCHO_CM` / `_ALTO_CM` | No | Caja por defecto para productos sin medidas cargadas (30 × 20 × 15). |
+
+`CORREO_ARGENTINO_CLIENT_ID` y `CORREO_ARGENTINO_CLIENT_SECRET` se siguen leyendo como alias de `USER`/`PASSWORD`: son los nombres que quedaron cargados en Railway de cuando se creía que la API era OAuth.
 
 Si Gmail no está configurado, el pedido se crea igual y el backend solo registra una advertencia. El correo es deliberadamente “best effort”.
 
-La integración real con la API del transportista todavía está pendiente en `backend/services/correoArgentino.js`. Hoy la ventana de entrega se estima con el tarifario de tránsito propio (`TRANSIT_BANDS` por banda de CP) más el margen de preparación del pedido.
+Para verificar las credenciales sin esperar a que un cliente lo descubra en el checkout:
+
+```bash
+npm --prefix backend run correo:test -- 1704 B
+```
+
+Pide un token, cotiza un envío de prueba al CP indicado y lista las sucursales de la provincia. No escribe nada. Si falta el `customerId` pero están cargadas `CORREO_ARGENTINO_ACCOUNT_EMAIL` y `CORREO_ARGENTINO_ACCOUNT_PASSWORD` (la cuenta de MiCorreo), el script lo averigua con `/users/validate` y lo imprime para copiarlo al `.env`.
 
 ### Frontend: `.env.local` opcional
 
@@ -550,10 +565,59 @@ la misma transacción.
 
 ## Envíos
 
-El costo se cotiza con `backend/services/shippingQuotes.js`. Por defecto usa
-`SHIPPING_PROVIDER=manual` y el tarifario Andreani de
-`backend/config/shipping.js`; el checkout conserva una copia en
-`src/config/shipping.js` para mostrar la cotización sin demoras.
+El costo se cotiza con `backend/services/shippingQuotes.js`, que tiene **dos
+fuentes y una sola regla**: si la API de Correo Argentino puede cotizar, manda
+la API; si no, manda el tarifario Andreani de `backend/config/shipping.js`.
+
+Se cae al tarifario cuando no hay credenciales, cuando Correo no responde o
+tarda más de `CORREO_ARGENTINO_TIMEOUT_MS`, cuando devuelve un error, o cuando
+el bulto excede los límites de la API (más de 25 kg o un lado de más de 150 cm).
+El fallback no es código a la espera de borrarse: es lo que sostiene el checkout
+el día que la API no está, y lo que queda si se deja de usar Correo. Con
+`SHIPPING_PROVIDER=manual` se apaga la API por completo.
+
+### Con la API de Correo Argentino (MiCorreo)
+
+`backend/services/correoArgentinoApi.js` habla con la API: pide el token
+(Basic Auth en `/token`, JWT cacheado en memoria y renovado por el claim `exp`),
+cotiza en `/rates` y lista sucursales en `/agencies`.
+
+- **La tarifa se cobra tal cual la informa Correo.** No se le suma seguro ni
+  IVA: esa fórmula es del tarifario Andreani, que se publica sin impuestos.
+- **Correo cotiza dos productos por modalidad**, Clásico (`CP`) y Expreso
+  (`EP`), y el Expreso puede costar el triple. Se elige por `productType`,
+  nunca por el orden del array. Un solo viaje trae las cuatro combinaciones
+  (domicilio/sucursal × clásico/expreso) y el checkout las muestra todas con su
+  precio y su plazo; cambiar de opción no cuesta otra cotización.
+- **El tarifario de respaldo sólo tarifa el Clásico.** Si la API no está, el
+  Expreso no se ofrece y un pedido que lo tenía elegido se registra como
+  Clásico: cobrar tarifa de Clásico por un Expreso sería vender un servicio más
+  caro del que se cobra.
+- **Provincia y ciudad se sugieren por código postal**
+  (`GET /api/shipping/locality`). El índice lo arma
+  `backend/services/correoArgentinoLocalities.js` con las sucursales de Correo,
+  que informan `postalCode`, `locality` y `province` — no hay ninguna tabla de
+  rangos de CP escrita a mano, porque los bordes provinciales no siguen los
+  bloques numéricos. Es sugerencia, no validación: los campos siguen siendo
+  texto libre.
+- Se cotizan **domicilio y sucursal en un solo viaje** (la API devuelve ambas
+  cuando no se manda `deliveredType`), así el checkout muestra los dos precios
+  sin volver a preguntar cuando el cliente cambia de opción.
+- La **ventana de entrega** sale de `deliveryTimeMin/Max` de la propia API.
+  Sin ese dato se usan las bandas de CP propias (`TRANSIT_BANDS`).
+- El **bulto** lo arma `backend/services/shippingPackage.js`: la API cotiza por
+  volumen además de por peso, así que necesita alto, ancho y largo. Se apila —
+  base del producto más grande, alto sumado— con las medidas reales de
+  `products` y la caja por defecto para lo que todavía no las tiene cargadas.
+
+Envío a sucursal: el cliente elige la agencia en el checkout y queda guardada en
+el pedido (`orders.shipping_delivery_option`, `shipping_agency_code/_name/_address`).
+La opción sólo se ofrece si la API está configurada — sin ella no hay lista de
+sucursales ni tarifa propia para esa modalidad. **La importación del envío a
+MiCorreo (`/shipping/import`) y el seguimiento (`/shipping/tracking`) quedan
+fuera de alcance**: hoy el despacho se carga a mano.
+
+### Con el tarifario Andreani (fallback)
 
 El costo se arma con dos ejes:
 
@@ -581,12 +645,12 @@ backend vuelve a cotizar y es la autoridad final al crear el pedido; nunca
 acepta el precio enviado por el navegador.
 
 Los días de tránsito se resuelven aparte, por una banda de CP más fina que las
-tres zonas de tarifa (`TRANSIT_BANDS` en `backend/config/shipping.js`).
+tres zonas de tarifa (`TRANSIT_BANDS` en `backend/config/shipping.js`), y sólo
+cuando la API no informó los suyos.
 
-Cuando esté disponible la API de Andreani, implementar el adaptador marcado en
-`backend/services/shippingQuotes.js` manteniendo el mismo contrato de
-`getManualShippingQuote` (recibe CP, peso y valor declarado; devuelve el costo
-final).
+El envío sin cargo a City Bell, Gonnet y Villa Elisa (CP 1894/1896/1897) y el
+envío gratis por umbral de compra se resuelven **antes** de elegir fuente: un
+envío que vale cero no se le cotiza a Correo.
 
 ## Mercado Pago y webhooks en desarrollo
 
