@@ -35,6 +35,7 @@ import { uploadsDir } from './config/uploads.js'
 import { createCorsOptionsDelegate } from './config/cors.js'
 import { startExpireReservationsJob } from './jobs/expireReservations.js'
 import { startPrunePageViewsJob } from './jobs/prunePageViews.js'
+import { pool } from './db/pool.js'
 import { backupManager } from './services/backupManager.js'
 
 const app  = express()
@@ -166,8 +167,40 @@ app.use((err, _req, res, _next) => {
   res.status(err.status || 500).json({ error: err.message || 'Error interno del servidor' })
 })
 
-app.listen(PORT, () => {
+const timers = []
+const server = app.listen(PORT, () => {
   console.log(`🔥 Fénix backend corriendo en http://localhost:${PORT}`)
-  startExpireReservationsJob()
-  startPrunePageViewsJob()
+  timers.push(startExpireReservationsJob())
+  timers.push(startPrunePageViewsJob())
 })
+
+// ── Apagado ordenado ──────────────────────────────────────────────────────────
+// Railway manda SIGTERM al reemplazar el deploy. Sin este handler Node muere por
+// señal, npm sale con código ≠ 0 y Railway marca la instancia saliente como
+// "Crashed" aunque el sitio nunca se haya caído. Acá cerramos en orden y salimos
+// con 0: dejamos terminar los requests en vuelo, frenamos los jobs y cerramos el
+// pool para no dejar conexiones colgadas en Postgres.
+let shuttingDown = false
+async function shutdown(signal) {
+  if (shuttingDown) return
+  shuttingDown = true
+  console.log(`[shutdown] ${signal} recibido, cerrando…`)
+  timers.forEach(clearInterval)
+  // Si un request largo no termina a tiempo, salimos igual: Railway mata el
+  // contenedor de todas formas pasado su plazo de gracia.
+  const forceExit = setTimeout(() => {
+    console.warn('[shutdown] tiempo agotado, saliendo sin esperar')
+    process.exit(0)
+  }, 10_000)
+  forceExit.unref()
+  await new Promise(resolve => server.close(resolve))
+  try {
+    await pool.end()
+  } catch (err) {
+    console.error('[shutdown] error cerrando el pool:', err)
+  }
+  console.log('[shutdown] listo')
+  process.exit(0)
+}
+process.on('SIGTERM', () => shutdown('SIGTERM'))
+process.on('SIGINT', () => shutdown('SIGINT'))

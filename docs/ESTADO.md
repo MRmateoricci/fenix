@@ -8,7 +8,7 @@
 > Un ajuste de padding, no.
 
 **Última actualización:** 15 de septiembre de 2026
-**Commit de referencia:** `154abba` + cambios locales de esta tanda (vista previa de precios: asociar en ráfaga y ajuste de códigos)
+**Commit de referencia:** `9534ce1` + cambios locales de esta tanda (apagado ordenado del backend en Railway)
 
 ---
 
@@ -42,6 +42,34 @@
 | Documentos legales | ✅ Funcionando | Privacidad (Ley 25.326 + Meta Pixel), Términos, Cambios, Envíos · botón de arrepentimiento · falta inscripción en la AAIP |
 | Meta Pixel | ✅ Funcionando | PageView + ViewContent + AddToCart + InitiateCheckout + Purchase · solo navegador, sin Conversions API |
 | Catálogo Meta (Commerce Manager) | ✅ Implementado | Feed CSV por URL en `/api/meta-catalog/products.csv` · mismo `id` que `content_ids` del Pixel · falta programarlo en el panel de Meta |
+
+---
+
+## Apagado ordenado del backend en Railway (2026-09-15)
+
+**Síntoma:** casi todos los deploys en Railway mostraban la instancia saliente como
+"Crashed" durante unos segundos antes de pasar a "Removed". El sitio nunca se caía.
+
+**Causa:** Railway manda `SIGTERM` al contenedor viejo cuando el nuevo pasa el
+healthcheck. `backend/index.js` no manejaba la señal, así que Node moría por señal,
+`npm start` lo reportaba como `command failed signal SIGTERM` y salía con código ≠ 0.
+Railway interpreta ese código como crash. Era cosmético, no una caída real.
+
+**Qué se hizo:**
+
+- `backend/index.js` guarda el `server` de `app.listen` y, ante `SIGTERM`/`SIGINT`,
+  cierra en orden: frena los `setInterval` de los jobs, `server.close()` (deja terminar
+  los requests en vuelo), `pool.end()` y `process.exit(0)`. Tope de 10 s por si un
+  request largo no termina: sale igual, Railway lo mataría de todas formas.
+- `jobs/expireReservations.js` y `jobs/prunePageViews.js` devuelven el handle del
+  timer para poder frenarlo.
+
+**Verificación:** disparando `process.emit('SIGTERM')` con el server levantado:
+`[shutdown] SIGTERM recibido → listo → exit code 0`. En Windows no se puede probar
+con `kill` (mata sin entregar la señal); en Linux/Railway sí llega al handler.
+
+**No se tocó:** rutas, servicios, el `preDeployCommand` de migración ni el
+healthcheck. `Dockerfile` sigue sin usarse (railway.json fuerza RAILPACK).
 
 ---
 

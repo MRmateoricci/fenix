@@ -37,7 +37,8 @@ async function sweepExpiredReservations() {
   }
 }
 
+// Devuelve el timer para que index.js pueda frenarlo en el apagado ordenado.
 export function startExpireReservationsJob() {
   sweepExpiredReservations()
-  setInterval(sweepExpiredReservations, SWEEP_INTERVAL_MS)
+  return setInterval(sweepExpiredReservations, SWEEP_INTERVAL_MS)
 }

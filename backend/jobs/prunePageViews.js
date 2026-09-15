@@ -17,7 +17,8 @@ async function sweepOldPageViews() {
   }
 }
 
+// Devuelve el timer para que index.js pueda frenarlo en el apagado ordenado.
 export function startPrunePageViewsJob() {
   sweepOldPageViews()
-  setInterval(sweepOldPageViews, SWEEP_INTERVAL_MS)
+  return setInterval(sweepOldPageViews, SWEEP_INTERVAL_MS)
 }
