@@ -79,6 +79,12 @@ automáticamente y gana sobre `builder: RAILPACK` de `railway.json`). El `CMD ["
 `WORKDIR /app/backend` + `CMD ["node", "index.js"]` (forma exec) para que sea
 coherente con el `startCommand`, que de todas formas lo pisa.
 
+**Tercer intento:** `cd backend && exec node index.js` falló al crear el contenedor
+con `The executable 'cd' could not be found`: con builder Dockerfile, Railway ejecuta
+el `startCommand` sin shell (forma exec). Quedó `startCommand: "node index.js"`,
+que corre en el `WORKDIR /app/backend` de la imagen. Regla: en `startCommand` no
+usar `cd`, `&&`, `exec` ni variables de shell.
+
 **Verificación:** disparando `process.emit('SIGTERM')` con el server levantado:
 `[shutdown] SIGTERM recibido → listo → exit code 0`. En Windows no se puede probar
 con `kill` (mata sin entregar la señal); en Linux/Railway sí llega al handler.
