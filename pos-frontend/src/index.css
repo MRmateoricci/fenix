@@ -1,0 +1,9 @@
+@import "tailwindcss";
+
+html {
+  color-scheme: light;
+}
+
+body {
+  font-size: 16px;
+}

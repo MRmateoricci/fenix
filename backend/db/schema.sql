@@ -360,6 +360,13 @@ ALTER TABLE products ALTER COLUMN supplier SET NOT NULL;
 -- Los importadores y ajustes rápidos históricos actualizan la fila `products`.
 -- Cuando el producto tiene una sola variante (la Base), reflejamos esos cambios
 -- en ella para que precio, stock y ficha técnica no queden desincronizados.
+--
+-- GREATEST(NEW.stock, 0): product_variant_rules.stock tiene un CHECK >= 0,
+-- pero products.stock no — cualquier UPDATE que deje products.stock en
+-- negativo (adjust-stock, stock/batch, la descarga de venta del POS) hacía
+-- fallar esta sincronización entera con una violación de constraint en la
+-- variante. products.stock conserva el número real (puede ser negativo); acá
+-- solo se achica el espejo para no romper el UPDATE.
 CREATE OR REPLACE FUNCTION sync_single_base_variant()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -373,7 +380,7 @@ BEGIN
            precio_iva_usd = NEW.precio_iva_usd,
            price_currency = NEW.price_currency,
            price_exchange_rate = NEW.price_exchange_rate,
-           stock = NEW.stock,
+           stock = GREATEST(NEW.stock, 0),
            image_url = NEW.image_url,
            product_data = product_data || jsonb_build_object(
              'codigo', NEW.codigo,
@@ -1115,3 +1122,398 @@ ALTER TABLE orders ADD COLUMN IF NOT EXISTS shipping_agency_address VARCHAR(255)
 -- Se aplica primero el que quita y después el que agrega.
 ALTER TABLE supplier_price_settings ADD COLUMN IF NOT EXISTS code_strip_prefix VARCHAR(40) NOT NULL DEFAULT '';
 ALTER TABLE supplier_price_settings ADD COLUMN IF NOT EXISTS code_add_prefix   VARCHAR(40) NOT NULL DEFAULT '';
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- POS de mostrador — Fase 1
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Sistema de venta de mostrador (Fara y vendedores), separado del panel de
+-- administración y de las cuentas de cliente del e-commerce: login propio por
+-- usuario/contraseña, sin email ni OAuth, sin registro público. Comparte la
+-- misma tabla products/product_variant_rules que el e-commerce — el POS lee
+-- precio y disponibilidad de ahí, nunca duplica el catálogo (ver CLAUDE.md 4.4).
+CREATE TABLE IF NOT EXISTS pos_users (
+  id            UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+  username      VARCHAR(60)  UNIQUE NOT NULL,
+  password_hash TEXT         NOT NULL,
+  name          VARCHAR(120) NOT NULL,
+  role          VARCHAR(20)  NOT NULL DEFAULT 'vendedor' CHECK (role IN ('admin', 'vendedor')),
+  active        BOOLEAN      NOT NULL DEFAULT TRUE,
+  created_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+  updated_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+);
+
+DROP TRIGGER IF EXISTS pos_users_updated_at ON pos_users;
+CREATE TRIGGER pos_users_updated_at
+  BEFORE UPDATE ON pos_users
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+-- sale_number es el número legible que se le muestra al vendedor ("Venta
+-- #1542"), aparte del UUID interno. IDENTITY en vez de MAX()+1: nunca se
+-- reusa un número aunque se borre una fila.
+CREATE TABLE IF NOT EXISTS pos_sales (
+  id               UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
+  sale_number      INTEGER       GENERATED ALWAYS AS IDENTITY UNIQUE,
+  user_id          UUID          NOT NULL REFERENCES pos_users(id),
+  subtotal         NUMERIC(14,2) NOT NULL,
+  discount_amount  NUMERIC(14,2) NOT NULL DEFAULT 0,
+  discount_percent NUMERIC(5,2),
+  total            NUMERIC(14,2) NOT NULL,
+  -- Registra la intención de facturar, no una emisión fiscal real: la
+  -- integración ARCA del POS queda para una fase posterior.
+  is_invoiced      BOOLEAN       NOT NULL DEFAULT FALSE,
+  invoice_data     JSONB,
+  notes            TEXT,
+  created_at       TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_pos_sales_created_at ON pos_sales(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_pos_sales_user_id     ON pos_sales(user_id);
+
+-- Recargo por cuotas con tarjeta, excluyente con el descuento (ver POST
+-- /api/pos/sales): una venta o tiene descuento o tiene recargo, nunca los
+-- dos. `installments` queda registrado aunque el tramo elegido sea de 0% de
+-- recargo (ej. "1 pago"), para que el historial de ventas pueda mostrar en
+-- cuántas cuotas se vendió. `total = subtotal - discount_amount +
+-- surcharge_amount`.
+ALTER TABLE pos_sales ADD COLUMN IF NOT EXISTS surcharge_amount  NUMERIC(14,2) NOT NULL DEFAULT 0;
+ALTER TABLE pos_sales ADD COLUMN IF NOT EXISTS surcharge_percent NUMERIC(5,2);
+ALTER TABLE pos_sales ADD COLUMN IF NOT EXISTS installments      SMALLINT;
+
+-- Snapshot de nombre/código al momento de la venta: si el producto cambia de
+-- nombre o se borra después, el ticket histórico tiene que seguir leyéndose
+-- igual que el día en que se vendió. product_id/variant_id quedan en NULL si
+-- el producto de origen se borra más adelante — la fila de venta no se pierde.
+CREATE TABLE IF NOT EXISTS pos_sale_items (
+  id           UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
+  sale_id      UUID          NOT NULL REFERENCES pos_sales(id) ON DELETE CASCADE,
+  product_id   UUID          REFERENCES products(id) ON DELETE SET NULL,
+  variant_id   UUID          REFERENCES product_variant_rules(id) ON DELETE SET NULL,
+  product_name TEXT          NOT NULL,
+  product_code TEXT,
+  unit_price   NUMERIC(14,2) NOT NULL,
+  quantity     INTEGER       NOT NULL CHECK (quantity > 0),
+  line_total   NUMERIC(14,2) NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_pos_sale_items_sale_id    ON pos_sale_items(sale_id);
+CREATE INDEX IF NOT EXISTS idx_pos_sale_items_product_id ON pos_sale_items(product_id);
+
+-- Más de una fila por venta habilita el pago mixto (ej: mitad efectivo, mitad
+-- tarjeta) sin modelar aparte el caso de un solo medio de pago.
+CREATE TABLE IF NOT EXISTS pos_sale_payments (
+  id      UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
+  sale_id UUID          NOT NULL REFERENCES pos_sales(id) ON DELETE CASCADE,
+  method  VARCHAR(20)   NOT NULL CHECK (method IN ('efectivo', 'debito', 'credito', 'transferencia', 'qr')),
+  amount  NUMERIC(14,2) NOT NULL CHECK (amount > 0)
+);
+
+CREATE INDEX IF NOT EXISTS idx_pos_sale_payments_sale_id ON pos_sale_payments(sale_id);
+
+-- Configuración del POS. Fila única (mismo patrón que store_settings): hoy es
+-- un solo valor, pero como tabla admite sumar más ajustes sin migrar de
+-- key-value a columnas más adelante.
+CREATE TABLE IF NOT EXISTS pos_settings (
+  id                    SMALLINT     PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+  cash_discount_percent NUMERIC(5,2) NOT NULL DEFAULT 10
+                        CHECK (cash_discount_percent >= 0 AND cash_discount_percent < 100),
+  updated_at            TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+);
+
+INSERT INTO pos_settings (id, cash_discount_percent)
+VALUES (1, 10)
+ON CONFLICT (id) DO NOTHING;
+
+DROP TRIGGER IF EXISTS pos_settings_updated_at ON pos_settings;
+CREATE TRIGGER pos_settings_updated_at
+  BEFORE UPDATE ON pos_settings
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+-- Tramos de recargo por cuotas con tarjeta (ej: 1 pago +0%, 3 cuotas +15%,
+-- 6 cuotas +25%): [{ "installments": 3, "surchargePercent": 15 }, ...]. El
+-- vendedor los ve como precios ya calculados y cliqueables en el modal de
+-- detalle de producto (ProductInfoModal) y en el ticket — a diferencia del
+-- descuento por efectivo, esto SÍ se aplica de verdad al total de la venta
+-- (ver pos_sales.surcharge_amount / POST /api/pos/sales), no es solo un dato
+-- de referencia.
+ALTER TABLE pos_settings ADD COLUMN IF NOT EXISTS installment_tiers JSONB NOT NULL DEFAULT '[]';
+
+-- Búsqueda de catálogo desde el POS: fallback de servidor mientras el cache
+-- local del navegador todavía no terminó de descargar el catálogo completo.
+-- COALESCE(name, descripcion, '') repite EXACTAMENTE el fallback de nombre que
+-- ya usa el catálogo completo (mapPosProduct en products.js): un producto de
+-- inventario crudo sin `name` se muestra por su `descripcion` una vez que el
+-- cache local terminó de bajar, así que tiene que poder encontrarse por ese
+-- mismo texto mientras tanto — si el índice solo mirara `name`, ese producto
+-- sería invisible para este fallback aunque el vendedor lo vea en pantalla
+-- apenas el cache termine de cargar. regexp_replace normaliza puntuación a
+-- espacios antes de tokenizar: nombres de inventario como "INT.PUNTO MEDIO"
+-- o "T/PALA" (sin espacio alrededor del signo) generan UN solo lexema
+-- ('int.punto', 't/pala') si no se separan a mano, y buscar "punto" no
+-- encontraría nada. La expresión tiene que ser idéntica acá y en la consulta
+-- de products.js: un índice de expresión solo se usa si el texto coincide.
+CREATE INDEX IF NOT EXISTS idx_products_search
+  ON products USING gin(to_tsvector('spanish',
+    regexp_replace(
+      coalesce(nullif(name, ''), nullif(descripcion, ''), '') || ' ' || coalesce(codigo, ''),
+      '[^[:alnum:]]+', ' ', 'g'
+    )
+  ));
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- POS de mostrador — Fase 2: caja (apertura, cierre y control diario)
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Una caja física compartida por el local, no una por vendedor: cualquiera que
+-- esté trabajando el mostrador la abre a la mañana y la cierra al final del
+-- turno, sin importar quién vendió qué en el medio. El índice único parcial de
+-- abajo obliga esa regla ("una sola caja abierta a la vez") a nivel de base,
+-- no solo en el código: dos terminales no pueden abrir caja al mismo tiempo.
+CREATE TABLE IF NOT EXISTS pos_cash_registers (
+  id              UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
+  opened_by       UUID          NOT NULL REFERENCES pos_users(id),
+  closed_by       UUID          REFERENCES pos_users(id),
+  opening_amount  NUMERIC(14,2) NOT NULL CHECK (opening_amount >= 0),
+  -- Se completan recién al cerrar; ver GET /api/pos/cash/current para el
+  -- cálculo en vivo mientras la caja sigue abierta.
+  expected_cash   NUMERIC(14,2),
+  actual_cash     NUMERIC(14,2),
+  cash_difference NUMERIC(14,2),
+  status          VARCHAR(10)   NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'closed')),
+  opened_at       TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+  closed_at       TIMESTAMPTZ,
+  notes           TEXT
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_pos_cash_registers_one_open
+  ON pos_cash_registers ((true)) WHERE status = 'open';
+
+CREATE INDEX IF NOT EXISTS idx_pos_cash_registers_opened_at ON pos_cash_registers(opened_at DESC);
+
+-- Toda venta de mostrador queda atada a la caja que estaba abierta cuando se
+-- hizo. Nullable a propósito: las ventas de la Fase 1 son anteriores a este
+-- concepto y quedan con NULL para siempre — no hay caja retroactiva que
+-- asignarles. Toda venta NUEVA sí la exige (ver routes/pos/sales.js).
+ALTER TABLE pos_sales ADD COLUMN IF NOT EXISTS cash_register_id UUID REFERENCES pos_cash_registers(id);
+CREATE INDEX IF NOT EXISTS idx_pos_sales_cash_register_id ON pos_sales(cash_register_id);
+
+-- Movimientos de efectivo que no son ventas: retiros ("pagar al flete") o
+-- ingresos ("cambio para el día") que mueven el cajón sin pasar por un
+-- ticket. Sin esto, "efectivo esperado" nunca cuadraría con lo que el
+-- vendedor cuenta a mano apenas alguien saca o mete plata fuera de una venta.
+CREATE TABLE IF NOT EXISTS pos_cash_movements (
+  id                UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
+  cash_register_id  UUID          NOT NULL REFERENCES pos_cash_registers(id) ON DELETE CASCADE,
+  user_id           UUID          NOT NULL REFERENCES pos_users(id),
+  type              VARCHAR(10)   NOT NULL CHECK (type IN ('ingreso', 'egreso')),
+  amount            NUMERIC(14,2) NOT NULL CHECK (amount > 0),
+  reason            TEXT          NOT NULL,
+  created_at        TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_pos_cash_movements_register_id ON pos_cash_movements(cash_register_id);
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- POS de mostrador — Fase 3: proveedores, compras y cuenta corriente
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Entidad de proveedor propia del POS, con CUIT y cuenta corriente — no tiene
+-- relación con `products.supplier` (texto libre que ya usan las listas de
+-- precios del admin, ver services/excelImport.js): son dos nociones de
+-- "proveedor" independientes a propósito, para no arriesgar el import
+-- existente uniéndolas sin que lo hayan pedido.
+CREATE TABLE IF NOT EXISTS pos_suppliers (
+  id           UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+  name         VARCHAR(160) NOT NULL,
+  legal_name   VARCHAR(200),
+  cuit         VARCHAR(20),
+  phone        VARCHAR(40),
+  email        VARCHAR(200),
+  contact_name VARCHAR(160),
+  notes        TEXT,
+  active       BOOLEAN      NOT NULL DEFAULT TRUE,
+  created_at   TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+  updated_at   TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_pos_suppliers_name ON pos_suppliers(name);
+
+DROP TRIGGER IF EXISTS pos_suppliers_updated_at ON pos_suppliers;
+CREATE TRIGGER pos_suppliers_updated_at
+  BEFORE UPDATE ON pos_suppliers
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+-- Ingreso de mercadería. `total` siempre está (es lo único seguro para la
+-- cuenta corriente); el desglose de IVA solo tiene sentido `has_invoice`
+-- true, y ahí puede seguir incompleto (un remito puede cargarse antes de
+-- tener todos los datos de la factura a mano) — por eso todo nullable salvo
+-- `total`. El CHECK evita el caso contradictorio: invoice_type sin factura.
+CREATE TABLE IF NOT EXISTS pos_purchases (
+  id             UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
+  supplier_id    UUID          NOT NULL REFERENCES pos_suppliers(id),
+  user_id        UUID          NOT NULL REFERENCES pos_users(id),
+  has_invoice    BOOLEAN       NOT NULL DEFAULT FALSE,
+  invoice_type   VARCHAR(1)    CHECK (invoice_type IS NULL OR invoice_type IN ('A', 'B', 'C')),
+  invoice_number VARCHAR(60),
+  invoice_date   DATE,
+  net_amount     NUMERIC(14,2) CHECK (net_amount IS NULL OR net_amount >= 0),
+  vat_21         NUMERIC(14,2) CHECK (vat_21 IS NULL OR vat_21 >= 0),
+  vat_10_5       NUMERIC(14,2) CHECK (vat_10_5 IS NULL OR vat_10_5 >= 0),
+  perceptions    NUMERIC(14,2) CHECK (perceptions IS NULL OR perceptions >= 0),
+  total          NUMERIC(14,2) NOT NULL CHECK (total >= 0),
+  notes          TEXT,
+  created_at     TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+  CONSTRAINT pos_purchases_invoice_type_requires_invoice
+    CHECK (has_invoice = TRUE OR invoice_type IS NULL)
+);
+
+CREATE INDEX IF NOT EXISTS idx_pos_purchases_supplier_id ON pos_purchases(supplier_id);
+CREATE INDEX IF NOT EXISTS idx_pos_purchases_created_at ON pos_purchases(created_at DESC);
+
+-- Detalle opcional de productos de la compra. product_id nullable a
+-- propósito: una línea de remito puede no mapear a ningún producto del
+-- catálogo (código nuevo, o algo que Fara no cargó como producto todavía) y
+-- igual tiene que poder registrarse. product_name es el nombre tal cual
+-- viene en el remito, no depende de que product_id exista.
+CREATE TABLE IF NOT EXISTS pos_purchase_items (
+  id           UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
+  purchase_id  UUID          NOT NULL REFERENCES pos_purchases(id) ON DELETE CASCADE,
+  product_id   UUID          REFERENCES products(id) ON DELETE SET NULL,
+  product_name TEXT          NOT NULL,
+  quantity     INTEGER       NOT NULL CHECK (quantity > 0),
+  unit_cost    NUMERIC(14,2) CHECK (unit_cost IS NULL OR unit_cost >= 0),
+  line_total   NUMERIC(14,2) CHECK (line_total IS NULL OR line_total >= 0)
+);
+
+CREATE INDEX IF NOT EXISTS idx_pos_purchase_items_purchase_id ON pos_purchase_items(purchase_id);
+CREATE INDEX IF NOT EXISTS idx_pos_purchase_items_product_id ON pos_purchase_items(product_id);
+
+-- Pago a proveedor. `date` es el día del pago (puede cargarse después, con
+-- fecha pasada) y es lo que ordena la cuenta corriente; `created_at` es solo
+-- cuándo quedó tipeado en el sistema — las dos cosas pueden no coincidir.
+CREATE TABLE IF NOT EXISTS pos_supplier_payments (
+  id          UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
+  supplier_id UUID          NOT NULL REFERENCES pos_suppliers(id),
+  user_id     UUID          NOT NULL REFERENCES pos_users(id),
+  amount      NUMERIC(14,2) NOT NULL CHECK (amount > 0),
+  method      VARCHAR(20)   NOT NULL CHECK (method IN ('efectivo', 'transferencia', 'cheque', 'otro')),
+  reference   VARCHAR(200),
+  date        DATE          NOT NULL DEFAULT CURRENT_DATE,
+  notes       TEXT,
+  created_at  TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_pos_supplier_payments_supplier_id ON pos_supplier_payments(supplier_id);
+CREATE INDEX IF NOT EXISTS idx_pos_supplier_payments_date ON pos_supplier_payments(date DESC);
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- POS de mostrador — Fase 4: importación de listas de precios
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Pipeline propio, en paralelo al de excelImport.js/productsRepo.js que ya usa
+-- el Inventario del admin: ese está atado a crear productos, mapeos de
+-- proveedor y variantes por color/medida — acá solo hace falta actualizar el
+-- precio de productos que YA existen, matcheados por código. `kind` distingue
+-- una carga de Excel de un aumento porcentual manual: los dos quedan en el
+-- mismo historial porque ambos son, en el fondo, "una tanda de cambios de
+-- precio propuesta y después aplicada o cancelada".
+--
+-- No hay `preview_data`: guardaríamos una segunda copia (parcial, solo los
+-- primeros N) del mismo dato que ya vive completo en
+-- pos_price_import_details — dos fuentes de verdad del mismo número.
+CREATE TABLE IF NOT EXISTS pos_price_imports (
+  id            UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id       UUID          NOT NULL REFERENCES pos_users(id),
+  supplier_id   UUID          REFERENCES pos_suppliers(id),
+  kind          VARCHAR(20)   NOT NULL DEFAULT 'file' CHECK (kind IN ('file', 'bulk_increase')),
+  filename      VARCHAR(255)  NOT NULL,
+  total_rows    INTEGER       NOT NULL DEFAULT 0,
+  matched_rows  INTEGER       NOT NULL DEFAULT 0,
+  updated_rows  INTEGER       NOT NULL DEFAULT 0,
+  skipped_rows  INTEGER       NOT NULL DEFAULT 0,
+  status        VARCHAR(10)   NOT NULL DEFAULT 'preview' CHECK (status IN ('preview', 'applied', 'cancelled')),
+  column_mapping JSONB        NOT NULL DEFAULT '{}',
+  created_at    TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_pos_price_imports_created_at ON pos_price_imports(created_at DESC);
+
+-- Una fila por código del Excel (o por producto afectado, en un aumento
+-- porcentual) generada ENTERA en el preview, no solo una muestra: así aplicar
+-- no depende de volver a parsear el archivo ni de confiar en un preview que
+-- pudo quedar viejo, y cancelar/consultar después conserva el detalle
+-- completo, no solo lo que se llegó a mostrar en pantalla.
+CREATE TABLE IF NOT EXISTS pos_price_import_details (
+  id           UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
+  import_id    UUID          NOT NULL REFERENCES pos_price_imports(id) ON DELETE CASCADE,
+  product_id   UUID          REFERENCES products(id) ON DELETE SET NULL,
+  product_code VARCHAR(64)   NOT NULL,
+  product_name TEXT,
+  old_price    NUMERIC(14,2),
+  new_price    NUMERIC(14,2) NOT NULL,
+  status       VARCHAR(20)   NOT NULL CHECK (status IN ('matched', 'not_found', 'no_change', 'applied', 'skipped_currency'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_pos_price_import_details_import_id ON pos_price_import_details(import_id);
+CREATE INDEX IF NOT EXISTS idx_pos_price_import_details_status ON pos_price_import_details(import_id, status);
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- POS de mostrador — Fase 5: facturación electrónica AFIP/ARCA
+-- ─────────────────────────────────────────────────────────────────────────────
+-- El POS reusa `invoices`/`invoice_jobs` — la misma identidad fiscal (CUIT,
+-- certificado) que ya usa el e-commerce, no una segunda. `order_id` deja de
+-- ser obligatorio y se suma `pos_sale_id`: cada fila de factura viene de un
+-- pedido web O de una venta de mostrador, nunca de los dos ni de ninguno. Se
+-- extiende la tabla en vez de crear una paralela para no duplicar ~15 columnas
+-- (CAE, vencimiento, desglose de IVA, snapshots) que ya existen y ya están
+-- probadas contra homologación real (ver docs/ESTADO.md).
+ALTER TABLE invoices ALTER COLUMN order_id DROP NOT NULL;
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS pos_sale_id UUID REFERENCES pos_sales(id) ON DELETE RESTRICT;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_invoices_pos_sale_id ON invoices(pos_sale_id);
+
+ALTER TABLE invoices DROP CONSTRAINT IF EXISTS invoices_source_check;
+ALTER TABLE invoices ADD CONSTRAINT invoices_source_check CHECK (
+  (order_id IS NOT NULL AND pos_sale_id IS NULL) OR (order_id IS NULL AND pos_sale_id IS NOT NULL)
+);
+
+ALTER TABLE invoice_jobs ALTER COLUMN order_id DROP NOT NULL;
+ALTER TABLE invoice_jobs ADD COLUMN IF NOT EXISTS pos_sale_id UUID REFERENCES pos_sales(id) ON DELETE CASCADE;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_invoice_jobs_pos_sale_id ON invoice_jobs(pos_sale_id);
+
+ALTER TABLE invoice_jobs DROP CONSTRAINT IF EXISTS invoice_jobs_source_check;
+ALTER TABLE invoice_jobs ADD CONSTRAINT invoice_jobs_source_check CHECK (
+  (order_id IS NOT NULL AND pos_sale_id IS NULL) OR (order_id IS NULL AND pos_sale_id IS NOT NULL)
+);
+
+-- 'pos': un vendedor pidió emitir/reintentar desde el mostrador — análogo a
+-- 'customer'/'admin' del lado web.
+ALTER TABLE invoice_jobs DROP CONSTRAINT IF EXISTS invoice_jobs_origin_check;
+ALTER TABLE invoice_jobs ADD CONSTRAINT invoice_jobs_origin_check CHECK (
+  last_attempt_origin IS NULL OR last_attempt_origin IN ('webhook', 'customer', 'admin', 'manual_script', 'pos')
+);
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- POS de mostrador — Fase 6: panel fiscal (IVA y vencimientos)
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Vencimiento de la DDJJ de IVA por período y terminación de CUIT. AFIP publica
+-- un calendario anual real; acá se guarda lo que ya se cargó (a mano o
+-- calculado de forma aproximada la primera vez que se consulta un período sin
+-- fila — ver routes/pos/fiscal.js) para poder corregirlo después sin volver a
+-- calcularlo. `filed_at` no está en ningún lado más: es lo único que permite
+-- distinguir "vencimiento pendiente" de "ya declarado" en el historial anual.
+CREATE TABLE IF NOT EXISTS pos_vat_deadlines (
+  id            UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  year          INTEGER     NOT NULL,
+  month         INTEGER     NOT NULL CHECK (month BETWEEN 1 AND 12),
+  cuit_ending   INTEGER     NOT NULL CHECK (cuit_ending BETWEEN 0 AND 9),
+  deadline_date DATE        NOT NULL,
+  filed_at      TIMESTAMPTZ,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (year, month, cuit_ending)
+);
+
+CREATE INDEX IF NOT EXISTS idx_pos_vat_deadlines_year_month ON pos_vat_deadlines(year, month);
+
+DROP TRIGGER IF EXISTS pos_vat_deadlines_updated_at ON pos_vat_deadlines;
+CREATE TRIGGER pos_vat_deadlines_updated_at
+  BEFORE UPDATE ON pos_vat_deadlines
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at();

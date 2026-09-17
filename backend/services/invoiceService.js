@@ -37,17 +37,17 @@ export class InvoiceServiceError extends Error {
   }
 }
 
-function json(value) {
+export function json(value) {
   return JSON.stringify(value ?? null);
 }
 
-function isoArcaDate(value) {
+export function isoArcaDate(value) {
   const normalized = String(value ?? '').replace(/\D/g, '');
   if (!/^\d{8}$/.test(normalized)) return null;
   return `${normalized.slice(0, 4)}-${normalized.slice(4, 6)}-${normalized.slice(6, 8)}`;
 }
 
-function safeArcaResponse(response) {
+export function safeArcaResponse(response) {
   if (!response) return null;
   return {
     header: response.header || null,
@@ -90,11 +90,11 @@ export function publicInvoice(invoice, { includeTechnicalMessages = true } = {})
   return result;
 }
 
-async function advisoryLock(client, key) {
+export async function advisoryLock(client, key) {
   await client.query('SELECT pg_advisory_lock(hashtext($1))', [key]);
 }
 
-async function advisoryUnlock(client, key) {
+export async function advisoryUnlock(client, key) {
   await client.query('SELECT pg_advisory_unlock(hashtext($1))', [key]);
 }
 
@@ -196,7 +196,7 @@ async function ensureInvoiceRow(client, order, receiver, config, fiscal) {
   return rows[0] || findInvoice(client, order.id);
 }
 
-async function persistProcessing(client, invoice, built, voucherNumber) {
+export async function persistProcessing(client, invoice, built, voucherNumber) {
   const { rows } = await client.query(
     `UPDATE invoices SET
        status = 'processing', cbte_numero = $2, fecha_comprobante = $3,
@@ -219,7 +219,7 @@ async function persistProcessing(client, invoice, built, voucherNumber) {
   return rows[0];
 }
 
-async function persistAuthorized(client, invoice, {
+export async function persistAuthorized(client, invoice, {
   cae,
   caeExpirationDate,
   result = 'A',
@@ -250,7 +250,7 @@ async function persistAuthorized(client, invoice, {
   return rows[0];
 }
 
-async function persistRejected(client, invoice, response) {
+export async function persistRejected(client, invoice, response) {
   const detail = response.details?.[0] || {};
   const observations = detail.observations || [];
   const errors = [...(response.errors || [])];
@@ -268,7 +268,7 @@ async function persistRejected(client, invoice, response) {
   return rows[0];
 }
 
-async function persistUncertain(client, invoice, cause) {
+export async function persistUncertain(client, invoice, cause) {
   const error = {
     code: cause?.code || 'ARCA_COMMUNICATION_UNCERTAIN',
     message: cause?.message || 'No se pudo confirmar la respuesta de ARCA.',
@@ -296,7 +296,7 @@ async function authorizeFromConsult(client, invoice, consultation) {
   });
 }
 
-async function consultUncertain(client, invoice) {
+export async function consultUncertain(client, invoice) {
   try {
     const consultation = await getVoucher(invoice.pto_vta, invoice.cbte_tipo, Number(invoice.cbte_numero));
     if (consultation.found) {
@@ -335,7 +335,7 @@ async function consultUncertain(client, invoice) {
   }
 }
 
-async function sendRequest(client, invoice, request) {
+export async function sendRequest(client, invoice, request) {
   let response;
   try {
     response = await createCAE(request);

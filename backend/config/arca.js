@@ -345,11 +345,24 @@ export function getArcaAutomationConfig(environmentVariables = process.env) {
   });
 }
 
-export function getArcaConfig({ requirePointOfSale = false, requireIssuerData = false } = {}) {
+// pointOfSaleEnvVar permite pedir un punto de venta distinto del de la web
+// (ARCA_POS_PTO_VTA para el mostrador) sin duplicar el resto de la config
+// fiscal — CUIT, certificado y condición fiscal son una sola identidad ante
+// ARCA, comprada por toda la empresa; el punto de venta es lo único que puede
+// diferir entre canales. A propósito NO cae al de la web si falta: hasta que
+// Fara habilite un punto de venta propio para el mostrador en el sitio de
+// AFIP, facturar desde el POS debe fallar con un error claro, no mezclar la
+// numeración de dos canales en el mismo punto de venta sin que se haya
+// decidido así.
+export function getArcaConfig({
+  requirePointOfSale = false,
+  requireIssuerData = false,
+  pointOfSaleEnvVar = 'ARCA_PTO_VTA',
+} = {}) {
   const environment = readEnvironment();
   const endpoints = ENVIRONMENTS[environment];
   const credentials = initializeArcaCredentials();
-  const pointOfSale = integer('PTO_VTA', process.env.ARCA_PTO_VTA, {
+  const pointOfSale = integer(pointOfSaleEnvVar.replace(/^ARCA_/, ''), process.env[pointOfSaleEnvVar], {
     requiredValue: requirePointOfSale,
   });
   const taxCondition = required('TAX_CONDITION', process.env.ARCA_TAX_CONDITION);

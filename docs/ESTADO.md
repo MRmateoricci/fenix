@@ -8,7 +8,7 @@
 > Un ajuste de padding, no.
 
 **Última actualización:** 15 de septiembre de 2026
-**Commit de referencia:** `9534ce1` + cambios locales de esta tanda (apagado ordenado del backend en Railway)
+**Commit de referencia:** `9534ce1` + cambios locales de esta tanda (apagado ordenado del backend en Railway) y las seis tandas anteriores, aún sin commitear (POS de mostrador, Fases 1 a 6 + modal de detalle de producto)
 
 ---
 
@@ -37,11 +37,12 @@
 | Newsletter | ✅ Funcionando | |
 | Disponibilidad y plazos | ✅ Funcionando | Reemplazó al control de stock y a "productos a pedido" — ver detalle abajo |
 | SEO | ✅ Funcionando | Helmet + sitemap + robots |
-| Facturación electrónica ARCA | 🟡 Implementada, producción bloqueada | A/B para RI y C para Monotributo; falta confirmar habilitación A real de Fenix |
+| Facturación electrónica ARCA | 🟡 Implementada, producción bloqueada | A/B para RI y C para Monotributo; falta confirmar habilitación A real de Fenix · desde la Fase 5 del POS, la misma integración también factura ventas de mostrador (punto de venta propio, `ARCA_POS_PTO_VTA`, todavía sin cargar) |
 | Analítica de visitas | ✅ Funcionando | Propia, sin servicio externo · pestaña **Visitas** en el panel · sin IP ni cookies |
 | Documentos legales | ✅ Funcionando | Privacidad (Ley 25.326 + Meta Pixel), Términos, Cambios, Envíos · botón de arrepentimiento · falta inscripción en la AAIP |
 | Meta Pixel | ✅ Funcionando | PageView + ViewContent + AddToCart + InitiateCheckout + Purchase · solo navegador, sin Conversions API |
 | Catálogo Meta (Commerce Manager) | ✅ Implementado | Feed CSV por URL en `/api/meta-catalog/products.csv` · mismo `id` que `content_ids` del Pixel · falta programarlo en el panel de Meta |
+| POS de mostrador | 🟡 Fases 1 a 6 funcionando | Login, venta, ticket, descuento, pago mixto, caja (apertura/cierre/movimientos/historial), proveedores/compras/cuenta corriente (admin), importación de precios + aumento porcentual (admin), facturación AFIP con reintento (admin, sin probar contra AFIP real todavía), panel fiscal de IVA con vencimientos (admin), modal de detalle de producto (precio con/sin IVA, con cuotas, costo/margen admin-only), Ventas, admin de usuarios/config · falta deploy en Railway, `ARCA_POS_PTO_VTA` real, y tests automatizados de las rutas nuevas |
 
 ---
 
@@ -350,6 +351,388 @@ el CSV; `backend/routes/metaCatalog.js` hace la consulta y responde;
 pixel `711144551940445`; cargar `grupo` en los productos que no lo tengan;
 verificar en el panel de Meta el "match rate" entre eventos y catálogo una vez
 que corra.
+
+---
+
+## POS de mostrador — modal de detalle de producto (2026-09-14)
+
+**Qué se hizo:** al elegir un producto en la búsqueda del POS (con o sin variantes)
+ahora siempre se abre un modal grande (`ProductInfoModal.jsx`, reemplaza a
+`VariantPicker.jsx`) en vez de agregarlo directo al ticket. Layout: características
+del producto arriba (medida, watts, amperes, IP, material, tipo de cable,
+descripción — todas ya públicas en la tienda online, ninguna dato nuevo), después el
+selector de variantes si tiene más de una (cada una con su propia medida/descripción,
+sacadas de `product_variant_rules.product_data`, para que el vendedor sepa cuál
+corresponde según lo que pide el cliente), y abajo una grilla de precios cliqueables
+para la variante elegida: **Precio de lista**, **Efectivo** (descuento configurado) y
+un botón por cada tramo de cuotas configurado. Clickear cualquiera agrega el ítem al
+ticket Y deja configurado el descuento/recargo y el medio de pago de toda la venta en
+el mismo click — ya no hace falta repetirlo después en el ticket.
+
+**El recargo por cuotas es real, no solo informativo — cambia de diseño a mitad de
+la tanda.** La primera versión (mismo día, más temprano) lo dejó a propósito
+solo-informativo para no tocar el modelo de dinero de la venta; el pedido de
+seguimiento pidió que clickear una opción "ya sume al carrito de ese modo", lo que
+implica que el total de la venta tiene que reflejarlo de verdad. Se generalizó
+`pos_sales`: nuevas columnas `surcharge_amount`, `surcharge_percent`, `installments`,
+excluyentes con `discount_amount`/`discount_percent` (`POST /api/pos/sales` rechaza
+una venta con las dos cosas a la vez). `total = subtotal - discount_amount +
+surcharge_amount`. `pos_settings.installment_tiers` (antes `installment_surcharge_
+percent`, un solo número) pasó a ser una lista de tramos `{ installments,
+surchargePercent }` editable desde `/admin/config`, porque "la demás cuotas según el
+interés que configure" pedía varios tramos, no uno.
+
+**Por qué no hizo falta tocar la facturación AFIP ni el cálculo de "efectivo
+esperado" de caja para que el recargo se facture/cuadre bien:** los dos ya leen
+`pos_sales.total` directo (`invoicePosFiscal.js#buildPseudoOrder` para el monto a
+facturar, `pos_sale_payments.amount` — que tiene que sumar `total`, ver CLAUDE.md
+4.7 — para la caja), nunca recalculan `subtotal - descuento` por su cuenta. Con el
+recargo ya sumado dentro de `total` antes del INSERT, ambos flujos quedan correctos
+sin cambios propios.
+
+**Costo y margen quedaron admin-only, y no viajan en el cache de catálogo.**
+Decisión confirmada con el dueño: un vendedor común ve precios pero no costo ni
+margen. La implicancia técnica importaba más que la regla en sí — `GET /api/pos/
+products/catalog` baja los ~40.000 productos al navegador de CUALQUIER usuario
+logueado del POS para el cache local (`useProductCatalog`), así que meter el costo
+ahí lo hubiera expuesto a cualquier vendedor con las devtools abiertas aunque la UI
+lo ocultara. Se separó en un endpoint aparte, `GET /api/pos/products/:id/cost`
+(`requirePosRole('admin')`), que el modal pide bajo demanda solo cuando lo abre un
+admin.
+
+**Precio sin IVA se calcula como precio con IVA ÷ 1.21, no lee `precio_venta`
+directo.** Así el desglose que ve el vendedor es siempre consistente con el importe
+que realmente se cobra, incluso si `precio_venta` y `precio_iva` divergieron por
+redondeos o una carga manual vieja.
+
+---
+
+## POS de mostrador — Fase 6: panel fiscal (2026-09-13)
+
+**Qué se hizo:** pantalla `/admin/panel-iva` con débito fiscal, crédito fiscal,
+saldo, vencimiento estimado y detalle de ventas/compras facturadas o no; historial
+anual (`/admin/panel-iva/anual`) con barra comparativa débito/crédito por mes; banner
+en el header cuando un vencimiento está vencido o a 5 días o menos. Detalle completo
+en `CLAUDE.md` 4.7; acá solo lo no obvio del pedido original.
+
+**Decisión de negocio confirmada con el dueño antes de escribir código:** el débito
+fiscal del panel es el de **todo el negocio** (web + POS), no solo lo facturado desde
+el mostrador — la consigna lo dejaba ambiguo. `fetchVatDebit` en
+`backend/routes/pos/fiscal.js` suma `invoices.imp_iva` sin filtrar por `pos_sale_id`
+vs `order_id`, así el saldo de IVA que ve el dueño es el real ante AFIP, no un
+recorte artificial por canal de venta.
+
+**Un bug real encontrado en la propia sesión, antes de mostrarlo:** `node-postgres`
+devuelve las columnas `DATE` como objeto `Date` de JS, construido con
+`new Date(year, month-1, day)` — medianoche en el huso **local** del proceso, no UTC,
+porque un `DATE` de Postgres no tiene huso. El código de `fiscal.js` comparaba esa
+fecha contra un string `'YYYY-MM-DD'` (`deadlineRow.deadline_date < today`, para
+"¿venció?") y la interpolaba en un template literal dentro de `daysBetween` — las dos
+cosas rompían con un objeto `Date` en vez de un string, y el segundo caso degradaba en
+silencio a `NaN` → `null` en el JSON de respuesta (`daysRemaining: null` aunque el
+vencimiento ya hubiera pasado). Se descartó reconfigurar el parser de `pg` a nivel
+global (`pg.types.setTypeParser(1082, …)`) por el radio de impacto: afectaría todo el
+resto del backend que lee columnas `DATE` sin auditar (`orders.pickup_date`,
+`invoices.fecha_comprobante`, `pos_purchases.invoice_date`). En su lugar,
+`normalizeDeadlineRow` convierte `deadline_date` a `'YYYY-MM-DD'` con los getters
+**locales** de `Date` (no UTC) inmediatamente después de cada consulta a
+`pos_vat_deadlines` — los mismos que usó `pg` para construirlo, así el string vuelve
+exacto sin importar en qué huso corra el proceso (dev en Windows, Railway en
+producción). Confirmado con `GET /upcoming-deadline` real: antes devolvía
+`"2026-08-19T03:00:00.000Z"` y `daysRemaining: null`; después, `"2026-08-19"` y
+`daysRemaining: -25` (vencido hace 25 días, correcto).
+
+**Vencimiento = aproximación editable, no el calendario oficial de AFIP.**
+`approximateDeadline` calcula el 3er lunes hábil del mes siguiente al período, corrido
+`cuitEnding` días hábiles — no hay forma de consultar el calendario real de AFIP desde
+acá. `PUT /deadlines` existe específicamente para corregir la fecha a mano y marcar
+"presentado", y el panel avisa cuando una fecha es `computed` (todavía no corregida).
+Sin `ARCA_CUIT` configurado (mismo env var que usa la facturación electrónica), el
+panel sigue funcionando para los números de IVA — solo el vencimiento queda vacío con
+un aviso, en vez de romper la pantalla entera.
+
+**Probado en esta tanda:** 6 tests unitarios nuevos (`fiscal.test.js`, funciones puras
+de fecha) más los 6 endpoints probados de punta a punta con datos reales insertados a
+propósito (proveedor, compra con y sin factura, venta facturada y sin facturar, una
+fila de `invoices` autorizada) — números de saldo, porcentajes y estados verificados a
+mano contra lo esperado, y limpiados después. En Chrome real: las 4 pestañas de
+detalle, el toggle de "marcar como presentado", el selector de mes/año, el historial
+anual con la barra proporcional, y el banner del header en sus tres estados (sin
+vencimiento próximo, a punto de vencer, vencido). Suite completa del backend en verde:
+269 pass, 0 fail (2 skips preexistentes, sin relación con esta tanda).
+
+**Pendiente:** lo mismo que las fases anteriores (deploy en Railway, tests
+automatizados más allá de lo puntual). Cargar `ARCA_CUIT` real en producción para que
+el vencimiento se calcule; hasta entonces el panel funciona sin esa tarjeta.
+
+---
+
+## POS de mostrador — Fase 5: facturación electrónica AFIP (2026-09-13)
+
+**Qué se hizo:** emisión de factura desde una venta del POS, PDF con QR, indicador
+de estado de AFIP en el header, pantalla de estado fiscal (solo lectura + "probar
+conexión"), reintento cuando falla. Detalle completo en `CLAUDE.md` 4.7; acá solo lo
+no obvio del pedido original.
+
+**El hallazgo más importante de esta tanda, antes de escribir código:** la consigna
+pedía instalar `@afipsdk/afip.js` y armar una tabla de configuración fiscal nueva,
+asumiendo que no había nada de facturación electrónica todavía. **Ya existía una
+integración ARCA/WSFEv1 completa y probada** para el e-commerce (WSAA + WSFEv1 a mano
+con `soap`, no con ninguna librería wrapper), con CAE real obtenido en homologación
+(ver la entrada de ARCA más abajo en este mismo archivo). Instalar una segunda
+librería y una tabla de config paralela hubiera significado dos sistemas gestionando
+el mismo CUIT/certificado ante AFIP — un riesgo fiscal real, no solo una duplicación
+de código. Se auditó todo con un subagente antes de tocar nada (ver la conversación
+original) y se descartó esa parte de la consigna por completo.
+
+**Lo que se construyó en su lugar:** `services/invoicePosFiscal.js#createInvoiceForPosSale`,
+paralelo a `invoiceService.js#createInvoiceForOrder` pero sin tocar ese archivo salvo
+para **exportar** (sin cambiar) los pasos de persistencia que ya eran genéricos sobre
+una fila de `invoices` (`persistProcessing`, `persistAuthorized`, `persistRejected`,
+`persistUncertain`, `consultUncertain`, `sendRequest`, `advisoryLock`/`Unlock`) — se
+confirmó con la suite de tests de facturación (28 tests) que exportar esas funciones
+no cambió ningún comportamiento. `invoices`/`invoice_jobs` se extendieron para aceptar
+`pos_sale_id` además de `order_id` (nunca los dos ni ninguno) en vez de crear una
+tabla de facturas paralela.
+
+**Decisión de negocio confirmada con el dueño antes de escribir código:** el punto de
+venta del POS es una env var propia (`ARCA_POS_PTO_VTA`), sin compartir numeración con
+el de la web — Fara tiene que habilitarlo en el sitio de AFIP antes de que la emisión
+real funcione. El código ya está listo apuntando a esa variable.
+
+**Cómo se probó, dada la limitación real de esta sesión:** no hay CUIT ni
+certificados de homologación de ARCA en el `.env` de desarrollo local (confirmado con
+el subagente de auditoría) — la emisión real contra AFIP solo se puede probar en el
+entorno donde esas credenciales ya existen (Railway/staging), no acá. Se probó
+exhaustivamente en Chrome real todo lo que SÍ es responsabilidad de esta tanda: que
+el indicador de estado muestre "no configurado" correctamente, que la pantalla
+`/admin/fiscal` no rompa sin config, que una venta con "Emitir factura" activado se
+registre igual (con stock descontado) cuando ARCA falla, que el error se muestre
+claro en el ticket y en el detalle de la venta, y que "Reintentar emisión" abra el
+formulario correctamente. También un test unitario nuevo (`invoicePosFiscal.test.js`)
+para la parte pura (mapeo de venta a la forma que espera `invoiceFiscal.js`). Suite
+completa del backend en verde: 263 pass, 0 fail.
+
+**Pendiente:** cargar `ARCA_POS_PTO_VTA` con un punto de venta real habilitado en
+AFIP, y probar la emisión real contra homologación (y eventualmente producción) desde
+el entorno que ya tiene las credenciales. Deploy en Railway y tests automatizados más
+allá de lo puntual, igual que las fases anteriores.
+
+---
+
+## POS de mostrador — Fase 4: importación de precios (2026-09-13)
+
+**Qué se hizo:** subir Excel/CSV con mapeo manual de columnas, vista previa con
+diferencia por producto, aumento porcentual filtrado por proveedor/categoría/
+selección manual, historial unificado de ambos. Todo admin-only. Detalle completo
+en `CLAUDE.md` 4.7; acá solo lo no obvio del pedido original.
+
+**Auditoría previa (evitó duplicar trabajo):** el e-commerce ya tenía un pipeline
+completo de importación de precios (`services/excelImport.js` + `productsRepo.js` +
+`/api/products/import/prices/*`), pero atado a crear productos, mapeos de proveedor
+y variantes por color/medida — no servía para "actualizar el precio de un producto
+que ya existe". Se reusaron sus utilidades puras (`toNumber`, `normalizeCodigo`,
+`readPriceWorkbook`) y se escribió un pipeline nuevo, más simple, para todo lo demás.
+`xlsx` ya estaba instalado — no hizo falta agregar ninguna dependencia.
+
+**Decisión de negocio confirmada con el dueño antes de escribir código:** el precio
+del Excel puede venir neto o con IVA incluido, depende del proveedor — no hay una
+convención fija. Se agregó un toggle explícito por importación en vez de asumir uno
+de los dos casos siempre.
+
+**Un bug evitado por diseño, no encontrado después:** `resolvePublicPrice` prioriza
+`precio_iva` sobre `precio_venta` si el primero existe. Si la importación solo
+tocara `precio_venta` y dejara un `precio_iva` viejo cargado de antes, el precio
+público **no cambiaría** aunque la base diga que sí se actualizó — un bug silencioso
+grave. Por eso aplicar siempre escribe los dos campos juntos, recalculando
+`precio_iva = precio_venta × 1.21` en el mismo UPDATE. Se verificó con un producto
+real que ya tenía `precio_iva` cargado de antes.
+
+**Salvedad aplicada a los dos flujos:** los productos en USD quedan afuera
+(`skipped_currency`, visible en su propia pestaña/columna) — tocar `precio_venta`
+(ARS) no cambia nada visible en ellos porque el sistema prioriza los campos `_usd`.
+Se probó con un producto real en USD del catálogo.
+
+**Otra decisión, sin volver a preguntar:** los filtros `supplier_id`/`category_id`
+del aumento porcentual que pedía la consigna no existen como columnas UUID en
+`products` (son texto libre) — se implementaron contra el texto real
+(`products.supplier`/`category`). Un aumento porcentual sin ningún filtro se
+rechaza a propósito (400): repreciar todo el catálogo por error sería carísimo.
+
+**Probado en esta tanda:** flujo completo en Chrome real (subir Excel de prueba con
+casos mezclados — código con espacios/minúsculas, precio con "$" y coma decimal, fila
+vacía, precio inválido, código inexistente, producto en USD — mapear columnas, ver
+las 4 pestañas de la vista previa, aplicar, ver el historial) y el aumento porcentual
+(filtro por proveedor, vista previa, aplicar, mismo historial unificado). Un vendedor
+sin rol admin queda bloqueado en las tres pantallas nuevas, backend y frontend. Todos
+los precios de prueba se restauraron a sus valores originales exactos usando el propio
+`old_price` guardado en el detalle de cada importación. Suite de Node en verde: 258
+pass, 0 fail.
+
+**Pendiente:** lo mismo que las fases anteriores (deploy en Railway, tests
+automatizados más allá de las verificaciones manuales). No hay "deshacer" una
+importación ya aplicada (solo se puede cancelar antes de aplicar) — si hace falta
+más adelante, el propio detalle guardado (`old_price` por fila) ya tiene todo lo
+necesario para construirlo.
+
+---
+
+## POS de mostrador — Fase 3: proveedores y compras (2026-09-12)
+
+**Qué se hizo:** proveedores con cuenta corriente, ingreso de mercadería (con y sin
+factura, con desglose de IVA cuando corresponde), pagos, e historial con saldo
+acumulado. Todo admin-only. Detalle completo en `CLAUDE.md` 4.7; acá solo lo no
+obvio del pedido original.
+
+**Backend** — `pos_suppliers`, `pos_purchases`, `pos_purchase_items`,
+`pos_supplier_payments` en `backend/db/schema.sql`; `backend/routes/pos/suppliers.js`
+(CRUD + `/summary` + `/:id/movements` + `/:id/balance`), `purchases.js`,
+`supplierPayments.js`. El saldo nunca se guarda: se calcula sumando compras menos
+pagos en cada request, tal como pedía la consigna. Migración corrida dos veces
+seguidas (idempotente) contra dev, sin tocar producción.
+
+**Decisión de scope confirmada con el dueño antes de escribir código:** el módulo
+entero quedó admin-only (ver, cargar compras, registrar pagos, alta de proveedor) —
+la consigna no lo especificaba, a diferencia de las Fases 1 y 2, así que se preguntó
+en vez de asumir dado que es plata real con el proveedor.
+
+**Dos cosas que ya existían y no se reutilizaron a propósito, documentadas para que
+no se vuelvan a proponer:** `products.supplier` (texto libre de las listas de precios)
+es una noción de "proveedor" completamente distinta de la nueva `pos_suppliers` — no
+se cruzan. Y sumar stock en una compra usa el mismo patrón simple de
+`/api/products/:id/adjust-stock`, no `productsRepo.js#applyPurchaseIncrement` (ese
+helper es específico de la importación "orden de compra KIAN", con upsert por código
+y moneda forzada a USD — no encaja con sumar stock a un producto existente por UUID).
+
+**Probado en esta tanda:** flujo completo en Chrome real (crear proveedor → registrar
+compra con factura A y un producto del catálogo, que sumó stock correctamente
+incluyendo la variante única → registrar pago parcial → ver saldo y ledger con saldo
+acumulado correctos → resumen de deuda total en la lista → un vendedor sin rol admin
+no puede entrar a `/proveedores`). Suite de Node en verde: 258 pass, 0 fail.
+
+**Pendiente:** deploy en Railway y tests automatizados de las rutas nuevas (igual que
+las fases anteriores). Fases siguientes ya delimitadas: importación de listas de
+precios del POS, panel fiscal.
+
+---
+
+## POS de mostrador — Fase 2: caja (2026-09-12)
+
+**Qué se hizo:** apertura/cierre de caja, control de efectivo esperado vs contado,
+ingresos/egresos extra y historial de cajas cerradas (solo admin). Detalle completo
+en `CLAUDE.md` 4.7; acá solo lo no obvio del pedido original.
+
+**Backend** — `pos_cash_registers`, `pos_cash_movements` y `pos_sales.cash_register_id`
+en `backend/db/schema.sql`; `backend/routes/pos/cash.js` (`open`, `current`, `close`,
+`history`, `:id`, `movements`); `backend/routes/pos/sales.js` ahora exige una caja
+abierta (la resuelve él mismo, nunca la recibe del cliente) y la vincula a la venta.
+Una sola caja abierta a la vez, **impuesto con un índice único parcial en la base**
+(`uq_pos_cash_registers_one_open`), no solo con una validación de aplicación — dos
+terminales no pueden abrir caja al mismo tiempo. Probado con la migración corrida dos
+veces seguidas (idempotente) contra la base de dev, sin tocar producción.
+
+**Un bug real encontrado probando el flujo completo en el navegador:** la pantalla de
+Caja mostraba un "efectivo esperado" viejo después de hacer una venta desde "Vender".
+Causa: `CashRegisterContext` solo actualiza su estado a sí mismo al abrir/cerrar caja o
+cargar un movimiento — crear una venta pasa por `POS.jsx`, que no toca ese contexto, así
+que el resumen quedaba con los números de la última acción de caja. Fix: `pages/Caja.jsx`
+vuelve a pedir `GET /api/pos/cash/current` cada vez que se entra a la pantalla.
+
+**Decisiones tomadas sin volver a preguntar (documentadas en CLAUDE.md 4.7):** la
+consigna describía la fórmula de "efectivo esperado" de dos formas ligeramente
+distintas entre el modelo de datos y el endpoint — se usó la del endpoint (fondo +
+efectivo + ingresos − egresos) porque los pagos ya son post-descuento y restarlo de
+nuevo lo contaría dos veces. Caja única global (no por vendedor). Historial y detalle
+de una caja puntual solo para admin, igual que `/api/pos/users`.
+
+**Probado en esta tanda:** flujo completo en Chrome real (login sin caja → formulario
+de apertura → abrir → vender → registrar ingreso → volver a caja y ver la venta
+reflejada → cerrar caja con diferencia $0 → historial → detalle → un vendedor sin rol
+admin no puede entrar a `/caja/historial`). Suite de Node en verde: 258 pass, 0 fail.
+
+**Pendiente:** lo mismo que quedó pendiente de la Fase 1 (deploy en Railway, tests
+automatizados más allá de lo puntual), más las fases siguientes ya delimitadas
+(proveedores/compras, importación de precios, panel fiscal).
+
+---
+
+## POS de mostrador — Fase 1 (2026-09-12)
+
+**Qué se hizo:** primera versión del punto de venta de mostrador, proyecto Vite +
+React separado (`pos-frontend/`) que habla a la misma API y base que el e-commerce.
+Alcance completo en `CLAUDE.md` 4.7; acá solo lo que no es obvio desde el pedido
+original.
+
+**Backend** — `backend/db/schema.sql` (tablas `pos_users`, `pos_sales`,
+`pos_sale_items`, `pos_sale_payments`, `pos_settings` + índice GIN
+`idx_products_search`), `backend/middleware/posAuth.js`, `backend/routes/pos/*.js`,
+montadas en `backend/index.js` bajo `/api/pos/*`. `backend/db/seedPosUsers.js` crea
+el admin inicial (`admin` / `admin123`, cambiarla después del primer login).
+
+**Tres bugs reales encontrados auditando antes de escribir código** (no hipotéticos —
+los tres se reprodujeron y se confirmó el fix):
+
+1. El pedido original pedía reusar `services/stockReservation.js` para descontar
+   stock, pero ese módulo está **fuera de servicio a propósito** (ver 4.4) y además
+   *bloquea* la venta sin stock suficiente — lo opuesto de lo que pedía la consigna
+   para el POS. Se usa `productsRepo.js#applySaleDecrement` en su lugar (no
+   bloqueante, mismo mecanismo que ya usaba el import de reportes de venta del admin).
+2. Descontar `products.stock` a negativo en un producto de una sola variante hacía
+   fallar el trigger `sync_single_base_variant` contra el `CHECK >= 0` de
+   `product_variant_rules.stock` — **bug preexistente**, reproducible hoy mismo con
+   `/api/products/:id/adjust-stock` del admin, no algo que introdujo el POS. Fix:
+   `GREATEST(NEW.stock, 0)` en el trigger.
+3. Los nombres de producto traen puntuación pegada sin espacio (`"INT.PUNTO MEDIO"`,
+   `"T/PALA"`) — Postgres arma un solo lexema (`'int.punto'`) en vez de separar las
+   palabras, así que buscar "punto" no encontraba nada. Fix: normalizar puntuación a
+   espacios antes de tokenizar, en el índice **y** en la consulta (tienen que ser
+   idénticos) y en `buildPrefixTsQuery` del lado de la app. Cubierto por
+   `backend/routes/pos/products.test.js`.
+
+**Un cuarto bug, encontrado por Valentín probando la app ya entregada:** un producto
+de inventario crudo sin precio cargado (`precio_venta`/`precio_iva` NULL — típico de
+algo recién importado de una lista de proveedor y nunca precificado) se agregaba al
+ticket como si costara **$0**: `resolvePublicPrice` devuelve `null` para "sin precio",
+pero el cálculo de línea (`unitPrice * cantidad`) y el `money()` del frontend
+convertían ese `null` en 0 en silencio. La venta llegaba al pago con total $0 y ahí
+tiraba un error genérico de "medio de pago inválido" que no explicaba nada. Fix:
+- Backend (`routes/pos/sales.js`): si el precio resuelto es `null`, la venta se
+  rechaza entera con un mensaje que nombra el código del producto — nunca se llega
+  a construir una línea "gratis".
+- Frontend: la búsqueda muestra "Sin precio" en rojo en vez de "$0,00"
+  (`ProductSearch.jsx`, `VariantPicker.jsx`) y **no deja agregarlo** al ticket
+  (`POS.jsx`), mostrando el mismo motivo antes de que el vendedor arme todo el ticket.
+- De paso se encontró que la búsqueda de respaldo del servidor solo indexaba `name` +
+  `codigo`, no `descripcion` — invisible justo para este tipo de producto (sin
+  `name`) aunque el cache completo del navegador sí lo mostraba por su `descripcion`.
+  El índice y la consulta ahora usan el mismo fallback `name → descripcion → codigo`
+  que ya usa el resto del catálogo.
+
+**Decisión de producto confirmada con el dueño (Valentín) antes de escribir código:**
+el stock por variante nunca se escribe desde el POS (solo se muestra); si vende de
+más, se descuenta el stock agregado del producto y puede quedar negativo.
+
+**Frontend** — `pos-frontend/`, Tailwind 4 (a diferencia de `src/`, que usa estilos
+inline), JWT por header `Authorization` en vez de cookie porque el POS va a vivir en
+un subdominio propio. Cache de catálogo completo en memoria del navegador
+(`hooks/useProductCatalog.jsx`) con refresco incremental cada 2.5 min.
+
+**Probado en esta tanda:** flujo completo en navegador real (Playwright vía
+`playwright-core` + Chrome instalado, no había `chromium-cli` disponible) — login,
+búsqueda local y por variante, ticket, descuento, pago, confirmación, Ventas, admin
+de Usuarios y Configuración. Suite de Node (`npm test` en `backend/`) sigue en verde:
+258 pass, 0 fail.
+
+**Pendiente:**
+
+- Deploy de `pos-frontend` como servicio Railway independiente (Dockerfile/estático +
+  subdominio + `POS_FRONTEND_BASE_URL` en producción) — decidido explícitamente fuera
+  de esta tanda, ver la conversación original.
+- Tests automatizados de las rutas nuevas más allá del tokenizer de búsqueda
+  (`auth`, `users`, `sales` se probaron a mano con curl/Playwright, no con
+  `node --test`).
+- Fases siguientes ya delimitadas en el pedido original: facturación fiscal del POS,
+  caja (apertura/cierre), proveedores/compras desde el POS.
 
 ---
 

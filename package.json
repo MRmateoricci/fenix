@@ -17,7 +17,8 @@
     "preview": "vite preview",
     "db:migrate": "npm --prefix backend run db:migrate",
     "db:seed": "npm --prefix backend run db:seed",
-    "db:seed:demo": "npm --prefix backend run db:seed:demo"
+    "db:seed:demo": "npm --prefix backend run db:seed:demo",
+    "db:seed:pos": "npm --prefix backend run db:seed:pos"
   },
   "dependencies": {
     "axios": "^1.19.0",

@@ -40,9 +40,9 @@ export function requestOrigin(req) {
   return normalizeOrigin(host && protocol ? `${protocol}://${host}` : null)
 }
 
-export function createCorsOptionsDelegate({ appBaseUrl, frontendBaseUrl } = {}) {
+export function createCorsOptionsDelegate({ appBaseUrl, frontendBaseUrl, posFrontendBaseUrl } = {}) {
   const allowedOrigins = new Set(
-    [...localOrigins, appBaseUrl, frontendBaseUrl]
+    [...localOrigins, appBaseUrl, frontendBaseUrl, posFrontendBaseUrl]
       .map(normalizeOrigin)
       .filter(Boolean)
   )

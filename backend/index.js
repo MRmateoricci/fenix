@@ -30,6 +30,18 @@ import analyticsRouter from './routes/analytics.js'
 import arcaRouter from './routes/arca.js'
 import invoicesRouter from './routes/invoices.js'
 import revocationsRouter from './routes/revocations.js'
+import posAuthRouter from './routes/pos/auth.js'
+import posUsersRouter from './routes/pos/users.js'
+import posProductsRouter from './routes/pos/products.js'
+import posSalesRouter from './routes/pos/sales.js'
+import posSettingsRouter from './routes/pos/settings.js'
+import posCashRouter from './routes/pos/cash.js'
+import posSuppliersRouter from './routes/pos/suppliers.js'
+import posPurchasesRouter from './routes/pos/purchases.js'
+import posSupplierPaymentsRouter from './routes/pos/supplierPayments.js'
+import posPriceImportsRouter from './routes/pos/priceImports.js'
+import posInvoicingRouter from './routes/pos/invoicing.js'
+import posFiscalRouter from './routes/pos/fiscal.js'
 import { initializeArcaCredentials } from './config/arca.js'
 import { uploadsDir } from './config/uploads.js'
 import { createCorsOptionsDelegate } from './config/cors.js'
@@ -56,6 +68,7 @@ app.set('trust proxy', 1)
 app.use(cors(createCorsOptionsDelegate({
   appBaseUrl: process.env.APP_BASE_URL,
   frontendBaseUrl: process.env.FRONTEND_BASE_URL,
+  posFrontendBaseUrl: process.env.POS_FRONTEND_BASE_URL,
 })))
 
 // ── Webhooks: necesitan el body raw para verificar la firma ───────────────────
@@ -118,6 +131,18 @@ app.use('/api/coupons', couponsRouter)
 app.use('/api/customers', customersRouter)
 app.use('/api/analytics', analyticsRouter)
 app.use('/api/revocations', revocationsRouter)
+app.use('/api/pos/auth', posAuthRouter)
+app.use('/api/pos/users', posUsersRouter)
+app.use('/api/pos/products', posProductsRouter)
+app.use('/api/pos/sales', posSalesRouter)
+app.use('/api/pos/settings', posSettingsRouter)
+app.use('/api/pos/cash', posCashRouter)
+app.use('/api/pos/suppliers', posSuppliersRouter)
+app.use('/api/pos/purchases', posPurchasesRouter)
+app.use('/api/pos/supplier-payments', posSupplierPaymentsRouter)
+app.use('/api/pos/price-imports', posPriceImportsRouter)
+app.use('/api/pos/invoicing', posInvoicingRouter)
+app.use('/api/pos/fiscal', posFiscalRouter)
 
 // Mercado Pago no acepta back_urls con localhost. En desarrollo la preferencia
 // vuelve primero por APP_BASE_URL (por ejemplo, ngrok) y este puente redirige
