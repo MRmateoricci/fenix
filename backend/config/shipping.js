@@ -286,11 +286,17 @@ export function getTransitBusinessDays(postalCode) {
 // Configurable sin tocar código vía variable de entorno.
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Piso si nunca se guardó nada en store_settings.free_shipping_threshold (ver
+// services/shippingSettings.js, que resuelve el valor real contra la DB). Se
+// mantiene como export porque routes/shipping.js y orders.js lo usan de
+// fallback, y shipping.test.js sigue probando contra este número sin tocar la DB.
 export const FREE_SHIPPING_THRESHOLD = Number(process.env.ENVIO_GRATIS_MINIMO) || 100000
 
 // subtotal: total de productos ya recalculado server-side, sin envío, en el
 // mismo valor con IVA incluido que se le muestra al comprador — nunca un
 // monto mandado por el cliente.
-export function qualifiesForFreeShipping({ subtotal }) {
-  return subtotal >= FREE_SHIPPING_THRESHOLD
+// threshold: normalmente resuelto por services/shippingSettings.js#getFreeShippingThreshold
+// (admin-editable). El default acá es sólo para no romper llamadas viejas/tests.
+export function qualifiesForFreeShipping({ subtotal, threshold = FREE_SHIPPING_THRESHOLD }) {
+  return subtotal >= threshold
 }

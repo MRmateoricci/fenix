@@ -16,6 +16,7 @@ import {
   isFreeShippingPostalCode,
 } from '../config/shipping.js'
 import { quoteShipping, normalizeDeliveryOption } from '../services/shippingQuotes.js'
+import { getFreeShippingThreshold } from '../services/shippingSettings.js'
 import { sendBankTransferInstructions, sendOrderConfirmationNotifications } from '../services/orderNotifications.js'
 import { PaymentReconciliationError, reconcileMercadoPagoReturn } from '../services/mercadopagoPayments.js'
 import { sendReviewInvitationForOrder } from '../services/reviewInvitations.js'
@@ -526,7 +527,7 @@ router.post('/', attachUserIfPresent, async (req, res) => {
         return res.status(400).json({ error: 'No pudimos calcular el envío automáticamente — consultanos por WhatsApp y lo coordinamos' })
       }
       const freeShipping =
-        qualifiesForFreeShipping({ subtotal: productsTotal })
+        qualifiesForFreeShipping({ subtotal: productsTotal, threshold: await getFreeShippingThreshold() })
         || isFreeShippingPostalCode(customer.codigoPostal)
       shippingCost = freeShipping ? 0 : quote.cost
       // Margen de preparación: el mayor plazo del carrito, nunca la suma — los

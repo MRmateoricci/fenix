@@ -1,7 +1,6 @@
 import { Router } from 'express'
 import {
   SHIPPING_SERVICES,
-  FREE_SHIPPING_THRESHOLD,
   FREE_SHIPPING_LOCALITIES,
   qualifiesForFreeShipping,
   isFreeShippingPostalCode,
@@ -11,6 +10,9 @@ import { quoteShipping, normalizeDeliveryOption } from '../services/shippingQuot
 import { fetchAgencies } from '../services/correoArgentinoApi.js'
 import { localitiesForProvince, lookupPostalCode } from '../services/correoArgentinoLocalities.js'
 import { estimateDeliveryDate } from '../services/correoArgentino.js'
+import { getFreeShippingThreshold, validateFreeShippingThreshold } from '../services/shippingSettings.js'
+import { pool } from '../db/pool.js'
+import { requireAdmin } from '../middleware/requireAdmin.js'
 
 const router = Router()
 
@@ -19,14 +21,42 @@ const router = Router()
 // Público — única fuente de verdad del umbral y las localidades de envío gratis
 // para que el frontend nunca los tenga hardcodeados (carrito, checkout, banner).
 // ─────────────────────────────────────────────────────────────────────────────
-router.get('/config', (_req, res) => {
-  res.json({
-    freeShippingThreshold: FREE_SHIPPING_THRESHOLD,
-    freeShippingLocalities: FREE_SHIPPING_LOCALITIES,
-    // Le dice al checkout si tiene sentido ofrecer envío a sucursal. Sin la API
-    // de Correo no hay lista de sucursales ni tarifa propia para esa modalidad.
-    branchDeliveryEnabled: isCorreoArgentinoConfigured(),
-  })
+router.get('/config', async (_req, res) => {
+  try {
+    res.json({
+      freeShippingThreshold: await getFreeShippingThreshold(),
+      freeShippingLocalities: FREE_SHIPPING_LOCALITIES,
+      // Le dice al checkout si tiene sentido ofrecer envío a sucursal. Sin la API
+      // de Correo no hay lista de sucursales ni tarifa propia para esa modalidad.
+      branchDeliveryEnabled: isCorreoArgentinoConfigured(),
+    })
+  } catch (error) {
+    console.error('Error consultando la configuración de envíos:', error.message)
+    res.status(500).json({ error: 'No se pudo consultar la configuración de envíos' })
+  }
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PATCH /api/shipping/free-shipping-threshold
+// Admin-only — antes sólo se podía cambiar por env var (ENVIO_GRATIS_MINIMO) y
+// redeploy.
+// ─────────────────────────────────────────────────────────────────────────────
+router.patch('/free-shipping-threshold', requireAdmin, async (req, res) => {
+  const value = Number(req.body?.freeShippingThreshold)
+  const validationError = validateFreeShippingThreshold(value)
+  if (validationError) return res.status(400).json({ error: validationError })
+  try {
+    await pool.query(
+      `INSERT INTO store_settings (id, free_shipping_threshold, updated_at)
+       VALUES (1, $1, NOW())
+       ON CONFLICT (id) DO UPDATE SET free_shipping_threshold = EXCLUDED.free_shipping_threshold, updated_at = NOW()`,
+      [value],
+    )
+    res.json({ freeShippingThreshold: value })
+  } catch (error) {
+    console.error('Error guardando el umbral de envío gratis:', error.message)
+    res.status(500).json({ error: 'No se pudo guardar el umbral de envío gratis' })
+  }
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -141,7 +171,8 @@ router.get('/estimate', async (req, res) => {
     }
 
     const freeShipping =
-      qualifiesForFreeShipping({ subtotal }) || isFreeShippingPostalCode(postalCode)
+      qualifiesForFreeShipping({ subtotal, threshold: await getFreeShippingThreshold() })
+      || isFreeShippingPostalCode(postalCode)
 
     // El margen de preparación lo manda el Checkout con el mayor plazo del
     // carrito. Es sólo para la vista previa: POST /api/orders lo vuelve a

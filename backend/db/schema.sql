@@ -1517,3 +1517,35 @@ DROP TRIGGER IF EXISTS pos_vat_deadlines_updated_at ON pos_vat_deadlines;
 CREATE TRIGGER pos_vat_deadlines_updated_at
   BEFORE UPDATE ON pos_vat_deadlines
   FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Envío gratis y cuotas: overrides editables desde el admin
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Antes sólo se podían cambiar tocando código (ENVIO_GRATIS_MINIMO por env var,
+-- CUOTAS hardcodeado en config/payments.js) y redeployando. NULL a propósito:
+-- significa "seguir usando ese fallback", así la migración no cambia el
+-- comportamiento real de nadie hasta que el admin guarde un valor nuevo desde
+-- el panel (ver services/shippingSettings.js y services/paymentsSettings.js).
+ALTER TABLE store_settings ADD COLUMN IF NOT EXISTS free_shipping_threshold NUMERIC(14,2);
+ALTER TABLE store_settings DROP CONSTRAINT IF EXISTS store_settings_free_shipping_threshold_check;
+ALTER TABLE store_settings ADD CONSTRAINT store_settings_free_shipping_threshold_check
+  CHECK (free_shipping_threshold IS NULL OR free_shipping_threshold >= 0);
+
+-- Los montos mínimos de cada tramo (desde $0, desde $500.000) quedan fijos en
+-- config/payments.js — lo único editable es la cantidad de cuotas de cada uno.
+ALTER TABLE store_settings ADD COLUMN IF NOT EXISTS base_installments SMALLINT;
+ALTER TABLE store_settings DROP CONSTRAINT IF EXISTS store_settings_base_installments_check;
+ALTER TABLE store_settings ADD CONSTRAINT store_settings_base_installments_check
+  CHECK (base_installments IS NULL OR base_installments BETWEEN 1 AND 24);
+
+ALTER TABLE store_settings ADD COLUMN IF NOT EXISTS max_installments SMALLINT;
+ALTER TABLE store_settings DROP CONSTRAINT IF EXISTS store_settings_max_installments_check;
+ALTER TABLE store_settings ADD CONSTRAINT store_settings_max_installments_check
+  CHECK (max_installments IS NULL OR max_installments BETWEEN 1 AND 24);
+
+-- Cruzada entre las dos columnas: el tramo "premium" nunca puede ofrecer menos
+-- cuotas que el tramo base. Sólo se puede evaluar cuando el admin cargó los
+-- dos valores — si sólo hay uno, todavía se está completando el fallback.
+ALTER TABLE store_settings DROP CONSTRAINT IF EXISTS store_settings_installments_order_check;
+ALTER TABLE store_settings ADD CONSTRAINT store_settings_installments_order_check
+  CHECK (base_installments IS NULL OR max_installments IS NULL OR max_installments >= base_installments);

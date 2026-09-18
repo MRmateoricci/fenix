@@ -7,8 +7,8 @@
 > Si el cambio merece un commit con mensaje propio, merece una entrada acá.
 > Un ajuste de padding, no.
 
-**Última actualización:** 15 de septiembre de 2026
-**Commit de referencia:** `9534ce1` + cambios locales de esta tanda (apagado ordenado del backend en Railway) y las seis tandas anteriores, aún sin commitear (POS de mostrador, Fases 1 a 6 + modal de detalle de producto)
+**Última actualización:** 17 de septiembre de 2026
+**Commit de referencia:** `9dc66e7` + cambios locales de esta tanda (envío gratis y cuotas configurables desde el admin), aún sin commitear
 
 ---
 
@@ -43,6 +43,59 @@
 | Meta Pixel | ✅ Funcionando | PageView + ViewContent + AddToCart + InitiateCheckout + Purchase · solo navegador, sin Conversions API |
 | Catálogo Meta (Commerce Manager) | ✅ Implementado | Feed CSV por URL en `/api/meta-catalog/products.csv` · mismo `id` que `content_ids` del Pixel · falta programarlo en el panel de Meta |
 | POS de mostrador | 🟡 Fases 1 a 6 funcionando | Login, venta, ticket, descuento, pago mixto, caja (apertura/cierre/movimientos/historial), proveedores/compras/cuenta corriente (admin), importación de precios + aumento porcentual (admin), facturación AFIP con reintento (admin, sin probar contra AFIP real todavía), panel fiscal de IVA con vencimientos (admin), modal de detalle de producto (precio con/sin IVA, con cuotas, costo/margen admin-only), Ventas, admin de usuarios/config · falta deploy en Railway, `ARCA_POS_PTO_VTA` real, y tests automatizados de las rutas nuevas |
+
+---
+
+## Envío gratis y cuotas configurables desde el admin (2026-09-17)
+
+**Problema:** el pedido original era "poder cambiar lo que dice el banner de
+arriba de todo" (`AnnouncementBar.jsx`). De las 5 frases, 3 no eran texto
+suelto sino que mostraban un valor real: el monto de envío gratis y la
+cantidad de cuotas sólo se podían cambiar editando código y redeployando
+(`ENVIO_GRATIS_MINIMO` por env var, `CUOTAS` hardcodeado en
+`config/payments.js`); el descuento por transferencia ya era editable, pero
+el banner mostraba "10%" fijo, sin relación con ese valor real. Se descartó
+un editor de texto libre para las 5 frases: hubiera permitido que el cartel
+prometiera un número distinto del que de verdad usa el checkout, exactamente
+lo que el CLAUDE.md del proyecto pide evitar (§4.3).
+
+**Qué se hizo:**
+
+- `store_settings` suma `free_shipping_threshold` (NUMERIC),
+  `base_installments` y `max_installments` (SMALLINT), las tres NULL por
+  defecto — NULL significa "seguir usando el fallback de siempre" (env var /
+  config file), así la migración no cambió el comportamiento real de nadie el
+  día que corrió.
+- `services/shippingSettings.js` / `services/paymentsSettings.js`: resuelven
+  el valor efectivo (override de la DB o fallback) y validan lo que carga el
+  admin. Los montos mínimos de cada tramo de cuotas (desde $0, desde
+  $500.000) quedan fijos en código — lo único editable es la cantidad de
+  cuotas de cada tramo (la del tramo base incluida: primer intento sólo
+  dejaba tocar el máximo y no el "hasta 3 cuotas sin interés", corregido acá).
+  Constraint cruzado en la DB (`store_settings_installments_order_check`):
+  el tramo premium nunca puede ofrecer menos cuotas que el base.
+- `qualifiesForFreeShipping` (`config/shipping.js`) pasa a recibir el umbral
+  por parámetro en vez de leer la constante directamente — lo llaman
+  `routes/orders.js` (creación real del pedido) y `routes/shipping.js`
+  (vista previa del checkout) con el valor ya resuelto contra la DB.
+  `GET /api/shipping/config` y `GET /api/payments/config` (ya públicos, ya
+  los consumía el banner) ahora devuelven esos mismos valores resueltos —
+  sin agregar ningún endpoint nuevo para la tienda.
+- `PATCH /api/shipping/free-shipping-threshold` y
+  `PATCH /api/payments/installments` (admin-only, recibe `baseInstallments` y
+  `maxInstallments` juntos porque uno no se puede validar sin el otro): las
+  dos únicas rutas nuevas, para guardar el override.
+- Admin → Tienda → tarjeta **"Envío gratis y cuotas"** (tres campos: monto de
+  envío gratis, cuotas del tramo base, cuotas del tramo premium), al lado de
+  "Transferencia bancaria". El descuento por transferencia no se duplicó ahí:
+  sigue siendo el mismo campo de esa tarjeta.
+- `AnnouncementBar.jsx` (la barra en sí) no cambió su redacción — sigue fija,
+  como antes — sólo se corrigió la frase de transferencia para leer el
+  descuento real (`bankTransfer.discountPercent`) en vez de un "10%" hardcodeado.
+
+**Fuera de alcance:** texto libre para las 5 frases (se evaluó y se
+descartó, ver arriba); `ProductCard.jsx` sigue con su propio `INSTALLMENTS =
+3` hardcodeado, sin relación con esto (bug preexistente, no tocado).
 
 ---
 

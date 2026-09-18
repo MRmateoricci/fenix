@@ -116,6 +116,10 @@ export function AdminProvider({ children }) {
   const [couponsLoading, setCouponsLoading] = useState(false)
   const [couponsError, setCouponsError] = useState(null)
   const [bankTransferSettings, setBankTransferSettings] = useState(null)
+  // { freeShippingThreshold, freeShippingLocalities, branchDeliveryEnabled }
+  const [shippingSettings, setShippingSettings] = useState(null)
+  // { cuotas, bankTransfer } — cuotas ya viene armado (tramo base + premium)
+  const [paymentsSettings, setPaymentsSettings] = useState(null)
 
   // ── Cuentas de cliente (sección Cuentas, solo lectura) ────────────────────
   const [customers, setCustomers]           = useState([])
@@ -272,6 +276,46 @@ export function AdminProvider({ children }) {
     const data = await response.json().catch(() => ({}))
     if (!response.ok) throw new Error(data.error || 'No se pudo guardar la configuración bancaria')
     setBankTransferSettings(data)
+    return data
+  }, [])
+
+  const fetchShippingSettings = useCallback(async () => {
+    const response = await adminFetch(`${API_BASE}/api/shipping/config`)
+    const data = await response.json().catch(() => ({}))
+    if (!response.ok) throw new Error(data.error || 'No se pudo cargar la configuración de envíos')
+    setShippingSettings(data)
+    return data
+  }, [])
+
+  const updateFreeShippingThreshold = useCallback(async (freeShippingThreshold) => {
+    const response = await adminFetch(`${API_BASE}/api/shipping/free-shipping-threshold`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ freeShippingThreshold }),
+    })
+    const data = await response.json().catch(() => ({}))
+    if (!response.ok) throw new Error(data.error || 'No se pudo guardar el umbral de envío gratis')
+    setShippingSettings(current => current ? { ...current, freeShippingThreshold: data.freeShippingThreshold } : current)
+    return data
+  }, [])
+
+  const fetchPaymentsSettings = useCallback(async () => {
+    const response = await adminFetch(`${API_BASE}/api/payments/config`)
+    const data = await response.json().catch(() => ({}))
+    if (!response.ok) throw new Error(data.error || 'No se pudo cargar la configuración de medios de pago')
+    setPaymentsSettings(data)
+    return data
+  }, [])
+
+  const updateInstallments = useCallback(async (baseInstallments, maxInstallments) => {
+    const response = await adminFetch(`${API_BASE}/api/payments/installments`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ baseInstallments, maxInstallments }),
+    })
+    const data = await response.json().catch(() => ({}))
+    if (!response.ok) throw new Error(data.error || 'No se pudieron guardar las cuotas')
+    setPaymentsSettings(current => current ? { ...current, cuotas: data.cuotas } : current)
     return data
   }, [])
 
@@ -1224,6 +1268,8 @@ export function AdminProvider({ children }) {
       orders, ordersTotal, invoiceSummary, ordersLoading, ordersError,
       fetchOrders, updateOrderStatus, issueInvoiceAsAdmin, openAdminInvoicePdf,
       bankTransferSettings, fetchBankTransferSettings, updateBankTransferSettings,
+      shippingSettings, fetchShippingSettings, updateFreeShippingThreshold,
+      paymentsSettings, fetchPaymentsSettings, updateInstallments,
       reviewBankTransfer, downloadBankTransferProof,
       inventory, inventoryTotal, inventorySuppliers, inventoryLoading, inventoryError,
       importResult, importLoading, importError,

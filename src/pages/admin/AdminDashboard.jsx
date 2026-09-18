@@ -2221,6 +2221,93 @@ function BankTransferSettingsCard() {
   )
 }
 
+// Los valores reales detrás de 2 de las 5 frases de la barra de anuncios de
+// arriba de todo (AnnouncementBar.jsx): "ENVÍO GRATIS DESDE $X" y "HASTA N
+// CUOTAS SIN INTERÉS". Antes sólo se podían cambiar editando código
+// (ENVIO_GRATIS_MINIMO por env var, CUOTAS en config/payments.js) y
+// redeployando — esto los mueve a store_settings. El descuento por
+// transferencia (la 3ª frase con un valor real) ya se edita arriba, en
+// "Transferencia bancaria" — no se duplica ese campo acá. Los montos mínimos
+// de cada tramo de cuotas (desde $0, desde $500.000) siguen fijos en código:
+// sólo la cantidad de cuotas de cada tramo es editable.
+function CheckoutValuesSettingsCard() {
+  const {
+    shippingSettings, fetchShippingSettings, updateFreeShippingThreshold,
+    paymentsSettings, fetchPaymentsSettings, updateInstallments,
+  } = useAdmin()
+  const [threshold, setThreshold] = useState('')
+  const [baseInstallments, setBaseInstallments] = useState('')
+  const [maxInstallments, setMaxInstallments] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [message, setMessage] = useState('')
+
+  useEffect(() => {
+    fetchShippingSettings().catch(error => setMessage(error.message))
+    fetchPaymentsSettings().catch(error => setMessage(error.message))
+  }, [fetchShippingSettings, fetchPaymentsSettings])
+
+  useEffect(() => {
+    if (shippingSettings) setThreshold(String(shippingSettings.freeShippingThreshold))
+  }, [shippingSettings])
+
+  useEffect(() => {
+    if (paymentsSettings?.cuotas?.length) {
+      setBaseInstallments(String(paymentsSettings.cuotas[0].cantidad))
+      setMaxInstallments(String(paymentsSettings.cuotas[paymentsSettings.cuotas.length - 1].cantidad))
+    }
+  }, [paymentsSettings])
+
+  if (threshold === '' || baseInstallments === '' || maxInstallments === '') {
+    return <div style={{ marginBottom: 20 }}>Cargando envío y cuotas…</div>
+  }
+
+  const installmentsInvalid = Number(maxInstallments) < Number(baseInstallments)
+
+  const save = async event => {
+    event.preventDefault()
+    setSaving(true)
+    setMessage('')
+    try {
+      await Promise.all([
+        updateFreeShippingThreshold(Number(threshold)),
+        updateInstallments(Number(baseInstallments), Number(maxInstallments)),
+      ])
+      setMessage('Envío y cuotas guardados.')
+    } catch (error) {
+      setMessage(error.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <form onSubmit={save} style={{ background: C.white, border: `1px solid ${C.border}`, borderRadius: 10, padding: 18, marginBottom: 24 }}>
+      <div style={{ marginBottom: 14 }}>
+        <h2 style={{ margin: 0, fontSize: 17 }}>Envío gratis y cuotas</h2>
+        <p style={{ margin: '4px 0 0', color: C.muted, fontSize: 12 }}>Valores reales del checkout — también se ven en la barra de anuncios de arriba de todo.</p>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gap: 12 }}>
+        <label style={lbl}>Monto mínimo para envío gratis
+          <input style={{ ...inp, marginTop: 5 }} type="number" min="0" step="1" value={threshold} onChange={event => setThreshold(event.target.value)} />
+        </label>
+        <label style={lbl}>Cuotas sin recargo (tramo base, desde $0)
+          <input style={{ ...inp, marginTop: 5 }} type="number" min="1" max="24" step="1" value={baseInstallments} onChange={event => setBaseInstallments(event.target.value)} />
+        </label>
+        <label style={lbl}>Cuotas máximas (tramo premium, desde $500.000)
+          <input style={{ ...inp, marginTop: 5 }} type="number" min="1" max="24" step="1" value={maxInstallments} onChange={event => setMaxInstallments(event.target.value)} />
+        </label>
+      </div>
+      {installmentsInvalid && (
+        <p style={{ margin: '10px 0 0', color: C.red, fontSize: 12 }}>Las cuotas máximas no pueden ser menos que las del tramo base.</p>
+      )}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 15 }}>
+        <button type="submit" disabled={saving || installmentsInvalid} style={{ ...solidBtn, background: C.red, color: '#fff' }}>{saving ? 'Guardando…' : 'Guardar'}</button>
+        {message && <span style={{ color: message.includes('guardados') ? C.green : C.red, fontSize: 12 }}>{message}</span>}
+      </div>
+    </form>
+  )
+}
+
 const STORE_PAGE_SIZE = 40
 
 function StoreTab({ onUpdate, onDelete }) {
@@ -2307,6 +2394,7 @@ function StoreTab({ onUpdate, onDelete }) {
   return (
     <div>
       <BankTransferSettingsCard />
+      <CheckoutValuesSettingsCard />
       {/* Stats bar + add button */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>

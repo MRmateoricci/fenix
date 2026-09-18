@@ -11,6 +11,12 @@ const fmt = (n) =>
 // (GET /api/shipping/config), no se hardcodea acá.
 const listaLocalidades = new Intl.ListFormat('es-AR', { style: 'long', type: 'conjunction' })
 
+// bank_transfer_discount_percent es NUMERIC(5,2): recorta el ",00" sobrante
+// cuando el admin cargó un número entero.
+function fmtPercent(n) {
+  return Number.isInteger(n) ? String(n) : String(Math.round(n * 100) / 100)
+}
+
 function scrollToId(id) {
   document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' })
 }
@@ -28,13 +34,20 @@ export default function AnnouncementBar() {
   // servida acá para no duplicar el número de cuotas ni el mínimo (ver el bug
   // de INSTALLMENTS=6 pelado en ProductCard.jsx, que esto reemplaza a futuro).
   const [cuotas, setCuotas] = useState(null)
+  // Mismo descuento que edita el admin en "Transferencia bancaria" — antes
+  // esto decía "10%" fijo en el JSX, sin relación con bank_transfer_discount_percent.
+  const [descuentoTransferencia, setDescuentoTransferencia] = useState(null)
   const [manualPaused, setManualPaused] = useState(false)
 
   useEffect(() => {
     let cancelled = false
     fetch(`${API_BASE}/api/payments/config`)
       .then((res) => (res.ok ? res.json() : null))
-      .then((data) => { if (!cancelled && data?.cuotas) setCuotas(data.cuotas) })
+      .then((data) => {
+        if (cancelled) return
+        if (data?.cuotas) setCuotas(data.cuotas)
+        if (data?.bankTransfer) setDescuentoTransferencia(data.bankTransfer.discountPercent)
+      })
       .catch(() => {})
     return () => { cancelled = true }
   }, [])
@@ -100,13 +113,15 @@ export default function AnnouncementBar() {
         desktop: cuotasDesktop,
         mobile: cuotasMobile,
       },
-      {
-        key: 'transferencia',
-        href: '/faq#medios-de-pago',
-        onClick: goToMediosDePago,
-        desktop: <>10% DE DESCUENTO PAGANDO CON TRANSFERENCIA</>,
-        mobile: <>10% OFF POR TRANSFERENCIA</>,
-      },
+      ...(descuentoTransferencia != null
+        ? [{
+            key: 'transferencia',
+            href: '/faq#medios-de-pago',
+            onClick: goToMediosDePago,
+            desktop: <>{fmtPercent(descuentoTransferencia)}% DE DESCUENTO PAGANDO CON TRANSFERENCIA</>,
+            mobile: <>{fmtPercent(descuentoTransferencia)}% OFF POR TRANSFERENCIA</>,
+          }]
+        : []),
       {
         key: 'retiro',
         href: '/#contacto',
@@ -115,7 +130,7 @@ export default function AnnouncementBar() {
         mobile: <>RETIRÁ EN CITY BELL</>,
       },
     ]
-  }, [threshold, tiers, pathname, freeLocalities])
+  }, [threshold, tiers, pathname, freeLocalities, descuentoTransferencia])
 
   if (!slides) return null
 
