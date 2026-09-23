@@ -69,12 +69,10 @@ export default function POS() {
     setPendingProduct(product)
   }
 
-  // priceChoice viene del modal de detalle: qué precio cliqueó el vendedor
-  // (lista / efectivo / tarjeta en cuotas). Agrega el ítem SIEMPRE a precio de
-  // lista (igual que antes — el ajuste es de la venta entera, no del ítem) y
-  // de paso deja configurado el descuento o recargo de toda la venta, para no
-  // tener que repetirlo después en el ticket.
-  function handleAddFromModal(variant, priceChoice) {
+  // El modal de detalle ya no elige precio: agrega el ítem SIEMPRE a precio
+  // de lista (con IVA). El descuento efectivo/cuotas se elige aparte, para
+  // toda la venta, recién al confirmar (ver "Descuento efectivo" en el ticket).
+  function handleAddFromModal(variant) {
     const precio = variant ? variant.precio : pendingProduct.precio
     if (precio == null) {
       const nombre = variant ? `${pendingProduct.nombre} - ${variant.nombre}` : pendingProduct.nombre
@@ -84,20 +82,6 @@ export default function POS() {
     }
     setError('')
     addItem(pendingProduct, variant)
-    if (priceChoice) {
-      setDiscountValue(0)
-      if (priceChoice.discountMode === 'cash') {
-        setDiscountMode('cash')
-        setInstallmentTier(null)
-      } else if (priceChoice.discountMode === 'installments' && priceChoice.tier) {
-        setDiscountMode('installments')
-        setInstallmentTier(priceChoice.tier)
-      } else {
-        setDiscountMode('none')
-        setInstallmentTier(null)
-      }
-      if (priceChoice.singleMethod) setSingleMethod(priceChoice.singleMethod)
-    }
     setPendingProduct(null)
   }
 
@@ -172,7 +156,7 @@ export default function POS() {
   }
 
   return (
-    <div className="grid h-full grid-cols-[1fr_420px]">
+    <div className="grid h-full grid-cols-[1fr_600px]">
       <ProductSearch onSelect={handleSelectProduct} focusToken={focusToken} />
       <SaleTicket
         items={items}
@@ -215,8 +199,6 @@ export default function POS() {
       {pendingProduct && (
         <ProductInfoModal
           product={pendingProduct}
-          cashDiscountPercent={cashDiscountPercent}
-          installmentTiers={installmentTiers}
           onAdd={handleAddFromModal}
           onClose={() => setPendingProduct(null)}
         />

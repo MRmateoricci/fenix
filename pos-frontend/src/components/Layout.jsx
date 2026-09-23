@@ -36,8 +36,6 @@ export default function Layout() {
               <>
                 <NavLink to="/caja/historial" className={linkClass}>Historial de caja</NavLink>
                 <NavLink to="/proveedores" className={linkClass}>Proveedores</NavLink>
-                <NavLink to="/admin/importar-precios" className={linkClass}>Importar precios</NavLink>
-                <NavLink to="/admin/aumento-precios" className={linkClass}>Aumento de precios</NavLink>
                 <NavLink to="/admin/usuarios" className={linkClass}>Usuarios</NavLink>
                 <NavLink to="/admin/config" className={linkClass}>Configuración</NavLink>
                 <NavLink to="/admin/panel-iva" className={linkClass}>Panel IVA</NavLink>
