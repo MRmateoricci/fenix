@@ -68,6 +68,7 @@ test('rechaza un origen externo aunque llegue al mismo backend', async () => {
 
   assert.match(result.error.message, /CORS: origen no permitido/)
   assert.equal(result.error.status, 403)
+  assert.equal(result.error.corsRejected, true)
   assert.equal(result.allowed, undefined)
 })
 

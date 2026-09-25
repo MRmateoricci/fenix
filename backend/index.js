@@ -184,7 +184,14 @@ if (process.env.NODE_ENV === 'production') {
 }
 
 // ── Error global ──────────────────────────────────────────────────────────────
-app.use((err, _req, res, _next) => {
+app.use((err, req, res, _next) => {
+  // Un origen rechazado por CORS es el filtro funcionando, no una falla del
+  // servidor: con el stack completo cada bot o pestaña en http:// tapaba los
+  // errores reales en los logs de Railway.
+  if (err?.corsRejected) {
+    console.warn(`[CORS] origen rechazado: ${req.get('origin')} → ${req.method} ${req.originalUrl}`)
+    return res.status(403).json({ error: 'Origen no permitido' })
+  }
   console.error('[Express error]', err)
   if (err?.type === 'entity.too.large') {
     return res.status(413).json({ error: 'La operación contiene demasiados datos para procesarla' })

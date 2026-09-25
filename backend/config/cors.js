@@ -72,6 +72,7 @@ export function createCorsOptionsDelegate({ appBaseUrl, frontendBaseUrl, posFron
 
         const error = new Error(`CORS: origen no permitido → ${origin}`)
         error.status = 403
+        error.corsRejected = true
         return originCallback(error)
       },
     })
