@@ -41,10 +41,9 @@ import {
 const POS_POINT_OF_SALE_ENV_VAR = 'ARCA_POS_PTO_VTA';
 
 async function findPosSale(client, saleId) {
-  const [{ rows: saleRows }, { rows: itemRows }] = await Promise.all([
-    client.query('SELECT * FROM pos_sales WHERE id = $1', [saleId]),
-    client.query('SELECT * FROM pos_sale_items WHERE sale_id = $1 ORDER BY id', [saleId]),
-  ]);
+  // Secuencial: el client puede ser una conexión única dentro de una transacción.
+  const { rows: saleRows } = await client.query('SELECT * FROM pos_sales WHERE id = $1', [saleId]);
+  const { rows: itemRows } = await client.query('SELECT * FROM pos_sale_items WHERE sale_id = $1 ORDER BY id', [saleId]);
   const sale = saleRows[0];
   if (!sale) return null;
   return { ...sale, items: itemRows };

@@ -257,10 +257,9 @@ export async function applyDerivedVariantPrices(client, productId) {
 }
 
 export async function recomputeGroupedProduct(client, productId) {
-  const [{ rows: products }, { rows: rules }] = await Promise.all([
-    client.query('SELECT * FROM products WHERE id = $1', [productId]),
-    client.query('SELECT * FROM product_variant_rules WHERE product_id = $1', [productId]),
-  ])
+  // Secuencial: el client suele venir de una transacción.
+  const { rows: products } = await client.query('SELECT * FROM products WHERE id = $1', [productId])
+  const { rows: rules } = await client.query('SELECT * FROM product_variant_rules WHERE product_id = $1', [productId])
   const product = products[0]
   if (!product || !rules.length) return product
   const min = (ruleField, optionField) => {
@@ -493,10 +492,8 @@ export async function mergeProducts(client, payload) {
 }
 
 async function rebuildGroupedAxes(client, productId) {
-  const [{ rows: products }, { rows: rules }] = await Promise.all([
-    client.query('SELECT color_options,size_options,tone_options FROM products WHERE id=$1', [productId]),
-    client.query('SELECT color_name,color_hex,size_label,tone_name,tone_hex FROM product_variant_rules WHERE product_id=$1', [productId]),
-  ])
+  const { rows: products } = await client.query('SELECT color_options,size_options,tone_options FROM products WHERE id=$1', [productId])
+  const { rows: rules } = await client.query('SELECT color_name,color_hex,size_label,tone_name,tone_hex FROM product_variant_rules WHERE product_id=$1', [productId])
   const product = products[0]
   if (!product) return
   const rebuild = (options, key, values, extra = {}) => [...new Set(values.filter(Boolean))].map(value => {

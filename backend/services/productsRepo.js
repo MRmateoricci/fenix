@@ -786,14 +786,14 @@ function closestProducts(source, products, limit = 10, excludedProductId = null)
 
 export async function matchPriceRows(client, rows, supplier = null) {
   if (!rows.length) return []
-  const [productResult, mappingResult] = await Promise.all([
-    client.query(
+  // Secuencial: el client puede ser una conexión única (pool.connect()).
+  const productResult = await client.query(
       `SELECT id, codigo, COALESCE(NULLIF(name, ''), descripcion, codigo) AS nombre,
               descripcion, image_url, precio_costo, precio_venta, precio_iva, precio_costo_usd
        FROM products`
-    ),
-    supplier
-      ? client.query(
+  )
+  const mappingResult = supplier
+      ? await client.query(
         `SELECT m.source_code_key, m.color_name, m.color_hex,
                 p.id, p.codigo, COALESCE(NULLIF(p.name, ''), p.descripcion, p.codigo) AS nombre,
                 p.descripcion, p.image_url, p.precio_costo, p.precio_venta, p.precio_iva, p.precio_costo_usd
@@ -802,8 +802,7 @@ export async function matchPriceRows(client, rows, supplier = null) {
          WHERE m.supplier = $1`,
         [supplier]
       )
-      : Promise.resolve({ rows: [] }),
-  ])
+      : { rows: [] }
   const products = productResult.rows
   const byCode = new Map(products.map((product) => [priceCodeKey(product.codigo), product]))
   const savedMappings = new Map(mappingResult.rows.map(mapping => [mapping.source_code_key, mapping]))

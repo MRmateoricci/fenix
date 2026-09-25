@@ -1728,10 +1728,9 @@ router.post('/import/prices/parse', upload.single('file'), async (req, res) => {
   }
   const client = await pool.connect()
   try {
-    const [lines, settings] = await Promise.all([
-      matchPriceRows(client, parsed.rows, supplier),
-      client.query('SELECT usd_ars_rate FROM store_settings WHERE id = 1'),
-    ])
+    // Secuencial: comparten el mismo client de pg.
+    const lines = await matchPriceRows(client, parsed.rows, supplier)
+    const settings = await client.query('SELECT usd_ars_rate FROM store_settings WHERE id = 1')
     res.json({
       lines: lines.map(serializePriceMatchLine),
       totalRows: parsed.totalRows,

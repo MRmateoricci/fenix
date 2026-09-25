@@ -100,20 +100,20 @@ function publicDeadline(row, { computed = false } = {}) {
 // ── Agregaciones compartidas por summary y monthly-history ──────────────────
 
 async function fetchVatDebit(client, start, end) {
-  const [{ rows: byRate }, { rows: totalRows }] = await Promise.all([
-    client.query(
-      `SELECT COALESCE(SUM((elem->>'amount')::numeric) FILTER (WHERE (elem->>'rate')::numeric = 21), 0) AS debit_21,
-              COALESCE(SUM((elem->>'amount')::numeric) FILTER (WHERE (elem->>'rate')::numeric = 10.5), 0) AS debit_105
-       FROM invoices, jsonb_array_elements(iva_breakdown) AS elem
-       WHERE status = 'authorized' AND fecha_comprobante BETWEEN $1 AND $2`,
-      [start, end]
-    ),
-    client.query(
-      `SELECT COALESCE(SUM(imp_iva), 0) AS total FROM invoices
-       WHERE status = 'authorized' AND fecha_comprobante BETWEEN $1 AND $2`,
-      [start, end]
-    ),
-  ]);
+  // Secuencial: un client de pg ejecuta una consulta por vez. Lanzarlas con
+  // Promise.all solo las encolaba, y pg@9 va a rechazarlo.
+  const { rows: byRate } = await client.query(
+    `SELECT COALESCE(SUM((elem->>'amount')::numeric) FILTER (WHERE (elem->>'rate')::numeric = 21), 0) AS debit_21,
+            COALESCE(SUM((elem->>'amount')::numeric) FILTER (WHERE (elem->>'rate')::numeric = 10.5), 0) AS debit_105
+     FROM invoices, jsonb_array_elements(iva_breakdown) AS elem
+     WHERE status = 'authorized' AND fecha_comprobante BETWEEN $1 AND $2`,
+    [start, end]
+  );
+  const { rows: totalRows } = await client.query(
+    `SELECT COALESCE(SUM(imp_iva), 0) AS total FROM invoices
+     WHERE status = 'authorized' AND fecha_comprobante BETWEEN $1 AND $2`,
+    [start, end]
+  );
   return {
     debit21: Number(byRate[0].debit_21),
     debit105: Number(byRate[0].debit_105),
@@ -205,13 +205,12 @@ router.get('/summary', async (req, res) => {
     const { start, end } = periodRange(year, month);
     const cuitEnding = getCuitEnding();
 
-    const [sales, purchases, debit, credit, deadlineRow] = await Promise.all([
-      fetchSalesCard(client, start, end),
-      fetchPurchasesCard(client, start, end),
-      fetchVatDebit(client, start, end),
-      fetchVatCredit(client, start, end),
-      cuitEnding != null ? ensureDeadlineRow(client, year, month, cuitEnding) : null,
-    ]);
+    // Secuencial: todas comparten el mismo client de pg.
+    const sales = await fetchSalesCard(client, start, end);
+    const purchases = await fetchPurchasesCard(client, start, end);
+    const debit = await fetchVatDebit(client, start, end);
+    const credit = await fetchVatCredit(client, start, end);
+    const deadlineRow = cuitEnding != null ? await ensureDeadlineRow(client, year, month, cuitEnding) : null;
 
     const balance = roundMoney(debit.debitTotal - credit.creditTotal);
     const today = new Date().toLocaleDateString('en-CA', { timeZone: TZ });
@@ -251,14 +250,14 @@ router.get('/monthly-history', async (req, res) => {
     const { end } = periodRange(year, 12);
     const cuitEnding = getCuitEnding();
 
-    const [{ rows: debitRows }, { rows: creditRows }, { rows: deadlineRows }] = await Promise.all([
-      client.query(
+    // Secuencial: todas comparten el mismo client de pg.
+    const { rows: debitRows } = await client.query(
         `SELECT EXTRACT(MONTH FROM fecha_comprobante)::int AS month, COALESCE(SUM(imp_iva), 0) AS debit
          FROM invoices WHERE status = 'authorized' AND fecha_comprobante BETWEEN $1 AND $2
          GROUP BY month`,
         [start, end]
-      ),
-      client.query(
+    );
+    const { rows: creditRows } = await client.query(
         `SELECT EXTRACT(MONTH FROM COALESCE(invoice_date, (created_at AT TIME ZONE '${TZ}')::date))::int AS month,
                 COALESCE(SUM(vat_21) + SUM(vat_10_5), 0) AS credit
          FROM pos_purchases
@@ -266,11 +265,10 @@ router.get('/monthly-history', async (req, res) => {
            AND COALESCE(invoice_date, (created_at AT TIME ZONE '${TZ}')::date) BETWEEN $1 AND $2
          GROUP BY month`,
         [start, end]
-      ),
-      cuitEnding != null
-        ? client.query(`SELECT * FROM pos_vat_deadlines WHERE year = $1 AND cuit_ending = $2`, [year, cuitEnding])
-        : { rows: [] },
-    ]);
+    );
+    const { rows: deadlineRows } = cuitEnding != null
+      ? await client.query(`SELECT * FROM pos_vat_deadlines WHERE year = $1 AND cuit_ending = $2`, [year, cuitEnding])
+      : { rows: [] };
 
     const debitByMonth = new Map(debitRows.map(r => [r.month, Number(r.debit)]));
     const creditByMonth = new Map(creditRows.map(r => [r.month, Number(r.credit)]));
