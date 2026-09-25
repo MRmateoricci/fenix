@@ -7,7 +7,7 @@
 > Si el cambio merece un commit con mensaje propio, merece una entrada acá.
 > Un ajuste de padding, no.
 
-**Última actualización:** 17 de septiembre de 2026
+**Última actualización:** 25 de septiembre de 2026
 **Commit de referencia:** `9dc66e7` + cambios locales de esta tanda (envío gratis y cuotas configurables desde el admin), aún sin commitear
 
 ---
@@ -43,6 +43,34 @@
 | Meta Pixel | ✅ Funcionando | PageView + ViewContent + AddToCart + InitiateCheckout + Purchase · solo navegador, sin Conversions API |
 | Catálogo Meta (Commerce Manager) | ✅ Implementado | Feed CSV por URL en `/api/meta-catalog/products.csv` · mismo `id` que `content_ids` del Pixel · falta programarlo en el panel de Meta |
 | POS de mostrador | 🟡 Fases 1 a 6 funcionando | Login, venta, ticket, descuento, pago mixto, caja (apertura/cierre/movimientos/historial), proveedores/compras/cuenta corriente (admin), importación de precios + aumento porcentual (admin), facturación AFIP con reintento (admin, sin probar contra AFIP real todavía), panel fiscal de IVA con vencimientos (admin), modal de detalle de producto (precio con/sin IVA, con cuotas, costo/margen admin-only), Ventas, admin de usuarios/config · falta deploy en Railway, `ARCA_POS_PTO_VTA` real, y tests automatizados de las rutas nuevas |
+
+---
+
+## Logs de producción: CORS y consultas concurrentes de pg (2026-09-25)
+
+**Qué se vio:** en los logs de Railway, cada origen rechazado por CORS salía como
+`[Express error]` con stack completo (uno era `http://pos.…`, otro una prueba con
+un dominio falso), y aparecía el `DeprecationWarning` de pg por llamar
+`client.query()` con otra consulta en curso.
+
+**Qué se hizo:**
+
+- `config/cors.js` marca el rechazo con `error.corsRejected`; el manejador global
+  de `index.js` lo registra con un `console.warn` de una línea y responde 403 sin
+  stack. Es el filtro funcionando, no una falla.
+- Ocho `Promise.all` que compartían un mismo client de pg pasaron a ser
+  secuenciales: panel de IVA del POS (`routes/pos/fiscal.js`), vista previa de
+  listas de precios (`routes/products.js` + `matchPriceRows`), facturación de
+  ventas del POS (`services/invoicePosFiscal.js`) y productos agrupados
+  (`services/productVariants.js`). Con `pool.query` el paralelismo sigue siendo
+  válido; con un client único, no.
+
+**Configuración (fuera del repo):** `POS_FRONTEND_BASE_URL` ya estaba bien en
+Railway (`https://…`). El rechazo venía de una visita por `http://`: se indicó
+activar *Always Use HTTPS* en Cloudflare con SSL en modo Full.
+
+**Tests:** 325 pass, 3 fail — los mismos 3 que fallaban antes del cambio
+(dos de arranque con credenciales ARCA y `routes/pos/products.test.js`).
 
 ---
 
